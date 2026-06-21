@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Relay Studio IDE Concept</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="stylesheet" href="mockups.css">
+</head>
+<body>
+  <main class="desktop-stage">
+    <section class="brief-panel">
+      <div>
+        <p class="eyebrow">Selected Direction</p>
+        <h1>Relay Studio: Developer IDE Console</h1>
+        <p>Desktop-first API workspace with an activity bar, request explorer, tabbed editors, auth/variable inspector, response viewer, and docked execution console.</p>
+      </div>
+      <div class="brief-actions">
+        <a href="#recommendations">UX Notes</a>
+        <a href="#microcopy">Microcopy</a>
+      </div>
+    </section>
+
+    <section class="desktop-window" aria-label="Relay Studio desktop mockup">
+      <header class="window-titlebar">
+        <div class="traffic">
+          <span></span><span></span><span></span>
+        </div>
+        <div class="window-title">
+          <strong>Relay Studio</strong>
+          <span>Sample API Regression.restproj</span>
+        </div>
+        <div class="command-search">
+          <span>⌘K</span>
+          <input value="Search requests, variables, flows, saved responses">
+        </div>
+        <div class="titlebar-actions">
+          <button>Save Project</button>
+          <button class="primary">Import API Docs</button>
+        </div>
+      </header>
+
+      <div class="ide-shell">
+        <aside class="activity-bar" aria-label="Primary navigation">
+          <div class="brand-mark">RS</div>
+          <button class="activity-button active" aria-label="Services" data-tooltip="Services" data-tooltip-detail="Create and edit reusable REST calls.">⌁</button>
+          <button class="activity-button" aria-label="Runner" data-tooltip="Runner" data-tooltip-detail="Send requests and inspect live responses.">▶</button>
+          <button class="activity-button" aria-label="Flows" data-tooltip="Flows" data-tooltip-detail="Chain calls and map response values.">⇄</button>
+          <button class="activity-button" aria-label="Saved responses" data-tooltip="Saved Responses" data-tooltip-detail="Browse JSON files saved from previous runs.">▣</button>
+          <button class="activity-button bottom" aria-label="Settings" data-tooltip="Settings" data-tooltip-detail="Manage defaults, encryption, and close behavior.">⚙</button>
+        </aside>
+
+        <aside class="explorer-pane">
+          <div class="pane-header">
+            <div>
+              <p class="eyebrow">Project</p>
+              <h2>Sample API Regression</h2>
+            </div>
+            <button class="small-button">+</button>
+          </div>
+
+          <section class="import-card">
+            <strong>No OpenAPI source linked</strong>
+            <p>Paste an OpenAPI URL or drop a Swagger file to preload services.</p>
+            <div class="inline-actions">
+              <button class="primary">Import API Docs</button>
+              <button>Paste URL</button>
+            </div>
+          </section>
+
+          <div class="tree-group">
+            <button class="tree-heading">Services <span>18</span></button>
+            <button class="tree-item active"><span class="method post">POST</span> Login</button>
+            <button class="tree-item"><span class="method get">GET</span> Current User</button>
+            <button class="tree-item"><span class="method get">GET</span> List Products</button>
+            <button class="tree-item"><span class="method post">POST</span> Create Order</button>
+            <button class="tree-item"><span class="method get">GET</span> Get Order</button>
+            <button class="tree-item"><span class="method del">DEL</span> Cleanup Order</button>
+          </div>
+
+          <div class="tree-group">
+            <button class="tree-heading">Flows <span>4</span></button>
+            <button class="tree-item">Authenticated Read</button>
+            <button class="tree-item">Create And Cleanup</button>
+            <button class="tree-item">Product Search</button>
+          </div>
+
+          <div class="tree-group">
+            <button class="tree-heading">Saved Responses <span>3</span></button>
+            <button class="tree-item">current-user.json</button>
+            <button class="tree-item">order-response.json</button>
+            <button class="tree-item error-text">forbidden-admin.json</button>
+          </div>
+        </aside>
+
+        <section class="workbench">
+          <div class="tab-strip">
+            <button class="tab active">Create Order</button>
+            <button class="tab">Authenticated Read.flow</button>
+            <button class="tab">current-user.json</button>
+          </div>
+
+          <div class="editor-toolbar">
+            <div class="request-url">
+              <select><option>POST</option></select>
+              <input value="{{baseUrl}}/api/orders">
+            </div>
+            <button>Preview Services</button>
+            <button class="primary">Send Request</button>
+          </div>
+
+          <div class="validation-row">
+            <strong>2 issues</strong>
+            <span>Body JSON is invalid. Bearer Token references a missing variable.</span>
+          </div>
+
+          <div class="editor-layout">
+            <section class="request-editor">
+              <nav class="editor-tabs" aria-label="Request editor tabs">
+                <button class="active">Authorization</button>
+                <button>Headers</button>
+                <button>Query</button>
+                <button>Path</button>
+                <button>Body</button>
+                <button>Retry</button>
+              </nav>
+
+              <div class="auth-grid">
+                <div class="field-stack">
+                  <label>Authorization type
+                    <select>
+                      <option>Bearer Token</option>
+                      <option>No Auth</option>
+                      <option>Basic Auth</option>
+                      <option>JWT Bearer</option>
+                      <option>Digest Auth</option>
+                      <option>OAuth 1.0</option>
+                      <option>OAuth 2.0</option>
+                      <option>Hawk Authentication</option>
+                      <option>AWS Signature</option>
+                      <option>NTLM Authentication</option>
+                      <option>API Key</option>
+                      <option>Akamai EdgeGrid</option>
+                      <option>ASAP (Atlassian)</option>
+                    </select>
+                  </label>
+                  <label>Token variable
+                    <input value="{{token}}">
+                  </label>
+                  <label>Apply token to
+                    <select>
+                      <option>Authorization header</option>
+                      <option>Custom header</option>
+                      <option>Query parameter</option>
+                    </select>
+                  </label>
+                </div>
+
+                <div class="generated-panel">
+                  <div class="panel-caption">
+                    <strong>Generated request security</strong>
+                    <span class="status danger">Missing token</span>
+                  </div>
+                  <div class="mini-table">
+                    <div><span>Auth</span><strong>Authorization</strong><code>Bearer ••••••••</code><em>Missing token</em></div>
+                    <div><span>Header</span><strong>Content-Type</strong><code>application/json</code><em class="ok">OK</em></div>
+                  </div>
+                  <p class="field-note">Generated auth is previewed here. The Headers tab stays reserved for user-defined headers.</p>
+                </div>
+              </div>
+
+              <div class="code-header">
+                <span>Request Body</span>
+                <button>Format JSON</button>
+              </div>
+              <pre class="code-editor">{
+  "productId": "{{productId}}",
+  "quantity": 1,
+  "shippingMethod": "standard"
+}</pre>
+            </section>
+
+            <aside class="inspector-pane">
+              <div class="inspector-section">
+                <p class="eyebrow">Variables</p>
+                <div class="variable-row"><span>baseUrl</span><code>https://api.example.com</code></div>
+                <div class="variable-row"><span>token</span><code class="danger-text">Missing</code></div>
+                <div class="variable-row"><span>productId</span><code>prod-1001</code></div>
+              </div>
+
+              <div class="inspector-section">
+                <p class="eyebrow">Flow Preview</p>
+                <div class="flow-mini">
+                  <span class="done">Login</span>
+                  <span class="done">Products</span>
+                  <span class="active">Order</span>
+                  <span>Save Response</span>
+                </div>
+                <button class="full primary">Run Flow</button>
+              </div>
+
+              <div class="inspector-section">
+                <p class="eyebrow">Project Safety</p>
+                <label class="check-row"><input type="checkbox" checked> <span>Ask to save changes on close</span></label>
+                <label class="check-row"><input type="checkbox" checked> <span>Redact secrets in console</span></label>
+              </div>
+            </aside>
+          </div>
+
+          <section class="response-dock">
+            <div class="dock-header">
+              <div>
+                <strong>Response</strong>
+                <span>Send the request to inspect status, headers, timing, and body.</span>
+              </div>
+              <div class="inline-actions">
+                <span class="status success">200 OK</span>
+                <span class="metric">184 ms</span>
+                <button>Save Response</button>
+              </div>
+            </div>
+            <div class="response-grid">
+              <pre>{
+  "orderId": "ord-20260621-0001",
+  "status": "created",
+  "total": 1226.25
+}</pre>
+              <div class="saved-state">
+                <strong>Saved response target</strong>
+                <p>responses/create-order-2026-06-21.json</p>
+                <button>Choose File...</button>
+              </div>
+            </div>
+          </section>
+        </section>
+
+        <aside class="right-rail">
+          <div class="rail-panel">
+            <p class="eyebrow">OpenAPI Import</p>
+            <h3>Preload services</h3>
+            <p>Paste an OpenAPI URL, preview discovered endpoints, then choose what to add.</p>
+            <input value="https://api.example.com/openapi.json">
+            <button class="primary full">Preview Services</button>
+          </div>
+
+          <div class="rail-panel">
+            <p class="eyebrow">Close Prompt</p>
+            <h3>Unsaved changes</h3>
+            <p>Sample API Regression has unsaved service and flow edits.</p>
+            <div class="stacked-actions">
+              <button class="primary">Save And Close</button>
+              <button>Do Not Save</button>
+              <button>Cancel</button>
+            </div>
+          </div>
+        </aside>
+      </div>
+
+      <footer class="console-dock">
+        <div class="console-title">
+          <strong>Execution Console</strong>
+          <button>Clear</button>
+        </div>
+        <ol class="console">
+          <li><span>08:21:02</span> Resolving environment variable baseUrl.</li>
+          <li><span>08:21:02</span> Authorization header prepared from secret token.</li>
+          <li><span>08:21:02</span> Opening connection to {{baseUrl}}.</li>
+          <li><span>08:21:03</span> Invoking POST /api/orders.</li>
+          <li class="ok"><span>08:21:03</span> Response received: 200 OK.</li>
+          <li class="ok"><span>08:21:03</span> JSON saved to responses/create-order-2026-06-21.json.</li>
+        </ol>
+      </footer>
+    </section>
+
+    <section class="recommendations" id="recommendations">
+      <div>
+        <p class="eyebrow">UI / UX Recommendations</p>
+        <h2>Make it feel like a desktop tool</h2>
+      </div>
+      <div class="recommendation-grid">
+        <article>
+          <strong>Typography</strong>
+          <p>Use Inter, SF Pro, or Segoe UI for the shell at 13-15px. Reserve JetBrains Mono for JSON, variables, and console output. Keep screen titles compact, not hero-sized.</p>
+        </article>
+        <article>
+          <strong>Color Contrast</strong>
+          <p>Use navy for app chrome, royal blue for selected states and primary actions, silver for pane dividers, and red only for specific recoverable errors.</p>
+        </article>
+        <article>
+          <strong>Spacing</strong>
+          <p>Prefer split panes, row separators, and inspector sections over cards. Keep controls dense enough for repeated engineering work while preserving 8-12px internal rhythm.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="recommendations" id="microcopy">
+      <div>
+        <p class="eyebrow">Actionable Microcopy</p>
+        <h2>Button and empty-state language</h2>
+      </div>
+      <div class="microcopy-list">
+        <div><strong>Import API Docs</strong><span>Primary project-start action for OpenAPI/Swagger preload.</span></div>
+        <div><strong>Preview Services</strong><span>Fetch docs and show discovered endpoints before changing the project.</span></div>
+        <div><strong>Send Request</strong><span>Clearer than Run for a single REST call.</span></div>
+        <div><strong>Run Flow</strong><span>Reserved for chained calls with mappings.</span></div>
+        <div><strong>No services yet.</strong><span>Import API docs or add your first request.</span></div>
+        <div><strong>No response yet.</strong><span>Send the request to inspect status, headers, timing, and body.</span></div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
