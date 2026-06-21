@@ -32,8 +32,33 @@ import {
   X
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { createEmptyProject, createSampleProject, touchProject, type RecentProject, type RelayProject } from "./project/projectModel";
+import {
+  createEmptyProject,
+  createSampleProject,
+  touchProject,
+  type AuthMode,
+  type HttpMethod,
+  type KeyValueRow,
+  type ProjectEnvironment,
+  type ProjectService,
+  type RecentProject,
+  type RelayProject
+} from "./project/projectModel";
 import { createProjectPersistence, type ProjectPersistence } from "./project/projectPersistence";
+import {
+  AUTH_MODES,
+  HTTP_METHODS,
+  buildRequestPreview,
+  createService,
+  deleteService,
+  duplicateService,
+  formatJsonBody,
+  minifyJsonBody,
+  removeRow,
+  reorderService,
+  upsertRow,
+  type RequestPreview
+} from "./services/serviceDesigner";
 
 type Area = "Projects" | "Services" | "Runner" | "Flows" | "Saved Responses" | "Settings";
 type TabKind = "welcome" | "request" | "flow" | "response" | "import" | "settings";
@@ -92,6 +117,7 @@ export function App() {
   const [activeArea, setActiveArea] = useState<Area>("Services");
   const [tabs, setTabs] = useState(initialTabs);
   const [activeTabId, setActiveTabId] = useState("create-order");
+  const [activeServiceId, setActiveServiceId] = useState("create-order");
   const [environment, setEnvironment] = useState("QA Environment");
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [responseVisible, setResponseVisible] = useState(true);
@@ -101,6 +127,11 @@ export function App() {
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0];
   const hasDirtyState = projectDirty || tabs.some((tab) => tab.dirty);
   const groupedServices = useMemo(() => groupServices(project), [project]);
+  const activeEnvironment = useMemo(() => {
+    return project.environments.find((item) => item.name === environment) ?? project.environments[0];
+  }, [environment, project.environments]);
+  const activeService = project.services.find((service) => service.id === activeServiceId) ?? project.services[0];
+  const requestPreview = activeService && activeEnvironment ? buildRequestPreview(activeService, activeEnvironment) : null;
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -161,8 +192,8 @@ export function App() {
     if (activeTab.kind === "response") {
       return "responses/current-user-2026-06-21.json";
     }
-    return "{{baseUrl}}/api/orders";
-  }, [activeTab.kind]);
+    return requestPreview?.url ?? "{{baseUrl}}/api/orders";
+  }, [activeTab.kind, requestPreview?.url]);
 
   function openPlaceholderTab(kind: TabKind, label: string) {
     const id = `${kind}-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
@@ -178,6 +209,65 @@ export function App() {
       }
       return next.length ? next : initialTabs.slice(0, 1);
     });
+  }
+
+  function handleSelectService(service: ProjectService) {
+    setActiveServiceId(service.id);
+    setActiveArea("Services");
+    setTabs((current) => (
+      current.some((tab) => tab.id === service.id)
+        ? current
+        : [...current, { id: service.id, label: service.name, kind: "request", method: service.method }]
+    ));
+    setActiveTabId(service.id);
+  }
+
+  function updateProjectServices(nextServices: ProjectService[], message = "Service definition updated.") {
+    setProject((current) => touchProject({ ...current, services: nextServices }));
+    setProjectDirty(true);
+    setTabs((current) => current.map((tab) => (tab.id === activeTabId ? { ...tab, dirty: true } : tab)));
+    setProjectMessage(message);
+    setProjectError(null);
+  }
+
+  function updateActiveService(updater: (service: ProjectService) => ProjectService, message?: string) {
+    if (!activeService) return;
+    const updatedService = updater(activeService);
+    updateProjectServices(
+      project.services.map((service) => (service.id === activeService.id ? updatedService : service)),
+      message
+    );
+    setTabs((current) => current.map((tab) => (
+      tab.id === activeService.id ? { ...tab, label: updatedService.name, method: updatedService.method, dirty: true } : tab
+    )));
+  }
+
+  function handleCreateService() {
+    const next = createService({ id: `service-${project.services.length + 1}` });
+    updateProjectServices([...project.services, next], "New service created.");
+    handleSelectService(next);
+  }
+
+  function handleDuplicateService() {
+    if (!activeService) return;
+    const copy = duplicateService(activeService, project.services.map((service) => service.id));
+    updateProjectServices([...project.services, copy], "Service duplicated.");
+    handleSelectService(copy);
+  }
+
+  function handleDeleteService() {
+    if (!activeService) return;
+    const nextServices = deleteService(project.services, activeService.id);
+    updateProjectServices(nextServices, "Service deleted.");
+    const nextActive = nextServices[0];
+    if (nextActive) {
+      handleSelectService(nextActive);
+    }
+  }
+
+  function handleMoveService(direction: "up" | "down") {
+    if (!activeService) return;
+    updateProjectServices(reorderService(project.services, activeService.id, direction), "Service order updated.");
   }
 
   return (
@@ -207,12 +297,24 @@ export function App() {
           onOpenRecent={(recent) => setProjectDialog({ mode: "open", title: "Open Recent Project", path: recent.path })}
           onOpenSettings={() => openPlaceholderTab("settings", "Settings")}
           onOpenImport={() => openPlaceholderTab("import", "Import API Docs")}
+          activeServiceId={activeService?.id ?? ""}
+          onSelectService={handleSelectService}
         />
 
         <section className="workbench" aria-label="Workbench">
           <TabStrip tabs={tabs} activeTabId={activeTabId} onSelect={setActiveTabId} onClose={closeTab} />
           <RequestComposer requestUrl={requestUrl} activeTab={activeTab} />
-          <RequestEditor activeTab={activeTab} />
+          <RequestEditor
+            activeTab={activeTab}
+            activeService={activeService}
+            activeEnvironment={activeEnvironment}
+            requestPreview={requestPreview}
+            onCreateService={handleCreateService}
+            onDuplicateService={handleDuplicateService}
+            onDeleteService={handleDeleteService}
+            onMoveService={handleMoveService}
+            onUpdateService={updateActiveService}
+          />
           <BottomDock
             responseVisible={responseVisible}
             onToggleResponse={() => setResponseVisible((visible) => !visible)}
@@ -281,6 +383,7 @@ export function App() {
     setProject(nextProject);
     setProjectPath("");
     setEnvironment(nextProject.environments[0]?.name ?? "QA Environment");
+    setActiveServiceId("");
     setProjectDirty(true);
     setTabs(initialTabs.map((tab) => ({ ...tab, dirty: tab.id === "welcome" })));
     setActiveTabId("welcome");
@@ -319,6 +422,7 @@ export function App() {
       setProject(opened);
       setProjectPath(path);
       setEnvironment(opened.environments[0]?.name ?? "QA Environment");
+      setActiveServiceId(opened.services[0]?.id ?? "");
       setProjectDirty(false);
       setTabs(initialTabs.map((tab) => ({ ...tab, dirty: false })));
       setActiveTabId("welcome");
@@ -428,12 +532,14 @@ function ActivityRail({ activeArea, onAreaChange }: { activeArea: Area; onAreaCh
 
 function ProjectExplorer(props: {
   activeArea: Area;
-  groupedServices: Array<{ folder: string; items: Array<{ method: string; label: string }> }>;
+  groupedServices: Array<{ folder: string; items: ProjectService[] }>;
   project: RelayProject;
   projectDirty: boolean;
   recentProjects: RecentProject[];
   projectMessage: string;
   projectError: string | null;
+  activeServiceId: string;
+  onSelectService: (service: ProjectService) => void;
   onMarkDirty: () => void;
   onOpenRecent: (recent: RecentProject) => void;
   onOpenImport: () => void;
@@ -470,11 +576,12 @@ function ProjectExplorer(props: {
               {group.items.map((item) => (
                 <button
                   type="button"
-                  className={item.label === "Create Order" ? "tree-item selected" : "tree-item"}
-                  key={item.label}
+                  className={item.id === props.activeServiceId ? "tree-item selected" : "tree-item"}
+                  key={item.id}
+                  onClick={() => props.onSelectService(item)}
                 >
                   <span className={`method method-${item.method.toLowerCase()}`}>{item.method}</span>
-                  <span>{item.label}</span>
+                  <span>{item.name}</span>
                 </button>
               ))}
             </div>
@@ -617,7 +724,27 @@ function RequestComposer({ requestUrl, activeTab }: { requestUrl: string; active
   );
 }
 
-function RequestEditor({ activeTab }: { activeTab: WorkbenchTab }) {
+function RequestEditor({
+  activeTab,
+  activeService,
+  activeEnvironment,
+  requestPreview,
+  onCreateService,
+  onDuplicateService,
+  onDeleteService,
+  onMoveService,
+  onUpdateService
+}: {
+  activeTab: WorkbenchTab;
+  activeService: ProjectService | undefined;
+  activeEnvironment: ProjectEnvironment | undefined;
+  requestPreview: RequestPreview | null;
+  onCreateService: () => void;
+  onDuplicateService: () => void;
+  onDeleteService: () => void;
+  onMoveService: (direction: "up" | "down") => void;
+  onUpdateService: (updater: (service: ProjectService) => ProjectService, message?: string) => void;
+}) {
   if (activeTab.kind === "welcome") {
     return <PlaceholderView title="Welcome" description="Open a service, import API docs, or run a flow." />;
   }
@@ -634,75 +761,316 @@ function RequestEditor({ activeTab }: { activeTab: WorkbenchTab }) {
     return <PlaceholderView title="Settings" description="Manage defaults, close behavior, redaction, and encrypted project settings." />;
   }
 
+  if (!activeService || !activeEnvironment || !requestPreview) {
+    return <PlaceholderView title="No Service Selected" description="Create or select a service to edit its reusable REST request." />;
+  }
+
   return (
-    <section className="editor-surface" aria-label="Request editor">
+    <ServiceDesignerEditor
+      service={activeService}
+      environment={activeEnvironment}
+      preview={requestPreview}
+      onCreateService={onCreateService}
+      onDuplicateService={onDuplicateService}
+      onDeleteService={onDeleteService}
+      onMoveService={onMoveService}
+      onUpdateService={onUpdateService}
+    />
+  );
+}
+
+function ServiceDesignerEditor(props: {
+  service: ProjectService;
+  environment: ProjectEnvironment;
+  preview: RequestPreview;
+  onCreateService: () => void;
+  onDuplicateService: () => void;
+  onDeleteService: () => void;
+  onMoveService: (direction: "up" | "down") => void;
+  onUpdateService: (updater: (service: ProjectService) => ProjectService, message?: string) => void;
+}) {
+  const [activePanel, setActivePanel] = useState("Authorization");
+  const service = props.service;
+
+  function update(patch: Partial<ProjectService>, message?: string) {
+    props.onUpdateService((current) => ({ ...current, ...patch }), message);
+  }
+
+  function updateAuth(type: AuthMode) {
+    const defaultProfile = type === "none" ? { type } : { type, tokenVariable: "accessToken" };
+    update({ auth: type, authProfile: { ...defaultProfile } }, "Authorization updated.");
+  }
+
+  return (
+    <section className="editor-surface service-designer" aria-label="REST service designer">
       <nav className="editor-tabs" aria-label="Request editor tabs">
-        {["Authorization", "Headers 2", "Query Params", "Path Params", "Body", "Retry", "Tests", "Settings", "Pre Scripts"].map((tab, index) => (
-          <button type="button" className={index === 0 ? "active" : ""} key={tab}>
+        {["Authorization", "Headers", "Query Params", "Path Params", "Body", "Retry", "Settings"].map((tab) => (
+          <button type="button" className={activePanel === tab ? "active" : ""} key={tab} onClick={() => setActivePanel(tab)}>
             {tab}
-            {tab === "Body" ? <span className="green-dot" /> : null}
+            {tab === "Body" && service.body.contentType !== "none" ? <span className="green-dot" /> : null}
           </button>
         ))}
       </nav>
-      <div className="editor-main">
-        <section className="auth-panel">
-          <div className="form-grid">
+      <div className="service-designer-main">
+        <section className="service-detail-panel">
+          <header>
+            <strong>Service Detail</strong>
+            <div>
+              <button type="button" onClick={props.onCreateService}>New Service</button>
+              <button type="button" onClick={props.onDuplicateService}>Duplicate</button>
+              <button type="button" onClick={() => props.onMoveService("up")}>Move Up</button>
+              <button type="button" onClick={() => props.onMoveService("down")}>Move Down</button>
+              <button type="button" onClick={props.onDeleteService}>Delete</button>
+            </div>
+          </header>
+          <div className="service-form-grid">
             <label>
-              <span>Authorization type</span>
-              <select defaultValue="Bearer Token">
-                <option>Bearer Token</option>
-                <option>No Auth</option>
-                <option>Basic Auth</option>
-                <option>API Key</option>
-                <option>OAuth Client Credentials</option>
-                <option>Custom Header</option>
+              <span>Service name</span>
+              <input aria-label="Service name" value={service.name} onChange={(event) => update({ name: event.target.value }, "Service renamed.")} />
+            </label>
+            <label>
+              <span>Folder</span>
+              <input aria-label="Service folder" value={service.folder} onChange={(event) => update({ folder: event.target.value }, "Service folder updated.")} />
+            </label>
+            <label>
+              <span>Method</span>
+              <select aria-label="Service method" value={service.method} onChange={(event) => update({ method: event.target.value as HttpMethod }, "HTTP method updated.")}>
+                {HTTP_METHODS.map((method) => <option key={method}>{method}</option>)}
               </select>
             </label>
             <label>
-              <span>Token variable</span>
-              <div className="input-with-icon">
-                <input value="{{accessToken}}" readOnly />
-                <Braces size={16} />
-              </div>
+              <span>Path</span>
+              <input aria-label="Service path" value={service.path} onChange={(event) => update({ path: event.target.value }, "Service path updated.")} />
             </label>
-            <fieldset>
-              <legend>Apply token to</legend>
-              <label><input type="radio" name="token-target" defaultChecked /> Authorization header</label>
-              <label><input type="radio" name="token-target" /> Custom header</label>
-              <label><input type="radio" name="token-target" /> Query parameter</label>
-            </fieldset>
+            <label>
+              <span>Timeout ms</span>
+              <input aria-label="Timeout ms" type="number" value={service.timeoutMs} onChange={(event) => update({ timeoutMs: Number(event.target.value) }, "Timeout updated.")} />
+            </label>
           </div>
-          <div className="generated-preview">
-            <div>
-              <strong>Generated request header</strong>
-              <span className="status-ready"><CheckCircle2 size={16} /> Ready</span>
-            </div>
-            <dl>
-              <dt>Authorization</dt>
-              <dd>Bearer ********</dd>
-              <dt>Content-Type</dt>
-              <dd>application/json</dd>
-            </dl>
-            <p>Generated auth is previewed here. User-defined headers stay in the Headers tab.</p>
-          </div>
+          {activePanel === "Authorization" ? (
+            <AuthorizationPanel service={service} preview={props.preview} onAuthModeChange={updateAuth} onUpdateService={props.onUpdateService} />
+          ) : null}
+          {activePanel === "Headers" ? (
+            <RowsPanel title="Headers" rows={service.headers} onChange={(headers) => update({ headers }, "Headers updated.")} />
+          ) : null}
+          {activePanel === "Query Params" ? (
+            <RowsPanel title="Query Params" rows={service.queryParams} onChange={(queryParams) => update({ queryParams }, "Query params updated.")} />
+          ) : null}
+          {activePanel === "Path Params" ? (
+            <RowsPanel title="Path Params" rows={service.pathParams} onChange={(pathParams) => update({ pathParams }, "Path params updated.")} />
+          ) : null}
+          {activePanel === "Body" ? (
+            <BodyPanel service={service} onUpdate={update} />
+          ) : null}
+          {activePanel === "Retry" ? (
+            <RetryPanel service={service} onUpdate={update} />
+          ) : null}
+          {activePanel === "Settings" ? (
+            <SettingsPanel service={service} environment={props.environment} preview={props.preview} />
+          ) : null}
         </section>
-        <section className="body-editor" aria-label="JSON body editor">
-          <header>
-            <span>Request Body</span>
-            <div>
-              <button type="button">Beautify</button>
-              <button type="button">Minify</button>
-            </div>
-          </header>
-          <pre>{`{
-  "productId": "{{productId}}",
-  "quantity": 1,
-  "shippingMethod": "standard"
-}`}</pre>
-        </section>
+        <RequestPreviewPanel preview={props.preview} />
       </div>
     </section>
   );
+}
+
+function AuthorizationPanel(props: {
+  service: ProjectService;
+  preview: RequestPreview;
+  onAuthModeChange: (type: AuthMode) => void;
+  onUpdateService: (updater: (service: ProjectService) => ProjectService, message?: string) => void;
+}) {
+  const auth = props.service.authProfile;
+
+  function updateAuthProfile(patch: ProjectService["authProfile"]) {
+    props.onUpdateService((service) => ({ ...service, authProfile: { ...service.authProfile, ...patch } }), "Authorization updated.");
+  }
+
+  return (
+    <section className="auth-panel">
+      <div className="form-grid">
+        <label>
+          <span>Authorization type</span>
+          <select aria-label="Authorization type" value={auth.type} onChange={(event) => props.onAuthModeChange(event.target.value as AuthMode)}>
+            {AUTH_MODES.map((mode) => <option value={mode} key={mode}>{authLabel(mode)}</option>)}
+          </select>
+        </label>
+        {auth.type === "bearer" ? (
+          <label>
+            <span>Token variable</span>
+            <div className="input-with-icon">
+              <input aria-label="Token variable" value={auth.tokenVariable ?? ""} onChange={(event) => updateAuthProfile({ type: auth.type, tokenVariable: event.target.value })} />
+              <Braces size={16} />
+            </div>
+          </label>
+        ) : null}
+        {auth.type === "apiKey" ? (
+          <>
+            <label><span>Header name</span><input aria-label="API key header" value={auth.apiKeyName ?? ""} onChange={(event) => updateAuthProfile({ type: auth.type, apiKeyName: event.target.value })} /></label>
+            <label><span>Header value</span><input aria-label="API key value" value={auth.apiKeyValue ?? ""} onChange={(event) => updateAuthProfile({ type: auth.type, apiKeyValue: event.target.value })} /></label>
+          </>
+        ) : null}
+        {auth.type === "basic" ? (
+          <>
+            <label><span>Username variable</span><input aria-label="Username variable" value={auth.usernameVariable ?? ""} onChange={(event) => updateAuthProfile({ type: auth.type, usernameVariable: event.target.value })} /></label>
+            <label><span>Password variable</span><input aria-label="Password variable" value={auth.passwordVariable ?? ""} onChange={(event) => updateAuthProfile({ type: auth.type, passwordVariable: event.target.value })} /></label>
+          </>
+        ) : null}
+        {auth.type === "oauthClientCredentials" ? (
+          <>
+            <label><span>Token URL</span><input aria-label="Token URL" value={auth.tokenUrl ?? ""} onChange={(event) => updateAuthProfile({ type: auth.type, tokenUrl: event.target.value })} /></label>
+            <label><span>Client ID variable</span><input aria-label="Client ID variable" value={auth.clientIdVariable ?? ""} onChange={(event) => updateAuthProfile({ type: auth.type, clientIdVariable: event.target.value })} /></label>
+            <label><span>Client secret variable</span><input aria-label="Client secret variable" value={auth.clientSecretVariable ?? ""} onChange={(event) => updateAuthProfile({ type: auth.type, clientSecretVariable: event.target.value })} /></label>
+          </>
+        ) : null}
+        {auth.type === "customHeader" ? (
+          <>
+            <label><span>Header name</span><input aria-label="Custom auth header" value={auth.customHeaderName ?? ""} onChange={(event) => updateAuthProfile({ type: auth.type, customHeaderName: event.target.value })} /></label>
+            <label><span>Header value</span><input aria-label="Custom auth value" value={auth.customHeaderValue ?? ""} onChange={(event) => updateAuthProfile({ type: auth.type, customHeaderValue: event.target.value })} /></label>
+          </>
+        ) : null}
+      </div>
+      <div className="generated-preview">
+        <div>
+          <strong>Generated request auth</strong>
+          <span className="status-ready"><CheckCircle2 size={16} /> {props.preview.issues.some((issue) => issue.field === "auth") ? "Needs input" : "Ready"}</span>
+        </div>
+        <dl>
+          <dt>{props.preview.generatedAuthHeader?.name ?? "Auth"}</dt>
+          <dd>{props.preview.generatedAuthHeader?.value ?? "No generated auth header"}</dd>
+        </dl>
+        <p>Generated auth stays separate from user-defined headers and redacts secret values.</p>
+      </div>
+    </section>
+  );
+}
+
+function RowsPanel({ title, rows, onChange }: { title: string; rows: KeyValueRow[]; onChange: (rows: KeyValueRow[]) => void }) {
+  function updateRow(row: KeyValueRow) {
+    onChange(upsertRow(rows, row));
+  }
+
+  return (
+    <section className="rows-panel" aria-label={title}>
+      <header>
+        <strong>{title}</strong>
+        <button type="button" onClick={() => onChange([...rows, { id: `${title}-${rows.length + 1}`, name: "", value: "", enabled: true }])}>
+          Add {title === "Headers" ? "Header" : "Param"}
+        </button>
+      </header>
+      {rows.length ? rows.map((row) => (
+        <div className="kv-row" key={row.id}>
+          <label><input aria-label={`${row.name || title} enabled`} type="checkbox" checked={row.enabled} onChange={(event) => updateRow({ ...row, enabled: event.target.checked })} /></label>
+          <input aria-label={`${title} name`} value={row.name} placeholder="Name" onChange={(event) => updateRow({ ...row, name: event.target.value })} />
+          <input aria-label={`${title} value`} value={row.value} placeholder="Value" onChange={(event) => updateRow({ ...row, value: event.target.value })} />
+          <button type="button" onClick={() => onChange(removeRow(rows, row.id))}>Remove</button>
+        </div>
+      )) : <p className="empty-inline">No {title.toLowerCase()} configured.</p>}
+    </section>
+  );
+}
+
+function BodyPanel({ service, onUpdate }: { service: ProjectService; onUpdate: (patch: Partial<ProjectService>, message?: string) => void }) {
+  const [formatError, setFormatError] = useState<string | null>(null);
+
+  function updateBody(raw: string) {
+    setFormatError(null);
+    onUpdate({ body: { ...service.body, raw } }, "Request body updated.");
+  }
+
+  function transformBody(transform: (raw: string) => string) {
+    try {
+      updateBody(transform(service.body.raw));
+    } catch {
+      setFormatError("Body is not valid JSON.");
+    }
+  }
+
+  return (
+    <section className="body-editor" aria-label="JSON body editor">
+      <header>
+        <span>Request Body</span>
+        <div>
+          <select aria-label="Body content type" value={service.body.contentType} onChange={(event) => onUpdate({ body: { ...service.body, contentType: event.target.value as ProjectService["body"]["contentType"] } }, "Body content type updated.")}>
+            <option value="none">No Body</option>
+            <option value="application/json">JSON</option>
+            <option value="text/plain">Text</option>
+          </select>
+          <button type="button" onClick={() => transformBody(formatJsonBody)}>Beautify</button>
+          <button type="button" onClick={() => transformBody(minifyJsonBody)}>Minify</button>
+        </div>
+      </header>
+      <textarea aria-label="Request body" value={service.body.raw} onChange={(event) => updateBody(event.target.value)} />
+      {formatError ? <p className="field-error">{formatError}</p> : null}
+    </section>
+  );
+}
+
+function RetryPanel({ service, onUpdate }: { service: ProjectService; onUpdate: (patch: Partial<ProjectService>, message?: string) => void }) {
+  return (
+    <section className="retry-panel">
+      <label>
+        <span>Retry attempts</span>
+        <input aria-label="Retry attempts" type="number" value={service.retry.attempts} onChange={(event) => onUpdate({ retry: { ...service.retry, attempts: Number(event.target.value) } }, "Retry attempts updated.")} />
+      </label>
+      <label>
+        <span>Backoff ms</span>
+        <input aria-label="Retry backoff ms" type="number" value={service.retry.backoffMs} onChange={(event) => onUpdate({ retry: { ...service.retry, backoffMs: Number(event.target.value) } }, "Retry backoff updated.")} />
+      </label>
+    </section>
+  );
+}
+
+function SettingsPanel({ service, environment, preview }: { service: ProjectService; environment: ProjectEnvironment; preview: RequestPreview }) {
+  return (
+    <section className="settings-panel">
+      <dl>
+        <dt>Environment</dt><dd>{environment.name}</dd>
+        <dt>Timeout</dt><dd>{service.timeoutMs} ms</dd>
+        <dt>Retry</dt><dd>{service.retry.attempts} attempt(s), {service.retry.backoffMs} ms backoff</dd>
+        <dt>Validation</dt><dd>{preview.issues.length ? `${preview.issues.length} issue(s)` : "Ready"}</dd>
+      </dl>
+    </section>
+  );
+}
+
+function RequestPreviewPanel({ preview }: { preview: RequestPreview }) {
+  return (
+    <aside className="request-preview-panel" aria-label="Request construction preview">
+      <header>
+        <strong>Request Preview</strong>
+        <span className={preview.issues.some((issue) => issue.severity === "error") ? "preview-status error" : "preview-status"}>{preview.issues.length ? "Needs Review" : "Ready"}</span>
+      </header>
+      <dl>
+        <dt>Method</dt><dd>{preview.method}</dd>
+        <dt>URL</dt><dd>{preview.url}</dd>
+        <dt>Generated Auth</dt><dd>{preview.generatedAuthHeader ? `${preview.generatedAuthHeader.name}: ${preview.generatedAuthHeader.value}` : "None"}</dd>
+        <dt>Headers</dt><dd>{preview.headers.length}</dd>
+        <dt>Query Params</dt><dd>{preview.queryParams.length}</dd>
+        <dt>Path Params</dt><dd>{preview.pathParams.length}</dd>
+      </dl>
+      <section>
+        <strong>Validation</strong>
+        {preview.issues.length ? (
+          <ul>
+            {preview.issues.map((issue) => <li key={`${issue.field}-${issue.message}`} className={issue.severity}>{issue.message}</li>)}
+          </ul>
+        ) : <p>No blocking issues.</p>}
+      </section>
+    </aside>
+  );
+}
+
+function authLabel(mode: AuthMode): string {
+  return {
+    none: "No Auth",
+    bearer: "Bearer Token",
+    apiKey: "API Key",
+    basic: "Basic Auth",
+    oauthClientCredentials: "OAuth Client Credentials",
+    customHeader: "Custom Header"
+  }[mode];
 }
 
 function FlowPlaceholder() {
@@ -891,11 +1259,11 @@ function CommandPalette({ onClose, onChoose }: { onClose: () => void; onChoose: 
   );
 }
 
-function groupServices(project: RelayProject): Array<{ folder: string; items: Array<{ method: string; label: string }> }> {
-  const grouped = new Map<string, Array<{ method: string; label: string }>>();
+function groupServices(project: RelayProject): Array<{ folder: string; items: ProjectService[] }> {
+  const grouped = new Map<string, ProjectService[]>();
   for (const service of project.services) {
     const current = grouped.get(service.folder) ?? [];
-    current.push({ method: service.method, label: service.name });
+    current.push(service);
     grouped.set(service.folder, current);
   }
 

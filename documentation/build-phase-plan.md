@@ -133,6 +133,10 @@ Implemented. See `sprint-3-implementation-status.md`.
 
 ## Sprint 4: REST Service Designer
 
+### Status
+
+Implemented. See `sprint-4-implementation-status.md`.
+
 ### Goals
 
 - Let users define reusable REST calls.

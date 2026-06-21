@@ -177,6 +177,10 @@ Give users reliable local project persistence with encrypted secrets and safe cl
 
 ## Sprint 4: REST Service Designer
 
+### Status
+
+Implemented. See `sprint-4-implementation-status.md`.
+
 ### Objective
 
 Allow users to define reusable REST calls with validation, auth, variables, and request construction.

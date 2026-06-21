@@ -13,13 +13,54 @@ export interface ProjectEnvironment {
   variables: ProjectVariable[];
 }
 
+export type HttpMethod = "GET" | "POST" | "PUT" | "DELETE";
+export type AuthMode = "none" | "bearer" | "apiKey" | "basic" | "oauthClientCredentials" | "customHeader";
+
+export interface KeyValueRow {
+  id: string;
+  name: string;
+  value: string;
+  enabled: boolean;
+}
+
+export interface RequestBodyDefinition {
+  contentType: "application/json" | "text/plain" | "none";
+  raw: string;
+}
+
+export interface RetryPolicy {
+  attempts: number;
+  backoffMs: number;
+}
+
+export interface AuthProfile {
+  type: AuthMode;
+  tokenVariable?: string;
+  apiKeyName?: string;
+  apiKeyValue?: string;
+  usernameVariable?: string;
+  passwordVariable?: string;
+  clientIdVariable?: string;
+  clientSecretVariable?: string;
+  tokenUrl?: string;
+  customHeaderName?: string;
+  customHeaderValue?: string;
+}
+
 export interface ProjectService {
   id: string;
   folder: string;
   name: string;
-  method: "GET" | "POST" | "PUT" | "DELETE";
+  method: HttpMethod;
   path: string;
   auth: string;
+  timeoutMs: number;
+  retry: RetryPolicy;
+  headers: KeyValueRow[];
+  queryParams: KeyValueRow[];
+  pathParams: KeyValueRow[];
+  body: RequestBodyDefinition;
+  authProfile: AuthProfile;
 }
 
 export interface ProjectFlow {
@@ -60,6 +101,36 @@ export interface RecentProject {
   openedAt: string;
 }
 
+function service(input: {
+  id: string;
+  folder: string;
+  name: string;
+  method: HttpMethod;
+  path: string;
+  auth?: AuthMode;
+  headers?: KeyValueRow[];
+  queryParams?: KeyValueRow[];
+  pathParams?: KeyValueRow[];
+  body?: RequestBodyDefinition;
+}): ProjectService {
+  const auth = input.auth ?? "bearer";
+  return {
+    id: input.id,
+    folder: input.folder,
+    name: input.name,
+    method: input.method,
+    path: input.path,
+    auth,
+    timeoutMs: 30_000,
+    retry: { attempts: 1, backoffMs: 250 },
+    headers: input.headers ?? [{ id: `${input.id}-content-type`, name: "Content-Type", value: "application/json", enabled: true }],
+    queryParams: input.queryParams ?? [],
+    pathParams: input.pathParams ?? [],
+    body: input.body ?? { contentType: "none", raw: "" },
+    authProfile: auth === "none" ? { type: "none" } : { type: auth, tokenVariable: "accessToken" }
+  };
+}
+
 export function createSampleProject(now = new Date().toISOString()): RelayProject {
   return {
     format: PROJECT_FORMAT,
@@ -69,18 +140,87 @@ export function createSampleProject(now = new Date().toISOString()): RelayProjec
     createdAt: now,
     updatedAt: now,
     services: [
-      { id: "login", folder: "Auth", name: "Login", method: "POST", path: "/api/auth/login", auth: "none" },
-      { id: "refresh-token", folder: "Auth", name: "Refresh Token", method: "POST", path: "/api/auth/refresh", auth: "bearer" },
-      { id: "current-user", folder: "Auth", name: "Current User", method: "GET", path: "/api/auth/me", auth: "bearer" },
-      { id: "list-products", folder: "Products", name: "List Products", method: "GET", path: "/api/products", auth: "bearer" },
-      { id: "get-product", folder: "Products", name: "Get Product", method: "GET", path: "/api/products/{productId}", auth: "bearer" },
-      { id: "search-products", folder: "Products", name: "Search Products", method: "GET", path: "/api/products/search?q={query}", auth: "bearer" },
-      { id: "create-order", folder: "Orders", name: "Create Order", method: "POST", path: "/api/orders", auth: "bearer" },
-      { id: "get-order", folder: "Orders", name: "Get Order", method: "GET", path: "/api/orders/{orderId}", auth: "bearer" },
-      { id: "update-order", folder: "Orders", name: "Update Order", method: "PUT", path: "/api/orders/{orderId}", auth: "bearer" },
-      { id: "cleanup-order", folder: "Orders", name: "Cleanup Order", method: "DELETE", path: "/api/orders/{orderId}", auth: "bearer" },
-      { id: "admin-settings", folder: "Admin", name: "Admin Settings", method: "GET", path: "/api/admin/settings", auth: "bearer" },
-      { id: "audit-events", folder: "Admin", name: "Audit Events", method: "GET", path: "/api/admin/audit-events", auth: "bearer" }
+      service({
+        id: "login",
+        folder: "Auth",
+        name: "Login",
+        method: "POST",
+        path: "/api/auth/login",
+        auth: "none",
+        body: {
+          contentType: "application/json",
+          raw: `{
+  "username": "{{username}}",
+  "password": "{{password}}"
+}`
+        }
+      }),
+      service({ id: "refresh-token", folder: "Auth", name: "Refresh Token", method: "POST", path: "/api/auth/refresh" }),
+      service({ id: "current-user", folder: "Auth", name: "Current User", method: "GET", path: "/api/auth/me" }),
+      service({ id: "list-products", folder: "Products", name: "List Products", method: "GET", path: "/api/products" }),
+      service({
+        id: "get-product",
+        folder: "Products",
+        name: "Get Product",
+        method: "GET",
+        path: "/api/products/{productId}",
+        pathParams: [{ id: "get-product-product-id", name: "productId", value: "{{productId}}", enabled: true }]
+      }),
+      service({
+        id: "search-products",
+        folder: "Products",
+        name: "Search Products",
+        method: "GET",
+        path: "/api/products/search",
+        queryParams: [{ id: "search-products-query", name: "q", value: "{{query}}", enabled: true }]
+      }),
+      service({
+        id: "create-order",
+        folder: "Orders",
+        name: "Create Order",
+        method: "POST",
+        path: "/api/orders",
+        body: {
+          contentType: "application/json",
+          raw: `{
+  "productId": "{{productId}}",
+  "quantity": 1,
+  "shippingMethod": "standard"
+}`
+        }
+      }),
+      service({
+        id: "get-order",
+        folder: "Orders",
+        name: "Get Order",
+        method: "GET",
+        path: "/api/orders/{orderId}",
+        pathParams: [{ id: "get-order-order-id", name: "orderId", value: "{{orderId}}", enabled: true }]
+      }),
+      service({
+        id: "update-order",
+        folder: "Orders",
+        name: "Update Order",
+        method: "PUT",
+        path: "/api/orders/{orderId}",
+        pathParams: [{ id: "update-order-order-id", name: "orderId", value: "{{orderId}}", enabled: true }],
+        body: {
+          contentType: "application/json",
+          raw: `{
+  "status": "submitted"
+}`
+        }
+      }),
+      service({
+        id: "cleanup-order",
+        folder: "Orders",
+        name: "Cleanup Order",
+        method: "DELETE",
+        path: "/api/orders/{orderId}",
+        pathParams: [{ id: "cleanup-order-order-id", name: "orderId", value: "{{orderId}}", enabled: true }]
+      }),
+      service({ id: "admin-settings", folder: "Admin", name: "Admin Settings", method: "GET", path: "/api/admin/settings" }),
+      service({ id: "audit-events", folder: "Admin", name: "Audit Events", method: "GET", path: "/api/admin/audit-events" })
     ],
     environments: [
       {
@@ -89,6 +229,9 @@ export function createSampleProject(now = new Date().toISOString()): RelayProjec
         variables: [
           { name: "baseUrl", value: "https://api.example.com", secret: false },
           { name: "accessToken", value: "sample-access-token", secret: true },
+          { name: "username", value: "qa_user", secret: false },
+          { name: "password", value: "sample-password", secret: true },
+          { name: "query", value: "keyboard", secret: false },
           { name: "productId", value: "prod-1001", secret: false },
           { name: "orderId", value: "ord-20260621-0001", secret: false }
         ]
