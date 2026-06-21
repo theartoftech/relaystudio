@@ -141,6 +141,14 @@ export function createSampleProject(now = new Date().toISOString()): RelayProjec
     updatedAt: now,
     services: [
       service({
+        id: "health-check",
+        folder: "Utilities",
+        name: "Health Check",
+        method: "GET",
+        path: "/api/health",
+        auth: "none"
+      }),
+      service({
         id: "login",
         folder: "Auth",
         name: "Login",

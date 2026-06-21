@@ -135,12 +135,20 @@ export function buildRequestPreview(service: ProjectService, environment: Projec
 
 export function buildUrl(service: ProjectService, environment: ProjectEnvironment): string {
   const baseUrl = environment.variables.find((variable) => variable.name === "baseUrl")?.value ?? "";
-  const path = applyPathParams(service.path, service.pathParams);
+  const path = applyPathParams(service.path, service.pathParams, environment);
   const query = service.queryParams
     .filter((row) => row.enabled && row.name.trim())
     .map((row) => `${encodeURIComponent(row.name)}=${encodeURIComponent(resolveVariable(row.value, environment, false))}`)
     .join("&");
   return `${baseUrl}${path}${query ? `?${query}` : ""}`;
+}
+
+export function resolveTemplate(value: string, environment: ProjectEnvironment, redactSecrets: boolean): string {
+  return value.replace(/\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g, (_match, name: string) => {
+    const variable = environment.variables.find((item) => item.name === name);
+    if (!variable) return `{{${name}}}`;
+    return redactSecrets && variable.secret ? redactValue(variable.name, variable.value) : variable.value;
+  });
 }
 
 export function formatJsonBody(raw: string): string {
@@ -262,18 +270,14 @@ function authRow(name: string, value: string): KeyValueRow {
   return { id: "generated-auth", name, value, enabled: true };
 }
 
-function applyPathParams(path: string, params: KeyValueRow[]): string {
+function applyPathParams(path: string, params: KeyValueRow[], environment: ProjectEnvironment): string {
   return params.filter((row) => row.enabled).reduce((current, row) => {
-    return current.split(`{${row.name}}`).join(encodeURIComponent(row.value));
+    return current.split(`{${row.name}}`).join(encodeURIComponent(resolveTemplate(row.value, environment, false)));
   }, path);
 }
 
 function resolveVariable(value: string, environment: ProjectEnvironment, redactSecrets: boolean): string {
-  return value.replace(/\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g, (_match, name: string) => {
-    const variable = environment.variables.find((item) => item.name === name);
-    if (!variable) return `{{${name}}}`;
-    return redactSecrets && variable.secret ? redactValue(variable.name, variable.value) : variable.value;
-  });
+  return resolveTemplate(value, environment, redactSecrets);
 }
 
 function hasVariable(name: string | undefined, variableNames: Set<string>): boolean {

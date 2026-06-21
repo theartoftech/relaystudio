@@ -1044,6 +1044,11 @@ kbd {
   font-weight: 900;
 }
 
+.http-error {
+  color: var(--danger);
+  font-weight: 900;
+}
+
 .response-body {
   min-height: 0;
 }
@@ -1055,6 +1060,10 @@ kbd {
   place-content: center;
   color: var(--gray-500);
   text-align: center;
+}
+
+.empty-response.error {
+  color: var(--danger);
 }
 
 .console-dock header {
@@ -1103,6 +1112,14 @@ kbd {
   display: grid;
   grid-template-columns: 72px 1fr;
   gap: 10px;
+}
+
+.console-dock li.error {
+  color: var(--danger);
+}
+
+.console-dock li.success {
+  color: var(--success);
 }
 
 .console-dock li span {

@@ -63,6 +63,7 @@ describe("service designer helpers", () => {
     };
 
     expect(buildUrl(service, qa)).toBe("https://api.example.com/api/products/office%20supplies?q=keyboard");
+    expect(buildUrl(project.services.find((item) => item.id === "get-product")!, qa)).toBe("https://api.example.com/api/products/prod-1001");
   });
 
   it("builds a redacted bearer auth preview", () => {

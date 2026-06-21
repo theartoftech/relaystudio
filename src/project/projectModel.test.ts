@@ -11,7 +11,12 @@ describe("project model", () => {
       schemaVersion: PROJECT_SCHEMA_VERSION,
       name: "Sample API Regression"
     });
-    expect(project.services).toHaveLength(12);
+    expect(project.services).toHaveLength(13);
+    expect(project.services.find((service) => service.id === "health-check")).toMatchObject({
+      method: "GET",
+      path: "/api/health",
+      authProfile: { type: "none" }
+    });
     expect(project.environments[0].variables.map((variable) => variable.name)).toContain("baseUrl");
     expect(createOrder).toMatchObject({
       method: "POST",

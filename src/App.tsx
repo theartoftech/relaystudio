@@ -41,6 +41,7 @@ import {
   type KeyValueRow,
   type ProjectEnvironment,
   type ProjectService,
+  type ProjectVariable,
   type RecentProject,
   type RelayProject
 } from "./project/projectModel";
@@ -59,6 +60,7 @@ import {
   upsertRow,
   type RequestPreview
 } from "./services/serviceDesigner";
+import { runServiceRequest, type ExecutedResponse, type RunnerConsoleEvent } from "./services/serviceRunner";
 
 type Area = "Projects" | "Services" | "Runner" | "Flows" | "Saved Responses" | "Settings";
 type TabKind = "welcome" | "request" | "flow" | "response" | "import" | "settings";
@@ -123,6 +125,10 @@ export function App() {
   const [responseVisible, setResponseVisible] = useState(true);
   const [savePromptOpen, setSavePromptOpen] = useState(false);
   const [consoleFilter, setConsoleFilter] = useState("All Events");
+  const [runnerResponse, setRunnerResponse] = useState<ExecutedResponse | null>(null);
+  const [runnerEvents, setRunnerEvents] = useState<RunnerConsoleEvent[]>([]);
+  const [runnerError, setRunnerError] = useState<string | null>(null);
+  const [runnerRunning, setRunnerRunning] = useState(false);
 
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0];
   const hasDirtyState = projectDirty || tabs.some((tab) => tab.dirty);
@@ -270,6 +276,37 @@ export function App() {
     updateProjectServices(reorderService(project.services, activeService.id, direction), "Service order updated.");
   }
 
+  async function handleSendRequest() {
+    if (!activeService || !activeEnvironment) return;
+    setRunnerRunning(true);
+    setRunnerError(null);
+    setResponseVisible(true);
+
+    const result = await runServiceRequest(activeService, activeEnvironment);
+    setRunnerEvents(result.events);
+    setRunnerResponse(result.response);
+    setRunnerError(result.error);
+
+    if (result.response?.capturedVariables.length) {
+      setProject((current) => touchProject({
+        ...current,
+        environments: current.environments.map((item) => (
+          item.id === activeEnvironment.id
+            ? { ...item, variables: mergeCapturedVariables(item.variables, result.response!.capturedVariables) }
+            : item
+        ))
+      }));
+      setProjectDirty(true);
+      setProjectMessage("Captured secret response variables into the active environment.");
+    } else if (result.response) {
+      setProjectMessage(`Request completed with HTTP ${result.response.status}.`);
+    } else if (result.error) {
+      setProjectError(result.error);
+    }
+
+    setRunnerRunning(false);
+  }
+
   return (
     <main className="app-shell" aria-label="Relay Studio desktop shell">
       <TopCommandBar
@@ -281,6 +318,8 @@ export function App() {
         onNewProject={handleNewProject}
         onOpenProject={() => setProjectDialog({ mode: "open", title: "Open Project", path: projectPath })}
         onSave={() => setProjectDialog({ mode: "save", title: "Save Project", path: projectPath })}
+        onSendRequest={handleSendRequest}
+        runnerRunning={runnerRunning}
       />
 
       <section className="workspace-grid">
@@ -303,7 +342,7 @@ export function App() {
 
         <section className="workbench" aria-label="Workbench">
           <TabStrip tabs={tabs} activeTabId={activeTabId} onSelect={setActiveTabId} onClose={closeTab} />
-          <RequestComposer requestUrl={requestUrl} activeTab={activeTab} />
+          <RequestComposer requestUrl={requestUrl} activeTab={activeTab} onSendRequest={handleSendRequest} runnerRunning={runnerRunning} />
           <RequestEditor
             activeTab={activeTab}
             activeService={activeService}
@@ -320,6 +359,9 @@ export function App() {
             onToggleResponse={() => setResponseVisible((visible) => !visible)}
             consoleFilter={consoleFilter}
             onConsoleFilterChange={setConsoleFilter}
+            runnerResponse={runnerResponse}
+            runnerEvents={runnerEvents}
+            runnerError={runnerError}
           />
         </section>
 
@@ -335,6 +377,7 @@ export function App() {
           if (label === "Open Project") setProjectDialog({ mode: "open", title: "Open Project", path: projectPath });
           if (label === "Save Project") setProjectDialog({ mode: "save", title: "Save Project", path: projectPath });
           if (label === "Save Project As") setProjectDialog({ mode: "save", title: "Save Project As", path: "" });
+          if (label === "Send Request") void handleSendRequest();
         }} />
       ) : null}
 
@@ -445,12 +488,14 @@ export function App() {
 interface TopCommandBarProps {
   projectDirty: boolean;
   environment: string;
+  runnerRunning: boolean;
   onEnvironmentChange: (environment: string) => void;
   onOpenCommandPalette: () => void;
   onOpenImport: () => void;
   onNewProject: () => void;
   onOpenProject: () => void;
   onSave: () => void;
+  onSendRequest: () => void;
 }
 
 function TopCommandBar(props: TopCommandBarProps) {
@@ -490,9 +535,9 @@ function TopCommandBar(props: TopCommandBarProps) {
           <Save size={18} />
           <span>{props.projectDirty ? "Save Project *" : "Save Project"}</span>
         </button>
-        <button type="button" className="primary-command">
+        <button type="button" className="primary-command" onClick={props.onSendRequest} disabled={props.runnerRunning}>
           <Send size={18} />
-          <span>Send Request</span>
+          <span>{props.runnerRunning ? "Sending..." : "Send Request"}</span>
         </button>
         <label className="environment-select">
           <span className="status-dot" />
@@ -692,7 +737,17 @@ function TabStrip(props: {
   );
 }
 
-function RequestComposer({ requestUrl, activeTab }: { requestUrl: string; activeTab: WorkbenchTab }) {
+function RequestComposer({
+  requestUrl,
+  activeTab,
+  onSendRequest,
+  runnerRunning
+}: {
+  requestUrl: string;
+  activeTab: WorkbenchTab;
+  onSendRequest: () => void;
+  runnerRunning: boolean;
+}) {
   return (
     <div className="request-composer" aria-label="Request composer">
       <div className="breadcrumb">
@@ -712,9 +767,9 @@ function RequestComposer({ requestUrl, activeTab }: { requestUrl: string; active
           <option>HTTP/1.1</option>
           <option>HTTP/2</option>
         </select>
-        <button type="button" className="primary-command send-button">
+        <button type="button" className="primary-command send-button" onClick={onSendRequest} disabled={runnerRunning}>
           <Send size={18} />
-          <span>Send Request</span>
+          <span>{runnerRunning ? "Sending..." : "Send Request"}</span>
         </button>
         <button type="button" className="split-action" aria-label="Request actions">
           <ChevronDown size={17} />
@@ -1102,17 +1157,24 @@ function BottomDock(props: {
   onToggleResponse: () => void;
   consoleFilter: string;
   onConsoleFilterChange: (value: string) => void;
+  runnerResponse: ExecutedResponse | null;
+  runnerEvents: RunnerConsoleEvent[];
+  runnerError: string | null;
 }) {
+  const [responseTab, setResponseTab] = useState<"Pretty" | "Raw" | "Headers" | "Error">("Pretty");
+  const filteredEvents = props.consoleFilter === "Errors Only"
+    ? props.runnerEvents.filter((event) => event.level === "error")
+    : props.runnerEvents;
+  const responseText = props.runnerResponse?.prettyBody || props.runnerResponse?.rawBody || "";
+
   return (
     <section className="bottom-dock" aria-label="Response and console dock">
       <div className="response-dock">
         <header>
           <nav aria-label="Response tabs">
-            <button type="button" className="active">Response</button>
-            <button type="button">Headers</button>
-            <button type="button">Cookies</button>
-            <button type="button">Tests</button>
-            <button type="button">Metrics</button>
+            {(["Pretty", "Raw", "Headers", "Error"] as const).map((tab) => (
+              <button type="button" className={responseTab === tab ? "active" : ""} onClick={() => setResponseTab(tab)} key={tab}>{tab}</button>
+            ))}
           </nav>
           <button
             type="button"
@@ -1123,22 +1185,26 @@ function BottomDock(props: {
             {props.responseVisible ? "Empty" : "Body"}
           </button>
         </header>
-        {props.responseVisible ? (
+        {props.responseVisible && props.runnerResponse ? (
           <div className="response-content">
             <div className="response-meta">
-              <span className="http-ok">200 OK</span>
-              <span>245 ms</span>
-              <span>1.23 KB</span>
+              <span className={props.runnerResponse.ok ? "http-ok" : "http-error"}>{props.runnerResponse.status} {props.runnerResponse.statusText}</span>
+              <span>{props.runnerResponse.durationMs} ms</span>
+              <span>{props.runnerResponse.rawBody.length} B</span>
               <button type="button">Save Response</button>
             </div>
             <div className="response-body">
-              <pre>{`{
-  "orderId": "ord-20260621-0001",
-  "status": "created",
-  "total": 1226.25,
-  "currency": "USD"
-}`}</pre>
+              {responseTab === "Pretty" ? <pre>{responseText || "No response body."}</pre> : null}
+              {responseTab === "Raw" ? <pre>{props.runnerResponse.rawBody || "No response body."}</pre> : null}
+              {responseTab === "Headers" ? <pre>{JSON.stringify(props.runnerResponse.headers, null, 2)}</pre> : null}
+              {responseTab === "Error" ? <pre>{props.runnerError ?? props.runnerResponse.parseError ?? (props.runnerResponse.ok ? "No errors." : `HTTP ${props.runnerResponse.status} ${props.runnerResponse.statusText}`)}</pre> : null}
             </div>
+          </div>
+        ) : props.responseVisible && props.runnerError ? (
+          <div className="empty-response error">
+            <Archive size={34} />
+            <strong>Request failed.</strong>
+            <span>{props.runnerError}</span>
           </div>
         ) : (
           <div className="empty-response">
@@ -1161,10 +1227,14 @@ function BottomDock(props: {
           <button type="button">Export Log</button>
         </header>
         <ol>
-          <li><span>09:40:59</span><em>Preparing request: POST {"{{baseUrl}}/api/orders"}</em></li>
-          <li><span>09:41:00</span><em>Opening connection to {"{{baseUrl}}"} (TLS 1.3)</em></li>
-          <li><span>09:41:00</span><em>Authorization header prepared from secret variable.</em></li>
-          <li><span>09:41:01</span><em>Received response (200 OK) in 245 ms.</em></li>
+          {filteredEvents.length ? filteredEvents.map((event) => (
+            <li className={event.level} key={event.sequence}>
+              <span>{String(event.sequence).padStart(2, "0")}</span>
+              <em>{event.message}</em>
+            </li>
+          )) : (
+            <li><span>--</span><em>Send a request to see execution events.</em></li>
+          )}
         </ol>
       </div>
     </section>
@@ -1268,6 +1338,19 @@ function groupServices(project: RelayProject): Array<{ folder: string; items: Pr
   }
 
   return Array.from(grouped.entries()).map(([folder, items]) => ({ folder, items }));
+}
+
+function mergeCapturedVariables(current: ProjectVariable[], captured: ProjectVariable[]): ProjectVariable[] {
+  const next = current.slice();
+  for (const variable of captured) {
+    const index = next.findIndex((item) => item.name === variable.name);
+    if (index >= 0) {
+      next[index] = variable;
+    } else {
+      next.push(variable);
+    }
+  }
+  return next;
 }
 
 function ProjectFileDialog({

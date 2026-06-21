@@ -245,6 +245,10 @@ Preload REST service definitions from published API documentation.
 
 ## Sprint 5: Single Request Runner
 
+### Status
+
+Implemented. See `sprint-5-implementation-status.md`.
+
 ### Objective
 
 Execute individual REST calls and display trustworthy diagnostics.

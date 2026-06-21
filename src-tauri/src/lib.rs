@@ -7,8 +7,10 @@ use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::Sha256;
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 const PROJECT_FORMAT: &str = "relay-studio-restproj";
 const PROJECT_SCHEMA_VERSION: u16 = 1;
@@ -39,6 +41,26 @@ struct ProjectEnvelope {
     schema_version: u16,
     encryption: EncryptionMetadata,
     ciphertext: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct HttpRequestInput {
+    method: String,
+    url: String,
+    headers: HashMap<String, String>,
+    body: Option<String>,
+    timeout_ms: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct HttpResponseOutput {
+    status: u16,
+    status_text: String,
+    headers: HashMap<String, String>,
+    body: String,
+    duration_ms: u128,
 }
 
 #[tauri::command]
@@ -73,6 +95,11 @@ fn remember_recent_project(project: RecentProject) -> Result<(), String> {
     remember_recent_project_impl(project)
 }
 
+#[tauri::command]
+async fn execute_http_request(request: HttpRequestInput) -> Result<HttpResponseOutput, String> {
+    execute_http_request_impl(request).await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -82,10 +109,81 @@ pub fn run() {
             open_project_file,
             project_file_exists,
             list_recent_projects,
-            remember_recent_project
+            remember_recent_project,
+            execute_http_request
         ])
         .run(tauri::generate_context!())
         .expect("error while running Relay Studio");
+}
+
+async fn execute_http_request_impl(
+    request: HttpRequestInput,
+) -> Result<HttpResponseOutput, String> {
+    validate_http_request(&request)?;
+
+    let method = reqwest::Method::from_bytes(request.method.as_bytes())
+        .map_err(|_| format!("Unsupported HTTP method: {}", request.method))?;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_millis(request.timeout_ms))
+        .build()
+        .map_err(|error| format!("Could not create HTTP client: {error}"))?;
+
+    let mut builder = client.request(method, &request.url);
+    for (name, value) in &request.headers {
+        builder = builder.header(name, value);
+    }
+    if let Some(body) = request.body {
+        builder = builder.body(body);
+    }
+
+    let started = Instant::now();
+    let response = builder.send().await.map_err(|error| {
+        if error.is_timeout() {
+            "Request timed out.".to_string()
+        } else if error.is_connect() {
+            format!("Network connection failed: {error}")
+        } else {
+            format!("HTTP request failed: {error}")
+        }
+    })?;
+    let status = response.status();
+    let status_text = status.canonical_reason().unwrap_or("").to_string();
+    let headers = response
+        .headers()
+        .iter()
+        .map(|(name, value)| {
+            (
+                name.to_string(),
+                value.to_str().unwrap_or("<binary header>").to_string(),
+            )
+        })
+        .collect();
+    let body = response
+        .text()
+        .await
+        .map_err(|error| format!("Could not read response body: {error}"))?;
+
+    Ok(HttpResponseOutput {
+        status: status.as_u16(),
+        status_text,
+        headers,
+        body,
+        duration_ms: started.elapsed().as_millis(),
+    })
+}
+
+fn validate_http_request(request: &HttpRequestInput) -> Result<(), String> {
+    match request.method.as_str() {
+        "GET" | "POST" | "PUT" | "DELETE" => {}
+        method => return Err(format!("Unsupported HTTP method: {method}")),
+    }
+    if !(request.url.starts_with("http://") || request.url.starts_with("https://")) {
+        return Err("Request URL must start with http:// or https://.".to_string());
+    }
+    if request.timeout_ms == 0 || request.timeout_ms > 300_000 {
+        return Err("Request timeout must be between 1 ms and 300000 ms.".to_string());
+    }
+    Ok(())
 }
 
 fn save_project_file_impl(path: &Path, password: &str, project: &Value) -> Result<(), String> {
@@ -318,5 +416,48 @@ mod tests {
         let error = open_project_file_impl(&path, "password").expect_err("corrupted file");
 
         assert!(error.contains("corrupted or unsupported"));
+    }
+
+    #[test]
+    fn http_request_validation_accepts_supported_requests() {
+        let request = HttpRequestInput {
+            method: "GET".to_string(),
+            url: "https://api.example.com/api/health".to_string(),
+            headers: HashMap::new(),
+            body: None,
+            timeout_ms: 30_000,
+        };
+
+        assert!(validate_http_request(&request).is_ok());
+    }
+
+    #[test]
+    fn http_request_validation_rejects_unsupported_inputs() {
+        let mut request = HttpRequestInput {
+            method: "PATCH".to_string(),
+            url: "https://api.example.com/api/health".to_string(),
+            headers: HashMap::new(),
+            body: None,
+            timeout_ms: 30_000,
+        };
+
+        assert_eq!(
+            validate_http_request(&request).expect_err("unsupported method"),
+            "Unsupported HTTP method: PATCH"
+        );
+
+        request.method = "GET".to_string();
+        request.url = "ftp://api.example.com/api/health".to_string();
+        assert_eq!(
+            validate_http_request(&request).expect_err("unsupported url"),
+            "Request URL must start with http:// or https://."
+        );
+
+        request.url = "https://api.example.com/api/health".to_string();
+        request.timeout_ms = 0;
+        assert_eq!(
+            validate_http_request(&request).expect_err("bad timeout"),
+            "Request timeout must be between 1 ms and 300000 ms."
+        );
     }
 }

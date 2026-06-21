@@ -186,6 +186,10 @@ Implemented. See `sprint-4-implementation-status.md`.
 
 ## Sprint 5: Single Request Runner
 
+### Status
+
+Implemented. See `sprint-5-implementation-status.md`.
+
 ### Goals
 
 - Execute individual REST calls and display reliable diagnostics.
