@@ -29,7 +29,8 @@ import {
   SlidersHorizontal,
   Terminal,
   UserCircle,
-  X
+  X,
+  Zap
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -138,6 +139,7 @@ export function App() {
   const [runnerEvents, setRunnerEvents] = useState<RunnerConsoleEvent[]>([]);
   const [runnerError, setRunnerError] = useState<string | null>(null);
   const [runnerRunning, setRunnerRunning] = useState(false);
+  const [editableRequestUrl, setEditableRequestUrl] = useState<string | null>(null);
   const [saveResponseDialog, setSaveResponseDialog] = useState<null | {
     path: string;
     warning: string | null;
@@ -205,7 +207,7 @@ export function App() {
     };
   }, [hasDirtyState]);
 
-  const requestUrl = useMemo(() => {
+  const computedRequestUrl = useMemo(() => {
     if (activeTab.kind === "flow") {
       return "{{baseUrl}}/flow/authenticated-read";
     }
@@ -214,6 +216,11 @@ export function App() {
     }
     return requestPreview?.url ?? "{{baseUrl}}/api/orders";
   }, [activeTab.kind, requestPreview?.url]);
+  const requestUrl = editableRequestUrl ?? computedRequestUrl;
+
+  useEffect(() => {
+    setEditableRequestUrl(null);
+  }, [activeServiceId, activeTab.kind, environment]);
 
   function openPlaceholderTab(kind: TabKind, label: string) {
     const id = `${kind}-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
@@ -262,6 +269,27 @@ export function App() {
     )));
   }
 
+  function handleRequestUrlChange(value: string) {
+    setEditableRequestUrl(value);
+    if (!activeService || !activeEnvironment || activeTab.kind !== "request") return;
+    const parsed = parseRequestUrlForService(activeService, activeEnvironment, value);
+    if (!parsed) return;
+
+    setProject((current) => touchProject({
+      ...current,
+      services: current.services.map((service) => (
+        service.id === activeService.id ? parsed.service : service
+      )),
+      environments: current.environments.map((item) => (
+        item.id === activeEnvironment.id ? parsed.environment : item
+      ))
+    }));
+    setProjectDirty(true);
+    setTabs((current) => current.map((tab) => (tab.id === activeService.id ? { ...tab, dirty: true } : tab)));
+    setProjectMessage("Request URL updated.");
+    setProjectError(null);
+  }
+
   function handleCreateService() {
     const next = createService({ id: `service-${project.services.length + 1}` });
     updateProjectServices([...project.services, next], "New service created.");
@@ -292,11 +320,23 @@ export function App() {
 
   async function handleSendRequest() {
     if (!activeService || !activeEnvironment) return;
+    let serviceForRun = activeService;
+    let environmentForRun = activeEnvironment;
+    if (editableRequestUrl && editableRequestUrl !== computedRequestUrl) {
+      const parsed = parseRequestUrlForService(activeService, activeEnvironment, editableRequestUrl);
+      if (!parsed) {
+        setProjectError("Request URL must be an absolute http(s) URL or a relative path starting with /.");
+        return;
+      }
+      serviceForRun = parsed.service;
+      environmentForRun = parsed.environment;
+    }
+
     setRunnerRunning(true);
     setRunnerError(null);
     setResponseVisible(true);
 
-    const result = await runServiceRequest(activeService, activeEnvironment);
+    const result = await runServiceRequest(serviceForRun, environmentForRun);
     setRunnerRequest(result.request);
     setRunnerEvents(result.events);
     setRunnerResponse(result.response);
@@ -428,6 +468,7 @@ export function App() {
           projectMessage={projectMessage}
           projectError={projectError}
           onMarkDirty={markProjectDirty}
+          onCreateService={handleCreateService}
           onOpenRecent={(recent) => setProjectDialog({ mode: "open", title: "Open Recent Project", path: recent.path })}
           onOpenSettings={() => openPlaceholderTab("settings", "Settings")}
           onOpenImport={() => openPlaceholderTab("import", "Import API Docs")}
@@ -438,7 +479,13 @@ export function App() {
 
         <section className="workbench" aria-label="Workbench">
           <TabStrip tabs={tabs} activeTabId={activeTabId} onSelect={setActiveTabId} onClose={closeTab} />
-          <RequestComposer requestUrl={requestUrl} activeTab={activeTab} onSendRequest={handleSendRequest} runnerRunning={runnerRunning} />
+          <RequestComposer
+            requestUrl={requestUrl}
+            activeTab={activeTab}
+            onRequestUrlChange={handleRequestUrlChange}
+            onSendRequest={handleSendRequest}
+            runnerRunning={runnerRunning}
+          />
           <RequestEditor
             activeTab={activeTab}
             activeService={activeService}
@@ -530,15 +577,31 @@ export function App() {
   }
 
   function handleNewProject() {
-    const nextProject = createEmptyProject();
+    const starterService = createService({
+      id: "request-1",
+      folder: "Requests",
+      name: "New Request",
+      method: "GET",
+      path: "/api/health",
+      auth: "none",
+      authProfile: { type: "none" }
+    });
+    const nextProject = {
+      ...createEmptyProject(),
+      services: [starterService]
+    };
     setProject(nextProject);
     setProjectPath("");
     setEnvironment(nextProject.environments[0]?.name ?? "QA Environment");
-    setActiveServiceId("");
+    setActiveServiceId(starterService.id);
     setProjectDirty(true);
-    setTabs(initialTabs.map((tab) => ({ ...tab, dirty: tab.id === "welcome" })));
-    setActiveTabId("welcome");
-    setProjectMessage("New unsaved project created.");
+    setTabs([
+      { id: "welcome", label: "Welcome", kind: "welcome" },
+      { id: starterService.id, label: starterService.name, kind: "request", method: starterService.method, dirty: true }
+    ]);
+    setActiveTabId(starterService.id);
+    setEditableRequestUrl(null);
+    setProjectMessage("New unsaved project created with a starter request.");
     setProjectError(null);
   }
 
@@ -615,7 +678,7 @@ function TopCommandBar(props: TopCommandBarProps) {
         <span className="control zoom" />
       </div>
       <div className="brand-lockup" aria-label="Relay Studio">
-        <span className="brand-mark">RS</span>
+        <span className="brand-mark" aria-hidden="true"><Zap size={24} strokeWidth={2.4} /></span>
         <div>
           <strong>Relay Studio</strong>
           <span>Sample API Regression</span>
@@ -697,6 +760,7 @@ function ProjectExplorer(props: {
   onOpenRecent: (recent: RecentProject) => void;
   onOpenImport: () => void;
   onOpenSettings: () => void;
+  onCreateService: () => void;
   onOpenSavedResponse: (metadata: SavedResponseMetadata) => void;
 }) {
   return (
@@ -707,7 +771,7 @@ function ProjectExplorer(props: {
           <h1>{props.project.name}{props.projectDirty ? " *" : ""}</h1>
           <span>{props.project.services.length} services - {props.project.flows.length} flows</span>
         </div>
-        <button type="button" aria-label="New item"><Plus size={17} /></button>
+        <button type="button" aria-label="New service" onClick={props.onCreateService}><Plus size={17} /></button>
       </div>
       <label className="explorer-search">
         <Search size={16} />
@@ -855,11 +919,13 @@ function TabStrip(props: {
 function RequestComposer({
   requestUrl,
   activeTab,
+  onRequestUrlChange,
   onSendRequest,
   runnerRunning
 }: {
   requestUrl: string;
   activeTab: WorkbenchTab;
+  onRequestUrlChange: (value: string) => void;
   onSendRequest: () => void;
   runnerRunning: boolean;
 }) {
@@ -877,7 +943,12 @@ function RequestComposer({
           <option>PUT</option>
           <option>DELETE</option>
         </select>
-        <input aria-label="Request URL" value={requestUrl} readOnly />
+        <input
+          aria-label="Request URL"
+          value={requestUrl}
+          readOnly={activeTab.kind !== "request"}
+          onChange={(event) => onRequestUrlChange(event.target.value)}
+        />
         <select aria-label="Protocol" defaultValue="HTTP/1.1">
           <option>HTTP/1.1</option>
           <option>HTTP/2</option>
@@ -1468,6 +1539,68 @@ function mergeCapturedVariables(current: ProjectVariable[], captured: ProjectVar
     }
   }
   return next;
+}
+
+function parseRequestUrlForService(
+  service: ProjectService,
+  environment: ProjectEnvironment,
+  value: string
+): { service: ProjectService; environment: ProjectEnvironment } | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  let parsedUrl: URL;
+  let baseUrl: string | null = null;
+  if (/^https?:\/\//i.test(trimmed)) {
+    try {
+      parsedUrl = new URL(trimmed);
+      baseUrl = parsedUrl.origin;
+    } catch {
+      return null;
+    }
+  } else if (trimmed.startsWith("/")) {
+    try {
+      parsedUrl = new URL(trimmed, "https://relay-studio.local");
+    } catch {
+      return null;
+    }
+  } else {
+    return null;
+  }
+
+  const queryParams = Array.from(parsedUrl.searchParams.entries()).map(([name, paramValue], index) => ({
+    id: `${service.id}-query-${slugForId(name)}-${index + 1}`,
+    name,
+    value: paramValue,
+    enabled: true
+  }));
+  const nextService = {
+    ...service,
+    path: parsedUrl.pathname || "/",
+    queryParams
+  };
+  const nextEnvironment = baseUrl
+    ? {
+      ...environment,
+      variables: upsertEnvironmentVariable(environment.variables, {
+        name: "baseUrl",
+        value: baseUrl,
+        secret: false
+      })
+    }
+    : environment;
+
+  return { service: nextService, environment: nextEnvironment };
+}
+
+function upsertEnvironmentVariable(variables: ProjectVariable[], variable: ProjectVariable): ProjectVariable[] {
+  return variables.some((item) => item.name === variable.name)
+    ? variables.map((item) => (item.name === variable.name ? variable : item))
+    : [...variables, variable];
+}
+
+function slugForId(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "param";
 }
 
 function ProjectFileDialog({

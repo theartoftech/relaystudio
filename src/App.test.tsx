@@ -37,6 +37,30 @@ describe("Relay Studio shell", () => {
     expect(screen.getByLabelText("Project file path")).toHaveValue("/private/tmp/sample-api-regression.restproj");
   });
 
+  it("creates a new project with an editable starter request", () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: /^New$/i }));
+
+    expect(screen.getByRole("tab", { name: /New Request/i })).toBeInTheDocument();
+    expect(screen.getByText("New unsaved project created with a starter request.")).toBeInTheDocument();
+    const requestUrl = screen.getByLabelText("Request URL");
+    expect(requestUrl).not.toHaveAttribute("readonly");
+    expect(requestUrl).toHaveValue("https://api.example.com/api/health");
+  });
+
+  it("lets the active request URL be edited directly", () => {
+    render(<App />);
+
+    const requestUrl = screen.getByLabelText("Request URL");
+    fireEvent.change(requestUrl, {
+      target: { value: "https://api.test.local/v1/orders?status=open" }
+    });
+
+    expect(requestUrl).toHaveValue("https://api.test.local/v1/orders?status=open");
+    expect(screen.getByText("Request URL updated.")).toBeInTheDocument();
+  });
+
   it("saves the current project through the browser fallback persistence", async () => {
     render(<App />);
 

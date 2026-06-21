@@ -63,9 +63,9 @@ button {
 
 .top-command-bar {
   display: grid;
-  grid-template-columns: auto 224px minmax(220px, 1fr) auto;
+  grid-template-columns: auto minmax(210px, 250px) minmax(280px, 1fr) auto;
   align-items: center;
-  gap: 18px;
+  gap: 14px;
   padding: 0 18px;
   color: #dce8f7;
   background: linear-gradient(90deg, var(--navy-950), var(--navy-900));
@@ -96,13 +96,16 @@ button {
 
 .brand-mark {
   display: grid;
-  width: 38px;
-  height: 38px;
+  width: 40px;
+  height: 40px;
   place-items: center;
-  color: var(--white);
-  font-weight: 800;
-  border: 1px solid rgb(255 255 255 / 28%);
-  background: #0c427d;
+  color: #dce8f7;
+  border: 1px solid rgb(255 255 255 / 22%);
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 65% 28%, rgb(255 255 255 / 26%), transparent 26px),
+    linear-gradient(135deg, #0c427d, #071b33 72%);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 8%);
 }
 
 .brand-lockup strong,
@@ -136,6 +139,18 @@ button {
   text-align: left;
   background: rgb(255 255 255 / 8%);
   border: 1px solid rgb(255 255 255 / 18%);
+}
+
+.command-search span {
+  min-width: 0;
+  overflow: hidden;
+  line-height: 1;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.command-search kbd {
+  white-space: nowrap;
 }
 
 kbd {
@@ -309,12 +324,26 @@ kbd {
   background: #fbfcfe;
 }
 
+.inspector label.filter-field {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.filter-field svg {
+  flex: 0 0 auto;
+}
+
 .explorer-search input,
 .filter-field input {
   min-width: 0;
   width: 100%;
+  height: 100%;
+  padding: 0;
   border: 0;
   outline: 0;
+  line-height: 1;
   background: transparent;
 }
 
