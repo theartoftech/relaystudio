@@ -14,6 +14,8 @@ use std::time::{Duration, Instant};
 
 const PROJECT_FORMAT: &str = "relay-studio-restproj";
 const PROJECT_SCHEMA_VERSION: u16 = 1;
+const SAVED_RESPONSE_FORMAT: &str = "relay-studio-response";
+const SAVED_RESPONSE_SCHEMA_VERSION: u16 = 1;
 const KDF_ITERATIONS: u32 = 120_000;
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
@@ -100,6 +102,23 @@ async fn execute_http_request(request: HttpRequestInput) -> Result<HttpResponseO
     execute_http_request_impl(request).await
 }
 
+#[tauri::command]
+fn save_response_file(path: String, overwrite: bool, artifact: Value) -> Result<(), String> {
+    save_response_file_impl(Path::new(&path), overwrite, &artifact)
+}
+
+#[tauri::command]
+fn read_response_file(metadata: Value) -> Result<Value, String> {
+    read_response_file_impl(&metadata)
+}
+
+#[tauri::command]
+fn response_file_exists(path: String) -> Result<bool, String> {
+    let response_path = Path::new(&path);
+    validate_response_path(response_path)?;
+    Ok(response_path.exists())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -110,7 +129,10 @@ pub fn run() {
             project_file_exists,
             list_recent_projects,
             remember_recent_project,
-            execute_http_request
+            execute_http_request,
+            save_response_file,
+            read_response_file,
+            response_file_exists
         ])
         .run(tauri::generate_context!())
         .expect("error while running Relay Studio");
@@ -241,6 +263,103 @@ fn validate_project_path(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_response_path(path: &Path) -> Result<(), String> {
+    if path.as_os_str().is_empty() {
+        return Err("Saved response path is required.".to_string());
+    }
+    match path.extension().and_then(|ext| ext.to_str()) {
+        Some("json") | Some("txt") => Ok(()),
+        _ => Err("Saved response file must use the .json or .txt extension.".to_string()),
+    }
+}
+
+fn save_response_file_impl(path: &Path, overwrite: bool, artifact: &Value) -> Result<(), String> {
+    validate_response_path(path)?;
+    validate_response_artifact(artifact)?;
+
+    if path.exists() && !overwrite {
+        return Err("Saved response already exists at this path.".to_string());
+    }
+
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("Could not create saved response directory: {error}"))?;
+    }
+
+    let bytes = if path.extension().and_then(|ext| ext.to_str()) == Some("txt") {
+        artifact
+            .get("body")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Saved response body is required.".to_string())?
+            .as_bytes()
+            .to_vec()
+    } else {
+        serde_json::to_vec_pretty(artifact)
+            .map_err(|error| format!("Saved response serialization failed: {error}"))?
+    };
+    let temp_path = response_temp_path_for(path);
+    fs::write(&temp_path, bytes)
+        .map_err(|error| format!("Could not write temporary saved response file: {error}"))?;
+    fs::rename(&temp_path, path)
+        .map_err(|error| format!("Could not finalize saved response file: {error}"))?;
+    Ok(())
+}
+
+fn read_response_file_impl(metadata: &Value) -> Result<Value, String> {
+    let path_text = metadata
+        .get("filePath")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Saved response metadata file path is required.".to_string())?;
+    let path = Path::new(path_text);
+    validate_response_path(path)?;
+
+    let raw = fs::read_to_string(path).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            format!("Saved response was not found: {}", path.display())
+        } else {
+            format!("Could not read saved response file: {error}")
+        }
+    })?;
+
+    let artifact = if path.extension().and_then(|ext| ext.to_str()) == Some("txt") {
+        serde_json::json!({
+            "format": SAVED_RESPONSE_FORMAT,
+            "schemaVersion": SAVED_RESPONSE_SCHEMA_VERSION,
+            "metadata": metadata,
+            "body": raw
+        })
+    } else {
+        serde_json::from_str::<Value>(&raw)
+            .map_err(|error| format!("Saved response file is corrupted or unsupported: {error}"))?
+    };
+
+    validate_response_artifact(&artifact)?;
+    Ok(artifact)
+}
+
+fn validate_response_artifact(artifact: &Value) -> Result<(), String> {
+    if artifact.get("format").and_then(Value::as_str) != Some(SAVED_RESPONSE_FORMAT) {
+        return Err("Unsupported saved response file format.".to_string());
+    }
+    if artifact.get("schemaVersion").and_then(Value::as_u64)
+        != Some(SAVED_RESPONSE_SCHEMA_VERSION.into())
+    {
+        return Err("Unsupported saved response schema version.".to_string());
+    }
+    let metadata = artifact
+        .get("metadata")
+        .ok_or_else(|| "Saved response metadata is required.".to_string())?;
+    let file_path = metadata
+        .get("filePath")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Saved response metadata file path is required.".to_string())?;
+    validate_response_path(Path::new(file_path))?;
+    if artifact.get("body").and_then(Value::as_str).is_none() {
+        return Err("Saved response body is required.".to_string());
+    }
+    Ok(())
+}
+
 fn validate_password(password: &str) -> Result<(), String> {
     if password.is_empty() {
         return Err("Project password is required.".to_string());
@@ -329,6 +448,14 @@ fn temp_path_for(path: &Path) -> PathBuf {
 
 fn backup_path_for(path: &Path) -> PathBuf {
     path.with_extension("restproj.bak")
+}
+
+fn response_temp_path_for(path: &Path) -> PathBuf {
+    let extension = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("tmp");
+    path.with_extension(format!("{extension}.tmp"))
 }
 
 fn recent_projects_path() -> Result<PathBuf, String> {
@@ -458,6 +585,104 @@ mod tests {
         assert_eq!(
             validate_http_request(&request).expect_err("bad timeout"),
             "Request timeout must be between 1 ms and 300000 ms."
+        );
+    }
+
+    #[test]
+    fn saved_response_json_round_trips() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("response.json");
+        let artifact = json!({
+            "format": SAVED_RESPONSE_FORMAT,
+            "schemaVersion": SAVED_RESPONSE_SCHEMA_VERSION,
+            "metadata": {
+                "id": "response-1",
+                "filePath": path.to_string_lossy(),
+                "fileName": "response.json"
+            },
+            "body": "{\"ok\":true}"
+        });
+
+        save_response_file_impl(&path, false, &artifact).expect("save response");
+        let opened = read_response_file_impl(&artifact["metadata"]).expect("read response");
+
+        assert_eq!(opened, artifact);
+    }
+
+    #[test]
+    fn saved_response_raw_body_round_trips_with_metadata() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("response.txt");
+        let artifact = json!({
+            "format": SAVED_RESPONSE_FORMAT,
+            "schemaVersion": SAVED_RESPONSE_SCHEMA_VERSION,
+            "metadata": {
+                "id": "response-1",
+                "filePath": path.to_string_lossy(),
+                "fileName": "response.txt"
+            },
+            "body": "plain response"
+        });
+
+        save_response_file_impl(&path, false, &artifact).expect("save response");
+
+        assert_eq!(
+            fs::read_to_string(&path).expect("read raw file"),
+            "plain response"
+        );
+        assert_eq!(
+            read_response_file_impl(&artifact["metadata"]).expect("read response"),
+            artifact
+        );
+    }
+
+    #[test]
+    fn saved_response_requires_overwrite_confirmation() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("response.json");
+        let artifact = json!({
+            "format": SAVED_RESPONSE_FORMAT,
+            "schemaVersion": SAVED_RESPONSE_SCHEMA_VERSION,
+            "metadata": {
+                "id": "response-1",
+                "filePath": path.to_string_lossy(),
+                "fileName": "response.json"
+            },
+            "body": "{}"
+        });
+
+        save_response_file_impl(&path, false, &artifact).expect("save response");
+        let error = save_response_file_impl(&path, false, &artifact).expect_err("overwrite");
+
+        assert_eq!(error, "Saved response already exists at this path.");
+        assert!(save_response_file_impl(&path, true, &artifact).is_ok());
+    }
+
+    #[test]
+    fn saved_response_validation_rejects_unsupported_inputs() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("response.html");
+        let artifact = json!({
+            "format": SAVED_RESPONSE_FORMAT,
+            "schemaVersion": SAVED_RESPONSE_SCHEMA_VERSION,
+            "metadata": {
+                "filePath": path.to_string_lossy()
+            },
+            "body": "{}"
+        });
+
+        assert_eq!(
+            validate_response_path(&path).expect_err("invalid extension"),
+            "Saved response file must use the .json or .txt extension."
+        );
+        assert_eq!(
+            validate_response_artifact(&json!({ "format": "unknown" }))
+                .expect_err("invalid format"),
+            "Unsupported saved response file format."
+        );
+        assert_eq!(
+            validate_response_artifact(&artifact).expect_err("invalid artifact path"),
+            "Saved response file must use the .json or .txt extension."
         );
     }
 }

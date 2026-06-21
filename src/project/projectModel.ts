@@ -72,8 +72,18 @@ export interface ProjectFlow {
 export interface SavedResponseMetadata {
   id: string;
   serviceId: string;
+  serviceName: string;
   fileName: string;
+  filePath: string;
+  method: HttpMethod;
+  url: string;
   status: number;
+  statusText: string;
+  durationMs: number;
+  contentType: string;
+  sizeBytes: number;
+  bodyKind: "json" | "raw";
+  redacted: boolean;
   capturedAt: string;
 }
 
@@ -253,9 +263,57 @@ export function createSampleProject(now = new Date().toISOString()): RelayProjec
       { id: "product-search", name: "Product Search", steps: ["login", "search-products"] }
     ],
     savedResponses: [
-      { id: "current-user-response", serviceId: "current-user", fileName: "current-user.json", status: 200, capturedAt: now },
-      { id: "create-order-response", serviceId: "create-order", fileName: "create-order.json", status: 200, capturedAt: now },
-      { id: "forbidden-admin-response", serviceId: "admin-settings", fileName: "forbidden-admin.json", status: 403, capturedAt: now }
+      {
+        id: "current-user-response",
+        serviceId: "current-user",
+        serviceName: "Current User",
+        fileName: "current-user.json",
+        filePath: "/private/tmp/current-user.json",
+        method: "GET",
+        url: "https://api.example.com/api/auth/me",
+        status: 200,
+        statusText: "OK",
+        durationMs: 245,
+        contentType: "application/json",
+        sizeBytes: 128,
+        bodyKind: "json",
+        redacted: true,
+        capturedAt: now
+      },
+      {
+        id: "create-order-response",
+        serviceId: "create-order",
+        serviceName: "Create Order",
+        fileName: "create-order.json",
+        filePath: "/private/tmp/create-order.json",
+        method: "POST",
+        url: "https://api.example.com/api/orders",
+        status: 200,
+        statusText: "OK",
+        durationMs: 289,
+        contentType: "application/json",
+        sizeBytes: 96,
+        bodyKind: "json",
+        redacted: true,
+        capturedAt: now
+      },
+      {
+        id: "forbidden-admin-response",
+        serviceId: "admin-settings",
+        serviceName: "Admin Settings",
+        fileName: "forbidden-admin.json",
+        filePath: "/private/tmp/forbidden-admin.json",
+        method: "GET",
+        url: "https://api.example.com/api/admin/settings",
+        status: 403,
+        statusText: "Forbidden",
+        durationMs: 112,
+        contentType: "application/json",
+        sizeBytes: 72,
+        bodyKind: "json",
+        redacted: true,
+        capturedAt: now
+      }
     ],
     importSources: [],
     settings: {

@@ -16,6 +16,7 @@ This folder contains the first implementation slice for Relay Studio: reviewable
 - [sprint-3-implementation-status.md](sprint-3-implementation-status.md): delivered Sprint 3 project persistence, encryption, dirty-state, and verification results.
 - [sprint-4-implementation-status.md](sprint-4-implementation-status.md): delivered Sprint 4 REST service designer, request validation, and 90% coverage gate.
 - [sprint-5-implementation-status.md](sprint-5-implementation-status.md): delivered Sprint 5 single request runner, native HTTP execution, response dock, console diagnostics, and verification results.
+- [sprint-6-implementation-status.md](sprint-6-implementation-status.md): delivered Sprint 6 saved responses, redacted response artifacts, native/browser file persistence, reload workflow, and coverage results.
 - [visual-target.md](visual-target.md): selected Concept 3 visual direction and implementation guardrails.
 - [live-rest-acceptance-test-matrix.md](live-rest-acceptance-test-matrix.md): configurable live REST acceptance suite.
 - [mockups/index.html](mockups/index.html): static full-app mockup set.

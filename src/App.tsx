@@ -43,7 +43,8 @@ import {
   type ProjectService,
   type ProjectVariable,
   type RecentProject,
-  type RelayProject
+  type RelayProject,
+  type SavedResponseMetadata
 } from "./project/projectModel";
 import { createProjectPersistence, type ProjectPersistence } from "./project/projectPersistence";
 import {
@@ -60,7 +61,13 @@ import {
   upsertRow,
   type RequestPreview
 } from "./services/serviceDesigner";
-import { runServiceRequest, type ExecutedResponse, type RunnerConsoleEvent } from "./services/serviceRunner";
+import { createSavedResponsePersistence, type SavedResponsePersistence } from "./services/savedResponsePersistence";
+import {
+  artifactToExecutedResponse,
+  buildSavedResponseDraft,
+  defaultSavedResponsePath
+} from "./services/savedResponses";
+import { runServiceRequest, type ExecutableRequest, type ExecutedResponse, type RunnerConsoleEvent } from "./services/serviceRunner";
 
 type Area = "Projects" | "Services" | "Runner" | "Flows" | "Saved Responses" | "Settings";
 type TabKind = "welcome" | "request" | "flow" | "response" | "import" | "settings";
@@ -109,6 +116,7 @@ export function App() {
   const [projectDirty, setProjectDirty] = useState(false);
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
   const [persistence, setPersistence] = useState<ProjectPersistence | null>(null);
+  const [savedResponsePersistence, setSavedResponsePersistence] = useState<SavedResponsePersistence | null>(null);
   const [projectMessage, setProjectMessage] = useState("Project loaded from sample data.");
   const [projectError, setProjectError] = useState<string | null>(null);
   const [projectDialog, setProjectDialog] = useState<null | {
@@ -126,9 +134,14 @@ export function App() {
   const [savePromptOpen, setSavePromptOpen] = useState(false);
   const [consoleFilter, setConsoleFilter] = useState("All Events");
   const [runnerResponse, setRunnerResponse] = useState<ExecutedResponse | null>(null);
+  const [runnerRequest, setRunnerRequest] = useState<ExecutableRequest | null>(null);
   const [runnerEvents, setRunnerEvents] = useState<RunnerConsoleEvent[]>([]);
   const [runnerError, setRunnerError] = useState<string | null>(null);
   const [runnerRunning, setRunnerRunning] = useState(false);
+  const [saveResponseDialog, setSaveResponseDialog] = useState<null | {
+    path: string;
+    warning: string | null;
+  }>(null);
 
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0];
   const hasDirtyState = projectDirty || tabs.some((tab) => tab.dirty);
@@ -164,6 +177,7 @@ export function App() {
       setPersistence(createdPersistence);
       setRecentProjects(await createdPersistence.listRecentProjects());
     });
+    void createSavedResponsePersistence().then(setSavedResponsePersistence);
   }, []);
 
   useEffect(() => {
@@ -283,6 +297,7 @@ export function App() {
     setResponseVisible(true);
 
     const result = await runServiceRequest(activeService, activeEnvironment);
+    setRunnerRequest(result.request);
     setRunnerEvents(result.events);
     setRunnerResponse(result.response);
     setRunnerError(result.error);
@@ -305,6 +320,86 @@ export function App() {
     }
 
     setRunnerRunning(false);
+  }
+
+  function openSaveResponseDialog() {
+    if (!activeService || !runnerResponse) {
+      setProjectError("Send a request before saving a response.");
+      return;
+    }
+    const path = defaultSavedResponsePath(activeService, runnerResponse);
+    setSaveResponseDialog({
+      path,
+      warning: runnerResponse.contentType.toLowerCase().includes("json") && !runnerResponse.parseError
+        ? null
+        : "Non-JSON responses save as redacted raw text."
+    });
+  }
+
+  async function handleSaveResponse(path: string, overwrite: boolean) {
+    if (!activeService || !runnerRequest || !runnerResponse) {
+      setProjectError("No completed request response is available to save.");
+      return;
+    }
+    try {
+      const responsePersistence = savedResponsePersistence ?? await createSavedResponsePersistence();
+      if (!savedResponsePersistence) setSavedResponsePersistence(responsePersistence);
+      const draft = buildSavedResponseDraft({
+        service: activeService,
+        request: runnerRequest,
+        response: runnerResponse,
+        filePath: path
+      });
+      await responsePersistence.saveResponse({ path, artifact: draft.artifact, overwrite });
+      setProject((current) => touchProject({
+        ...current,
+        savedResponses: [
+          draft.metadata,
+          ...current.savedResponses.filter((response) => response.filePath !== draft.metadata.filePath)
+        ]
+      }));
+      setProjectDirty(true);
+      setTabs((current) => current.map((tab) => (tab.id === activeTabId ? { ...tab, dirty: true } : tab)));
+      setSaveResponseDialog(null);
+      setProjectMessage(draft.warning ? `Saved response to ${path}. ${draft.warning}` : `Saved response to ${path}.`);
+      setProjectError(null);
+    } catch (error) {
+      setProjectError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function handleSavedResponseExists(path: string) {
+    const responsePersistence = savedResponsePersistence ?? await createSavedResponsePersistence();
+    if (!savedResponsePersistence) setSavedResponsePersistence(responsePersistence);
+    return responsePersistence.responseExists(path);
+  }
+
+  async function handleOpenSavedResponse(metadata: SavedResponseMetadata) {
+    try {
+      const responsePersistence = savedResponsePersistence ?? await createSavedResponsePersistence();
+      if (!savedResponsePersistence) setSavedResponsePersistence(responsePersistence);
+      const artifact = await responsePersistence.readResponse(metadata);
+      const response = artifactToExecutedResponse(artifact);
+      setRunnerResponse(response);
+      setRunnerRequest(null);
+      setRunnerError(response.parseError);
+      setRunnerEvents([
+        { sequence: 1, phase: "prepare", level: "info", message: `Loaded saved response: ${metadata.fileName}.` },
+        { sequence: 2, phase: "success", level: response.ok ? "success" : "error", message: `Saved response reopened with HTTP ${response.status}.` }
+      ]);
+      setResponseVisible(true);
+      setActiveArea("Saved Responses");
+      setTabs((current) => (
+        current.some((tab) => tab.id === metadata.id)
+          ? current
+          : [...current, { id: metadata.id, label: metadata.fileName, kind: "response", method: metadata.method }]
+      ));
+      setActiveTabId(metadata.id);
+      setProjectMessage(`Loaded saved response from ${metadata.filePath}.`);
+      setProjectError(null);
+    } catch (error) {
+      setProjectError(error instanceof Error ? error.message : String(error));
+    }
   }
 
   return (
@@ -338,6 +433,7 @@ export function App() {
           onOpenImport={() => openPlaceholderTab("import", "Import API Docs")}
           activeServiceId={activeService?.id ?? ""}
           onSelectService={handleSelectService}
+          onOpenSavedResponse={handleOpenSavedResponse}
         />
 
         <section className="workbench" aria-label="Workbench">
@@ -362,6 +458,8 @@ export function App() {
             runnerResponse={runnerResponse}
             runnerEvents={runnerEvents}
             runnerError={runnerError}
+            canSaveResponse={Boolean(runnerResponse && runnerRequest)}
+            onSaveResponse={openSaveResponseDialog}
           />
         </section>
 
@@ -378,6 +476,7 @@ export function App() {
           if (label === "Save Project") setProjectDialog({ mode: "save", title: "Save Project", path: projectPath });
           if (label === "Save Project As") setProjectDialog({ mode: "save", title: "Save Project As", path: "" });
           if (label === "Send Request") void handleSendRequest();
+          if (label === "Save Response") openSaveResponseDialog();
         }} />
       ) : null}
 
@@ -409,6 +508,15 @@ export function App() {
               await handleOpenProject(path, password);
             }
           }}
+        />
+      ) : null}
+
+      {saveResponseDialog ? (
+        <SaveResponseDialog
+          dialog={saveResponseDialog}
+          responseExists={handleSavedResponseExists}
+          onCancel={() => setSaveResponseDialog(null)}
+          onSubmit={handleSaveResponse}
         />
       ) : null}
     </main>
@@ -589,6 +697,7 @@ function ProjectExplorer(props: {
   onOpenRecent: (recent: RecentProject) => void;
   onOpenImport: () => void;
   onOpenSettings: () => void;
+  onOpenSavedResponse: (metadata: SavedResponseMetadata) => void;
 }) {
   return (
     <aside className="project-explorer" aria-label="Project explorer">
@@ -658,9 +767,15 @@ function ProjectExplorer(props: {
             <span>Vault (Encrypted)</span>
           </button>
         </TreeSection>
-        <TreeSection title="Saved Responses" count="3">
+        <TreeSection title="Saved Responses" count={String(props.project.savedResponses.length)}>
           {props.project.savedResponses.map((response) => (
-            <button type="button" className={response.status >= 400 ? "tree-item warning" : "tree-item"} key={response.id}>
+            <button
+              type="button"
+              className={response.status >= 400 ? "tree-item warning" : "tree-item"}
+              key={response.id}
+              onClick={() => props.onOpenSavedResponse(response)}
+              title={`${response.method} ${response.status} - ${response.filePath}`}
+            >
               <FileJson size={15} />
               <span>{response.fileName}</span>
             </button>
@@ -1160,6 +1275,8 @@ function BottomDock(props: {
   runnerResponse: ExecutedResponse | null;
   runnerEvents: RunnerConsoleEvent[];
   runnerError: string | null;
+  canSaveResponse: boolean;
+  onSaveResponse: () => void;
 }) {
   const [responseTab, setResponseTab] = useState<"Pretty" | "Raw" | "Headers" | "Error">("Pretty");
   const filteredEvents = props.consoleFilter === "Errors Only"
@@ -1191,7 +1308,7 @@ function BottomDock(props: {
               <span className={props.runnerResponse.ok ? "http-ok" : "http-error"}>{props.runnerResponse.status} {props.runnerResponse.statusText}</span>
               <span>{props.runnerResponse.durationMs} ms</span>
               <span>{props.runnerResponse.rawBody.length} B</span>
-              <button type="button">Save Response</button>
+              <button type="button" disabled={!props.canSaveResponse} onClick={props.onSaveResponse}>Save Response</button>
             </div>
             <div className="response-body">
               {responseTab === "Pretty" ? <pre>{responseText || "No response body."}</pre> : null}
@@ -1410,6 +1527,74 @@ function ProjectFileDialog({
           <div>
             <button type="submit" className="primary-command" disabled={submitting}>
               {submitting ? "Working..." : overwritePending ? "Overwrite Project" : dialog.mode === "save" ? "Save Project" : "Open Project"}
+            </button>
+            <button type="button" onClick={onCancel}>Cancel</button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+}
+
+function SaveResponseDialog({
+  dialog,
+  responseExists,
+  onCancel,
+  onSubmit
+}: {
+  dialog: { path: string; warning: string | null };
+  responseExists: (path: string) => Promise<boolean>;
+  onCancel: () => void;
+  onSubmit: (path: string, overwrite: boolean) => Promise<void>;
+}) {
+  const [path, setPath] = useState(dialog.path);
+  const [submitting, setSubmitting] = useState(false);
+  const [overwritePending, setOverwritePending] = useState(false);
+  const [fieldError, setFieldError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setOverwritePending(false);
+    setFieldError(null);
+  }, [path]);
+
+  async function handleSubmit() {
+    setFieldError(null);
+    try {
+      if (!overwritePending && await responseExists(path)) {
+        setOverwritePending(true);
+        return;
+      }
+      await onSubmit(path, overwritePending);
+    } catch (error) {
+      setFieldError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section className="project-file-dialog save-response-dialog" role="dialog" aria-modal="true" aria-label="Save Response">
+        <header>
+          <strong>Save Response</strong>
+          <button type="button" aria-label="Close response dialog" onClick={onCancel}><X size={17} /></button>
+        </header>
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            setSubmitting(true);
+            void handleSubmit().finally(() => setSubmitting(false));
+          }}
+        >
+          <label>
+            <span>Response file path</span>
+            <input value={path} onChange={(event) => setPath(event.target.value)} placeholder="/path/to/response.json" />
+          </label>
+          <p>Use `.json` for structured response artifacts or `.txt` for redacted raw response bodies. Project metadata keeps status, timing, and source service details.</p>
+          {dialog.warning ? <p className="response-warning">{dialog.warning}</p> : null}
+          {overwritePending ? <p className="overwrite-warning">A saved response already exists at this path. Confirm overwrite to continue.</p> : null}
+          {fieldError ? <p className="overwrite-warning">{fieldError}</p> : null}
+          <div>
+            <button type="submit" className="primary-command" disabled={submitting}>
+              {submitting ? "Working..." : overwritePending ? "Overwrite Response" : "Save Response"}
             </button>
             <button type="button" onClick={onCancel}>Cancel</button>
           </div>

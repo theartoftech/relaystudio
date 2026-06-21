@@ -1242,7 +1242,8 @@ kbd {
 }
 
 .command-palette,
-.save-prompt {
+.save-prompt,
+.project-file-dialog {
   width: min(640px, calc(100vw - 48px));
   background: var(--white);
   border: 1px solid var(--gray-300);
@@ -1359,6 +1360,11 @@ kbd {
 
 .project-file-dialog .overwrite-warning {
   color: var(--danger);
+  font-weight: 800;
+}
+
+.project-file-dialog .response-warning {
+  color: var(--warning);
   font-weight: 800;
 }
 

@@ -222,13 +222,18 @@ Implemented. See `sprint-5-implementation-status.md`.
 
 ## Sprint 6: Saved Responses
 
+### Status
+
+Implemented. See `sprint-6-implementation-status.md`.
+
 ### Goals
 
 - Persist response evidence for later review.
 
 ### Build Scope
 
-- Save response body as JSON file.
+- Save JSON responses as structured artifact files.
+- Save non-JSON responses as redacted raw body files.
 - Save response metadata in project.
 - Saved response browser.
 - Reload saved response into viewer.

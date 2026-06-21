@@ -279,6 +279,10 @@ Execute individual REST calls and display trustworthy diagnostics.
 
 ## Sprint 6: Saved Responses
 
+### Status
+
+Implemented. See `sprint-6-implementation-status.md`.
+
 ### Objective
 
 Persist response evidence for later inspection and review.
