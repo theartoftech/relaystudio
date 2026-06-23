@@ -10,7 +10,7 @@ The first implementation deliverable is a reviewable UX package. Product impleme
 
 - Local-first desktop app for macOS, Windows, and Linux.
 - No remote database and no hosted service dependency.
-- Visual target is **Concept 3: Developer IDE Console**: an IDE-style desktop API workbench with an activity bar, explorer, tabbed editor, inspector, response dock, and terminal-style console.
+- Visual target is **Concept 3: Developer IDE Console**, refined by Sprint 7A into an IDE-style desktop API workbench with a single project explorer, tabbed editor, optional contextual inspector, and tabbed bottom utility dock.
 - Enterprise workbench discipline applies: dense layouts, clear grouping, explicit empty states, and actionable validation.
 - Dallas Cowboys-inspired palette: navy, royal blue, silver, white, cool gray, with red reserved for errors.
 - Console-first execution transparency: every REST call and flow step must explain what happened.
@@ -250,6 +250,10 @@ Implemented. See `sprint-6-implementation-status.md`.
 
 ## Sprint 7: Visual Flow Builder
 
+### Status
+
+Implemented. See `sprint-7-implementation-status.md`.
+
 ### Goals
 
 - Model chained REST call workflows visually.
@@ -278,6 +282,35 @@ Implemented. See `sprint-6-implementation-status.md`.
 - Success path.
 - Failure path.
 - Console events grouped by flow and step.
+
+## Sprint 7A: UX Consolidation
+
+### Status
+
+Implemented. See `sprint-7a-implementation-status.md`.
+
+### Goals
+
+- Reduce workbench clutter while preserving desktop IDE capability.
+
+### Build Scope
+
+- Remove the permanent activity rail.
+- Make the project explorer the single primary navigation surface.
+- Replace the dense global top command bar with a compact contextual toolbar.
+- Collapse the inspector by default.
+- Merge response, console, and problems into one tabbed utility dock.
+- Add resizable workspace dividers for explorer, workbench, inspector, bottom dock, and flow details.
+- Fix controlled flow-node dragging so selected nodes remain attached to the pointer during drag.
+
+### Testing Scope
+
+- Shell anatomy tests for the simplified layout.
+- Inspector open and close behavior.
+- Pane resize behavior.
+- Flow-node drag behavior.
+- Command palette access for global commands.
+- Regression checks for request editing, flow editing, and saved response access.
 
 ## Sprint 8: Flow Variables And Mapping
 

@@ -1,20 +1,27 @@
 import {
+  Background,
+  Controls,
+  Handle,
+  MarkerType,
+  Position,
+  ReactFlow,
+  applyNodeChanges,
+  type Connection,
+  type Edge,
+  type Node,
+  type NodeChange,
+  type NodeProps
+} from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
+import {
   Archive,
-  Bell,
-  BookOpen,
   Box,
   Braces,
   CheckCircle2,
   ChevronDown,
-  Clock3,
-  Code2,
   Database,
-  Download,
   FileJson,
-  FilePlus2,
-  FileText,
   Folder,
-  FolderInput,
   FolderOpen,
   GitBranch,
   KeyRound,
@@ -24,15 +31,20 @@ import {
   Save,
   Search,
   Send,
-  Settings,
-  Shield,
   SlidersHorizontal,
-  Terminal,
+  Trash2,
   UserCircle,
   X,
   Zap
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import {
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+  useEffect,
+  useMemo,
+  useState
+} from "react";
 import {
   createEmptyProject,
   createSampleProject,
@@ -41,6 +53,7 @@ import {
   type HttpMethod,
   type KeyValueRow,
   type ProjectEnvironment,
+  type ProjectFlow,
   type ProjectService,
   type ProjectVariable,
   type RecentProject,
@@ -62,6 +75,14 @@ import {
   upsertRow,
   type RequestPreview
 } from "./services/serviceDesigner";
+import {
+  addFlowNode,
+  connectFlowNodes,
+  deleteFlowNode,
+  normalizeFlow,
+  reorderFlowNode,
+  runFlow
+} from "./services/flowBuilder";
 import { createSavedResponsePersistence, type SavedResponsePersistence } from "./services/savedResponsePersistence";
 import {
   artifactToExecutedResponse,
@@ -70,7 +91,6 @@ import {
 } from "./services/savedResponses";
 import { runServiceRequest, type ExecutableRequest, type ExecutedResponse, type RunnerConsoleEvent } from "./services/serviceRunner";
 
-type Area = "Projects" | "Services" | "Runner" | "Flows" | "Saved Responses" | "Settings";
 type TabKind = "welcome" | "request" | "flow" | "response" | "import" | "settings";
 
 interface WorkbenchTab {
@@ -80,15 +100,6 @@ interface WorkbenchTab {
   method?: "GET" | "POST" | "PUT" | "DELETE";
   dirty?: boolean;
 }
-
-const primaryAreas: Array<{ area: Area; icon: typeof FileText; label: string }> = [
-  { area: "Projects", icon: FolderOpen, label: "Projects" },
-  { area: "Services", icon: FileText, label: "Services" },
-  { area: "Runner", icon: Play, label: "Runner" },
-  { area: "Flows", icon: GitBranch, label: "Flows" },
-  { area: "Saved Responses", icon: Archive, label: "Saved Responses" },
-  { area: "Settings", icon: Settings, label: "Settings" }
-];
 
 const initialTabs: WorkbenchTab[] = [
   { id: "welcome", label: "Welcome", kind: "welcome" },
@@ -106,10 +117,23 @@ const commandItems = [
   "Save Project As",
   "Send Request",
   "Run Flow",
+  "New Flow",
   "Save Response",
   "Manage Environments",
   "Settings"
 ];
+
+interface LayoutSizes {
+  explorerWidth: number;
+  inspectorWidth: number;
+  bottomDockHeight: number;
+}
+
+const defaultLayoutSizes: LayoutSizes = {
+  explorerWidth: 318,
+  inspectorWidth: 306,
+  bottomDockHeight: 292
+};
 
 export function App() {
   const [project, setProject] = useState<RelayProject>(() => createSampleProject());
@@ -125,10 +149,12 @@ export function App() {
     title: string;
     path: string;
   }>(null);
-  const [activeArea, setActiveArea] = useState<Area>("Services");
   const [tabs, setTabs] = useState(initialTabs);
   const [activeTabId, setActiveTabId] = useState("create-order");
   const [activeServiceId, setActiveServiceId] = useState("create-order");
+  const [activeFlowId, setActiveFlowId] = useState("authenticated-read");
+  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [layoutSizes, setLayoutSizes] = useState(defaultLayoutSizes);
   const [environment, setEnvironment] = useState("QA Environment");
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [responseVisible, setResponseVisible] = useState(true);
@@ -152,6 +178,7 @@ export function App() {
     return project.environments.find((item) => item.name === environment) ?? project.environments[0];
   }, [environment, project.environments]);
   const activeService = project.services.find((service) => service.id === activeServiceId) ?? project.services[0];
+  const activeFlow = project.flows.find((flow) => flow.id === activeFlowId) ?? project.flows[0];
   const requestPreview = activeService && activeEnvironment ? buildRequestPreview(activeService, activeEnvironment) : null;
 
   useEffect(() => {
@@ -217,6 +244,13 @@ export function App() {
     return requestPreview?.url ?? "{{baseUrl}}/api/orders";
   }, [activeTab.kind, requestPreview?.url]);
   const requestUrl = editableRequestUrl ?? computedRequestUrl;
+  const workspaceStyle = {
+    "--explorer-width": `${layoutSizes.explorerWidth}px`,
+    "--inspector-width": `${layoutSizes.inspectorWidth}px`
+  } as CSSProperties;
+  const workbenchStyle = {
+    "--bottom-dock-height": `${layoutSizes.bottomDockHeight}px`
+  } as CSSProperties;
 
   useEffect(() => {
     setEditableRequestUrl(null);
@@ -240,7 +274,6 @@ export function App() {
 
   function handleSelectService(service: ProjectService) {
     setActiveServiceId(service.id);
-    setActiveArea("Services");
     setTabs((current) => (
       current.some((tab) => tab.id === service.id)
         ? current
@@ -249,11 +282,42 @@ export function App() {
     setActiveTabId(service.id);
   }
 
+  function handleSelectFlow(flow: ProjectFlow) {
+    setActiveFlowId(flow.id);
+    setTabs((current) => (
+      current.some((tab) => tab.id === flow.id)
+        ? current
+        : [...current, { id: flow.id, label: flow.name, kind: "flow" }]
+    ));
+    setActiveTabId(flow.id);
+  }
+
   function updateProjectServices(nextServices: ProjectService[], message = "Service definition updated.") {
     setProject((current) => touchProject({ ...current, services: nextServices }));
     setProjectDirty(true);
     setTabs((current) => current.map((tab) => (tab.id === activeTabId ? { ...tab, dirty: true } : tab)));
     setProjectMessage(message);
+    setProjectError(null);
+  }
+
+  function updateProjectFlows(nextFlows: ProjectFlow[], message = "Flow definition updated.") {
+    setProject((current) => touchProject({ ...current, flows: nextFlows }));
+    setProjectDirty(true);
+    setTabs((current) => current.map((tab) => (tab.id === activeTabId ? { ...tab, dirty: true } : tab)));
+    setProjectMessage(message);
+    setProjectError(null);
+  }
+
+  function updateFlow(flowId: string, updater: (flow: ProjectFlow) => ProjectFlow, message?: string) {
+    setProject((current) => touchProject({
+      ...current,
+      flows: current.flows.map((flow) => (
+        flow.id === flowId ? updater(normalizeFlow(flow)) : flow
+      ))
+    }));
+    setProjectDirty(true);
+    setTabs((current) => current.map((tab) => (tab.id === activeTabId ? { ...tab, dirty: true } : tab)));
+    setProjectMessage(message ?? "Flow definition updated.");
     setProjectError(null);
   }
 
@@ -318,7 +382,66 @@ export function App() {
     updateProjectServices(reorderService(project.services, activeService.id, direction), "Service order updated.");
   }
 
+  function handleAddFlowNode(flowId: string, serviceId: string) {
+    const service = project.services.find((item) => item.id === serviceId);
+    if (!service) return;
+    updateFlow(flowId, (flow) => addFlowNode(flow, service), "Flow step added.");
+  }
+
+  function handleDeleteFlowNode(flowId: string, nodeId: string) {
+    updateFlow(flowId, (flow) => deleteFlowNode(flow, nodeId), "Flow step deleted.");
+  }
+
+  function handleConnectFlowNodes(flowId: string, source: string, target: string, condition: "success" | "failure") {
+    updateFlow(flowId, (flow) => connectFlowNodes(flow, source, target, condition), `${condition === "success" ? "Success" : "Failure"} path added.`);
+  }
+
+  function handleReorderFlowNode(flowId: string, nodeId: string, direction: "left" | "right") {
+    updateFlow(flowId, (flow) => reorderFlowNode(flow, nodeId, direction), "Flow step order updated.");
+  }
+
+  function handleMoveFlowNode(flowId: string, nodeId: string, position: { x: number; y: number }) {
+    updateFlow(flowId, (flow) => ({
+      ...flow,
+      nodes: normalizeFlow(flow).nodes.map((node) => (
+        node.id === nodeId ? { ...node, position } : node
+      ))
+    }), "Flow layout updated.");
+  }
+
+  function handleCreateFlow() {
+    const flowNumber = project.flows.length + 1;
+    const nextFlow: ProjectFlow = {
+      id: `flow-${flowNumber}`,
+      name: `New Flow ${flowNumber}`,
+      steps: [],
+      nodes: [],
+      edges: []
+    };
+    updateProjectFlows([...project.flows, nextFlow], "New flow created.");
+    handleSelectFlow(nextFlow);
+  }
+
+  function handleDeleteFlow(flowId: string) {
+    const nextFlows = project.flows.filter((flow) => flow.id !== flowId);
+    updateProjectFlows(nextFlows, "Flow deleted.");
+    setTabs((current) => {
+      const nextTabs = current.filter((tab) => tab.id !== flowId);
+      if (activeTabId === flowId) {
+        setActiveTabId(nextFlows[0]?.id ?? activeService?.id ?? "welcome");
+      }
+      return nextTabs.length ? nextTabs : initialTabs.slice(0, 1);
+    });
+    if (activeFlowId === flowId) {
+      setActiveFlowId(nextFlows[0]?.id ?? "");
+    }
+  }
+
   async function handleSendRequest() {
+    if (activeTab.kind === "flow") {
+      await handleRunFlow();
+      return;
+    }
     if (!activeService || !activeEnvironment) return;
     let serviceForRun = activeService;
     let environmentForRun = activeEnvironment;
@@ -359,6 +482,23 @@ export function App() {
       setProjectError(result.error);
     }
 
+    setRunnerRunning(false);
+  }
+
+  async function handleRunFlow() {
+    if (!activeFlow || !activeEnvironment) return;
+    setRunnerRunning(true);
+    setRunnerError(null);
+    setResponseVisible(false);
+
+    const result = await runFlow(activeFlow, project.services, activeEnvironment);
+    updateProjectFlows(project.flows.map((flow) => (
+      flow.id === activeFlow.id ? result.flow : flow
+    )), result.issues.some((issue) => issue.severity === "error") ? "Flow blocked before execution." : "Flow run completed.");
+    setRunnerEvents(result.events);
+    setRunnerResponse(null);
+    setRunnerRequest(null);
+    setRunnerError(result.issues.length ? result.issues.map((issue) => issue.message).join(" ") : null);
     setRunnerRunning(false);
   }
 
@@ -428,7 +568,6 @@ export function App() {
         { sequence: 2, phase: "success", level: response.ok ? "success" : "error", message: `Saved response reopened with HTTP ${response.status}.` }
       ]);
       setResponseVisible(true);
-      setActiveArea("Saved Responses");
       setTabs((current) => (
         current.some((tab) => tab.id === metadata.id)
           ? current
@@ -445,22 +584,21 @@ export function App() {
   return (
     <main className="app-shell" aria-label="Relay Studio desktop shell">
       <TopCommandBar
+        activeTab={activeTab}
+        projectName={project.name}
         projectDirty={hasDirtyState}
         environment={environment}
         onEnvironmentChange={setEnvironment}
         onOpenCommandPalette={() => setCommandPaletteOpen(true)}
-        onOpenImport={() => openPlaceholderTab("import", "Import API Docs")}
-        onNewProject={handleNewProject}
-        onOpenProject={() => setProjectDialog({ mode: "open", title: "Open Project", path: projectPath })}
         onSave={() => setProjectDialog({ mode: "save", title: "Save Project", path: projectPath })}
         onSendRequest={handleSendRequest}
+        inspectorOpen={inspectorOpen}
+        onToggleInspector={() => setInspectorOpen((open) => !open)}
         runnerRunning={runnerRunning}
       />
 
-      <section className="workspace-grid">
-        <ActivityRail activeArea={activeArea} onAreaChange={setActiveArea} />
+      <section className={inspectorOpen ? "workspace-grid inspector-open" : "workspace-grid"} style={workspaceStyle}>
         <ProjectExplorer
-          activeArea={activeArea}
           groupedServices={groupedServices}
           project={project}
           projectDirty={hasDirtyState}
@@ -474,11 +612,23 @@ export function App() {
           onOpenImport={() => openPlaceholderTab("import", "Import API Docs")}
           activeServiceId={activeService?.id ?? ""}
           onSelectService={handleSelectService}
+          activeFlowId={activeFlow?.id ?? ""}
+          onSelectFlow={handleSelectFlow}
+          onCreateFlow={handleCreateFlow}
+          onDeleteFlow={handleDeleteFlow}
           onOpenSavedResponse={handleOpenSavedResponse}
         />
+        <ResizeHandle
+          ariaLabel="Resize explorer"
+          orientation="vertical"
+          onResize={(delta) => setLayoutSizes((current) => ({
+            ...current,
+            explorerWidth: clamp(current.explorerWidth + delta, 240, 520)
+          }))}
+        />
 
-        <section className="workbench" aria-label="Workbench">
-          <TabStrip tabs={tabs} activeTabId={activeTabId} onSelect={setActiveTabId} onClose={closeTab} />
+        <section className="workbench" aria-label="Workbench" style={workbenchStyle}>
+          <TabStrip tabs={tabs} activeTabId={activeTabId} onSelect={setActiveTabId} onClose={closeTab} onNewTab={handleCreateService} />
           <RequestComposer
             requestUrl={requestUrl}
             activeTab={activeTab}
@@ -489,6 +639,8 @@ export function App() {
           <RequestEditor
             activeTab={activeTab}
             activeService={activeService}
+            activeFlow={activeFlow}
+            services={project.services}
             activeEnvironment={activeEnvironment}
             requestPreview={requestPreview}
             onCreateService={handleCreateService}
@@ -496,6 +648,21 @@ export function App() {
             onDeleteService={handleDeleteService}
             onMoveService={handleMoveService}
             onUpdateService={updateActiveService}
+            onAddFlowNode={handleAddFlowNode}
+            onDeleteFlowNode={handleDeleteFlowNode}
+            onConnectFlowNodes={handleConnectFlowNodes}
+            onReorderFlowNode={handleReorderFlowNode}
+            onMoveFlowNode={handleMoveFlowNode}
+            onRunFlow={handleRunFlow}
+            runnerRunning={runnerRunning}
+          />
+          <ResizeHandle
+            ariaLabel="Resize utility dock"
+            orientation="horizontal"
+            onResize={(delta) => setLayoutSizes((current) => ({
+              ...current,
+              bottomDockHeight: clamp(current.bottomDockHeight - delta, 180, 520)
+            }))}
           />
           <BottomDock
             responseVisible={responseVisible}
@@ -510,7 +677,20 @@ export function App() {
           />
         </section>
 
-        <Inspector environment={environment} activeTab={activeTab} />
+        {inspectorOpen ? (
+          <>
+            <ResizeHandle
+              ariaLabel="Resize inspector"
+              className="inspector-resize-handle"
+              orientation="vertical"
+              onResize={(delta) => setLayoutSizes((current) => ({
+                ...current,
+                inspectorWidth: clamp(current.inspectorWidth - delta, 240, 460)
+              }))}
+            />
+            <Inspector environment={environment} activeTab={activeTab} onClose={() => setInspectorOpen(false)} />
+          </>
+        ) : null}
       </section>
 
       {commandPaletteOpen ? (
@@ -523,6 +703,8 @@ export function App() {
           if (label === "Save Project") setProjectDialog({ mode: "save", title: "Save Project", path: projectPath });
           if (label === "Save Project As") setProjectDialog({ mode: "save", title: "Save Project As", path: "" });
           if (label === "Send Request") void handleSendRequest();
+          if (label === "Run Flow") void handleRunFlow();
+          if (label === "New Flow") handleCreateFlow();
           if (label === "Save Response") openSaveResponseDialog();
         }} />
       ) : null}
@@ -546,6 +728,7 @@ export function App() {
         <ProjectFileDialog
           dialog={projectDialog}
           projectName={project.name}
+          recentProjects={recentProjects}
           projectExists={handleProjectExists}
           onCancel={() => setProjectDialog(null)}
           onSubmit={async ({ path, password }) => {
@@ -594,6 +777,7 @@ export function App() {
     setProjectPath("");
     setEnvironment(nextProject.environments[0]?.name ?? "QA Environment");
     setActiveServiceId(starterService.id);
+    setActiveFlowId(nextProject.flows[0]?.id ?? "");
     setProjectDirty(true);
     setTabs([
       { id: "welcome", label: "Welcome", kind: "welcome" },
@@ -637,6 +821,7 @@ export function App() {
       setProjectPath(path);
       setEnvironment(opened.environments[0]?.name ?? "QA Environment");
       setActiveServiceId(opened.services[0]?.id ?? "");
+      setActiveFlowId(opened.flows[0]?.id ?? "");
       setProjectDirty(false);
       setTabs(initialTabs.map((tab) => ({ ...tab, dirty: false })));
       setActiveTabId("welcome");
@@ -657,58 +842,43 @@ export function App() {
 }
 
 interface TopCommandBarProps {
+  activeTab: WorkbenchTab;
+  projectName: string;
   projectDirty: boolean;
   environment: string;
+  inspectorOpen: boolean;
   runnerRunning: boolean;
   onEnvironmentChange: (environment: string) => void;
   onOpenCommandPalette: () => void;
-  onOpenImport: () => void;
-  onNewProject: () => void;
-  onOpenProject: () => void;
   onSave: () => void;
   onSendRequest: () => void;
+  onToggleInspector: () => void;
 }
 
 function TopCommandBar(props: TopCommandBarProps) {
+  const actionLabel = props.activeTab.kind === "flow" ? "Run Flow" : "Send Request";
   return (
     <header className="top-command-bar">
-      <div className="window-controls" aria-hidden="true">
-        <span className="control close" />
-        <span className="control minimize" />
-        <span className="control zoom" />
-      </div>
       <div className="brand-lockup" aria-label="Relay Studio">
         <span className="brand-mark" aria-hidden="true"><Zap size={24} strokeWidth={2.4} /></span>
         <div>
           <strong>Relay Studio</strong>
-          <span>Sample API Regression</span>
+          <span>{props.projectName}</span>
         </div>
       </div>
       <button className="command-search" type="button" onClick={props.onOpenCommandPalette}>
         <Search size={17} />
-        <span>Search services, flows, variables...</span>
+        <span>Search commands</span>
         <kbd>Cmd K</kbd>
       </button>
       <div className="toolbar-actions" aria-label="Primary commands">
-        <button type="button" className="icon-command" onClick={props.onNewProject}>
-          <FilePlus2 size={18} />
-          <span>New</span>
-        </button>
-        <button type="button" className="icon-command" onClick={props.onOpenProject}>
-          <FolderInput size={18} />
-          <span>Open</span>
-        </button>
-        <button type="button" className="icon-command" onClick={props.onOpenImport}>
-          <Download size={18} />
-          <span>Import API Docs</span>
-        </button>
         <button type="button" className="icon-command" onClick={props.onSave}>
           <Save size={18} />
-          <span>{props.projectDirty ? "Save Project *" : "Save Project"}</span>
+          <span>{props.projectDirty ? "Save *" : "Save"}</span>
         </button>
         <button type="button" className="primary-command" onClick={props.onSendRequest} disabled={props.runnerRunning}>
-          <Send size={18} />
-          <span>{props.runnerRunning ? "Sending..." : "Send Request"}</span>
+          {props.activeTab.kind === "flow" ? <Play size={18} /> : <Send size={18} />}
+          <span>{props.runnerRunning ? "Running..." : actionLabel}</span>
         </button>
         <label className="environment-select">
           <span className="status-dot" />
@@ -718,36 +888,74 @@ function TopCommandBar(props: TopCommandBarProps) {
             <option>Production Environment</option>
           </select>
         </label>
-        <button type="button" className="chrome-icon" aria-label="History"><Clock3 size={19} /></button>
-        <button type="button" className="chrome-icon" aria-label="Notifications"><Bell size={19} /></button>
-        <button type="button" className="chrome-icon" aria-label="Settings"><Settings size={19} /></button>
+        <button
+          type="button"
+          className={props.inspectorOpen ? "chrome-icon active" : "chrome-icon"}
+          aria-label={props.inspectorOpen ? "Hide inspector" : "Show inspector"}
+          aria-pressed={props.inspectorOpen}
+          onClick={props.onToggleInspector}
+        >
+          <SlidersHorizontal size={19} />
+        </button>
         <button type="button" className="chrome-icon" aria-label="User"><UserCircle size={21} /></button>
       </div>
     </header>
   );
 }
 
-function ActivityRail({ activeArea, onAreaChange }: { activeArea: Area; onAreaChange: (area: Area) => void }) {
+function ResizeHandle({
+  ariaLabel,
+  className = "",
+  orientation,
+  onResize
+}: {
+  ariaLabel: string;
+  className?: string;
+  orientation: "vertical" | "horizontal";
+  onResize: (delta: number) => void;
+}) {
+  function startResize(event: ReactPointerEvent<HTMLDivElement>) {
+    event.preventDefault();
+    const start = orientation === "vertical" ? event.clientX : event.clientY;
+    let last = start;
+
+    function handleMove(moveEvent: PointerEvent) {
+      const current = orientation === "vertical" ? moveEvent.clientX : moveEvent.clientY;
+      onResize(current - last);
+      last = current;
+    }
+
+    function stopResize() {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", stopResize);
+    }
+
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", stopResize);
+  }
+
+  function nudge(event: ReactKeyboardEvent<HTMLDivElement>) {
+    const keys = orientation === "vertical" ? ["ArrowLeft", "ArrowRight"] : ["ArrowUp", "ArrowDown"];
+    if (!keys.includes(event.key)) return;
+    event.preventDefault();
+    const direction = event.key === "ArrowRight" || event.key === "ArrowDown" ? 1 : -1;
+    onResize(direction * 16);
+  }
+
   return (
-    <nav className="activity-rail" aria-label="Primary navigation">
-      {primaryAreas.map(({ area, icon: Icon, label }) => (
-        <button
-          key={area}
-          type="button"
-          className={area === activeArea ? "active" : ""}
-          aria-current={area === activeArea ? "page" : undefined}
-          onClick={() => onAreaChange(area)}
-        >
-          <Icon size={21} />
-          <span>{label}</span>
-        </button>
-      ))}
-    </nav>
+    <div
+      aria-label={ariaLabel}
+      aria-orientation={orientation}
+      className={`resize-handle ${orientation} ${className}`.trim()}
+      role="separator"
+      tabIndex={0}
+      onKeyDown={nudge}
+      onPointerDown={startResize}
+    />
   );
 }
 
 function ProjectExplorer(props: {
-  activeArea: Area;
   groupedServices: Array<{ folder: string; items: ProjectService[] }>;
   project: RelayProject;
   projectDirty: boolean;
@@ -756,6 +964,10 @@ function ProjectExplorer(props: {
   projectError: string | null;
   activeServiceId: string;
   onSelectService: (service: ProjectService) => void;
+  activeFlowId: string;
+  onSelectFlow: (flow: ProjectFlow) => void;
+  onCreateFlow: () => void;
+  onDeleteFlow: (flowId: string) => void;
   onMarkDirty: () => void;
   onOpenRecent: (recent: RecentProject) => void;
   onOpenImport: () => void;
@@ -763,6 +975,26 @@ function ProjectExplorer(props: {
   onCreateService: () => void;
   onOpenSavedResponse: (metadata: SavedResponseMetadata) => void;
 }) {
+  const [contextMenu, setContextMenu] = useState<null | {
+    x: number;
+    y: number;
+    target: "flows" | "flow";
+    flowId?: string;
+  }>(null);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    function closeContextMenu() {
+      setContextMenu(null);
+    }
+    window.addEventListener("click", closeContextMenu);
+    window.addEventListener("keydown", closeContextMenu);
+    return () => {
+      window.removeEventListener("click", closeContextMenu);
+      window.removeEventListener("keydown", closeContextMenu);
+    };
+  }, [contextMenu]);
+
   return (
     <aside className="project-explorer" aria-label="Project explorer">
       <div className="pane-title">
@@ -805,14 +1037,64 @@ function ProjectExplorer(props: {
             </div>
           ))}
         </TreeSection>
-        <TreeSection title="Flows" count="3">
+        <TreeSection
+          title="Flows"
+          count={String(props.project.flows.length)}
+          actionLabel="New flow"
+          onAction={props.onCreateFlow}
+          onContextMenu={(position) => setContextMenu({ ...position, target: "flows" })}
+        >
           {props.project.flows.map((flow) => (
-            <button type="button" className="tree-item" key={flow.id}>
+            <button
+              type="button"
+              className={flow.id === props.activeFlowId ? "tree-item selected" : "tree-item"}
+              key={flow.id}
+              onClick={() => props.onSelectFlow(flow)}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                setContextMenu({
+                  x: event.clientX,
+                  y: event.clientY,
+                  target: "flow",
+                  flowId: flow.id
+                });
+              }}
+            >
               <GitBranch size={15} />
               <span>{flow.name}</span>
             </button>
           ))}
         </TreeSection>
+        {contextMenu ? (
+          <div
+            className="tree-context-menu"
+            role="menu"
+            aria-label={contextMenu.target === "flow" ? "Flow context menu" : "Flows context menu"}
+            style={{ left: contextMenu.x, top: contextMenu.y }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            {contextMenu.target === "flows" ? (
+              <button type="button" role="menuitem" onClick={() => {
+                setContextMenu(null);
+                props.onCreateFlow();
+              }}>
+                <Plus size={14} />
+                <span>Add Flow</span>
+              </button>
+            ) : null}
+            {contextMenu.target === "flow" && contextMenu.flowId ? (
+              <button type="button" role="menuitem" className="danger" onClick={() => {
+                const flowId = contextMenu.flowId as string;
+                setContextMenu(null);
+                props.onDeleteFlow(flowId);
+              }}>
+                <Trash2 size={14} />
+                <span>Delete Flow</span>
+              </button>
+            ) : null}
+          </div>
+        ) : null}
         <TreeSection title="Environments" count="3">
           {["QA Environment", "Staging Environment", "Production Environment"].map((environment) => (
             <button type="button" className="tree-item" key={environment}>
@@ -860,7 +1142,7 @@ function ProjectExplorer(props: {
         {props.projectError ?? props.projectMessage}
       </div>
       <div className="explorer-footer">
-        <span>{props.activeArea}</span>
+        <span>Project</span>
         <button type="button" onClick={props.onMarkDirty}>Mark Dirty</button>
         <button type="button" onClick={props.onOpenSettings}>Settings</button>
       </div>
@@ -868,14 +1150,40 @@ function ProjectExplorer(props: {
   );
 }
 
-function TreeSection({ title, count, children }: { title: string; count: string; children: React.ReactNode }) {
+function TreeSection({
+  title,
+  count,
+  actionLabel,
+  onAction,
+  onContextMenu,
+  children
+}: {
+  title: string;
+  count: string;
+  actionLabel?: string;
+  onAction?: () => void;
+  onContextMenu?: (position: { x: number; y: number }) => void;
+  children: React.ReactNode;
+}) {
   return (
     <section className="tree-section">
-      <button type="button" className="tree-section-heading">
+      <button
+        type="button"
+        className="tree-section-heading"
+        onContextMenu={onContextMenu ? (event) => {
+          event.preventDefault();
+          onContextMenu({ x: event.clientX, y: event.clientY });
+        } : undefined}
+      >
         <ChevronDown size={15} />
         <span>{title}</span>
         <em>{count}</em>
       </button>
+      {onAction && actionLabel ? (
+        <button type="button" className="tree-section-action" aria-label={actionLabel} onClick={onAction}>
+          <Plus size={14} />
+        </button>
+      ) : null}
       {children}
     </section>
   );
@@ -886,6 +1194,7 @@ function TabStrip(props: {
   activeTabId: string;
   onSelect: (id: string) => void;
   onClose: (id: string) => void;
+  onNewTab: () => void;
 }) {
   return (
     <div className="tab-strip" role="tablist" aria-label="Open editors">
@@ -909,7 +1218,7 @@ function TabStrip(props: {
           }} />
         </button>
       ))}
-      <button type="button" className="new-tab" aria-label="Open new tab">
+      <button type="button" className="new-tab" aria-label="New request" onClick={props.onNewTab}>
         <Plus size={17} />
       </button>
     </div>
@@ -955,7 +1264,7 @@ function RequestComposer({
         </select>
         <button type="button" className="primary-command send-button" onClick={onSendRequest} disabled={runnerRunning}>
           <Send size={18} />
-          <span>{runnerRunning ? "Sending..." : "Send Request"}</span>
+          <span>{runnerRunning ? "Running..." : activeTab.kind === "flow" ? "Run Flow" : "Send Request"}</span>
         </button>
         <button type="button" className="split-action" aria-label="Request actions">
           <ChevronDown size={17} />
@@ -968,16 +1277,27 @@ function RequestComposer({
 function RequestEditor({
   activeTab,
   activeService,
+  activeFlow,
+  services,
   activeEnvironment,
   requestPreview,
   onCreateService,
   onDuplicateService,
   onDeleteService,
   onMoveService,
-  onUpdateService
+  onUpdateService,
+  onAddFlowNode,
+  onDeleteFlowNode,
+  onConnectFlowNodes,
+  onReorderFlowNode,
+  onMoveFlowNode,
+  onRunFlow,
+  runnerRunning
 }: {
   activeTab: WorkbenchTab;
   activeService: ProjectService | undefined;
+  activeFlow: ProjectFlow | undefined;
+  services: ProjectService[];
   activeEnvironment: ProjectEnvironment | undefined;
   requestPreview: RequestPreview | null;
   onCreateService: () => void;
@@ -985,6 +1305,13 @@ function RequestEditor({
   onDeleteService: () => void;
   onMoveService: (direction: "up" | "down") => void;
   onUpdateService: (updater: (service: ProjectService) => ProjectService, message?: string) => void;
+  onAddFlowNode: (flowId: string, serviceId: string) => void;
+  onDeleteFlowNode: (flowId: string, nodeId: string) => void;
+  onConnectFlowNodes: (flowId: string, source: string, target: string, condition: "success" | "failure") => void;
+  onReorderFlowNode: (flowId: string, nodeId: string, direction: "left" | "right") => void;
+  onMoveFlowNode: (flowId: string, nodeId: string, position: { x: number; y: number }) => void;
+  onRunFlow: () => void;
+  runnerRunning: boolean;
 }) {
   if (activeTab.kind === "welcome") {
     return <PlaceholderView title="Welcome" description="Open a service, import API docs, or run a flow." />;
@@ -995,7 +1322,22 @@ function RequestEditor({
   }
 
   if (activeTab.kind === "flow") {
-    return <FlowPlaceholder />;
+    if (!activeFlow) {
+      return <PlaceholderView title="No Flow Selected" description="Select a flow from the explorer to model chained REST calls." />;
+    }
+    return (
+      <FlowBuilderEditor
+        flow={activeFlow}
+        services={services}
+        onAddFlowNode={onAddFlowNode}
+        onDeleteFlowNode={onDeleteFlowNode}
+        onConnectFlowNodes={onConnectFlowNodes}
+        onReorderFlowNode={onReorderFlowNode}
+        onMoveFlowNode={onMoveFlowNode}
+        onRunFlow={onRunFlow}
+        runnerRunning={runnerRunning}
+      />
+    );
   }
 
   if (activeTab.kind === "settings") {
@@ -1314,17 +1656,199 @@ function authLabel(mode: AuthMode): string {
   }[mode];
 }
 
-function FlowPlaceholder() {
+interface FlowCanvasNodeData extends Record<string, unknown> {
+  label: string;
+  method: string;
+  serviceName: string;
+  status: string;
+}
+
+type FlowCanvasNode = Node<FlowCanvasNodeData, "flowStep">;
+
+const flowNodeTypes = {
+  flowStep: FlowStepNode
+};
+
+function FlowBuilderEditor(props: {
+  flow: ProjectFlow;
+  services: ProjectService[];
+  onAddFlowNode: (flowId: string, serviceId: string) => void;
+  onDeleteFlowNode: (flowId: string, nodeId: string) => void;
+  onConnectFlowNodes: (flowId: string, source: string, target: string, condition: "success" | "failure") => void;
+  onReorderFlowNode: (flowId: string, nodeId: string, direction: "left" | "right") => void;
+  onMoveFlowNode: (flowId: string, nodeId: string, position: { x: number; y: number }) => void;
+  onRunFlow: () => void;
+  runnerRunning: boolean;
+}) {
+  const flow = normalizeFlow(props.flow);
+  const [selectedNodeId, setSelectedNodeId] = useState(flow.nodes[0]?.id ?? "");
+  const [serviceId, setServiceId] = useState(props.services[0]?.id ?? "");
+  const [branchTargetId, setBranchTargetId] = useState(flow.nodes[1]?.id ?? "");
+  const [flowDetailsWidth, setFlowDetailsWidth] = useState(260);
+  const [dragPositions, setDragPositions] = useState<Record<string, { x: number; y: number }>>({});
+  const selectedNode = flow.nodes.find((node) => node.id === selectedNodeId) ?? flow.nodes[0];
+  const branchTargets = selectedNode ? flow.nodes.filter((node) => node.id !== selectedNode.id) : [];
+  const branchTarget = branchTargets.find((node) => node.id === branchTargetId) ?? branchTargets[0];
+  const selectedIndex = selectedNode ? flow.nodes.findIndex((node) => node.id === selectedNode.id) : -1;
+  const successPathExists = Boolean(selectedNode && branchTarget && flow.edges.some((edge) => (
+    edge.source === selectedNode.id && edge.target === branchTarget.id && edge.condition === "success"
+  )));
+  const failurePathExists = Boolean(selectedNode && branchTarget && flow.edges.some((edge) => (
+    edge.source === selectedNode.id && edge.target === branchTarget.id && edge.condition === "failure"
+  )));
+  const nodes: FlowCanvasNode[] = flow.nodes.map((node) => {
+    const service = props.services.find((item) => item.id === node.serviceId);
+    return {
+      id: node.id,
+      type: "flowStep",
+      position: dragPositions[node.id] ?? node.position,
+      data: {
+        label: node.label,
+        method: service?.method ?? "GET",
+        serviceName: service?.name ?? "Missing Service",
+        status: node.status
+      }
+    };
+  });
+  const edges: Edge[] = flow.edges.map((edge) => ({
+    id: edge.id,
+    source: edge.source,
+    target: edge.target,
+    label: edge.condition === "success" ? "Success" : "Failure",
+    animated: edge.condition === "success",
+    markerEnd: { type: MarkerType.ArrowClosed },
+    style: {
+      stroke: edge.condition === "success" ? "#1f9d55" : "#cf2e2e",
+      strokeWidth: 2
+    },
+    labelStyle: {
+      fill: edge.condition === "success" ? "#1f9d55" : "#cf2e2e",
+      fontWeight: 800
+    }
+  }));
+
+  function connect(connection: Connection) {
+    if (!connection.source || !connection.target) return;
+    props.onConnectFlowNodes(flow.id, connection.source, connection.target, "success");
+  }
+
+  function handleNodeChanges(changes: NodeChange<FlowCanvasNode>[]) {
+    const changedNodes = applyNodeChanges(changes, nodes);
+    setDragPositions(Object.fromEntries(changedNodes.map((node) => [node.id, node.position])));
+  }
+
+  useEffect(() => {
+    if (!flow.nodes.some((node) => node.id === selectedNodeId)) {
+      setSelectedNodeId(flow.nodes[0]?.id ?? "");
+    }
+  }, [flow.nodes, selectedNodeId]);
+
+  useEffect(() => {
+    if (!selectedNode) return;
+    const nextTarget = flow.nodes.find((node) => node.id !== selectedNode.id && node.id === branchTargetId)
+      ?? flow.nodes[selectedIndex + 1]
+      ?? flow.nodes.find((node) => node.id !== selectedNode.id);
+    setBranchTargetId(nextTarget?.id ?? "");
+  }, [branchTargetId, flow.nodes, selectedIndex, selectedNode]);
+
   return (
-    <section className="flow-placeholder" aria-label="Flow editor placeholder">
-      {["Login", "Current User", "List Products", "Get Product", "Save Response"].map((step, index) => (
-        <div className="flow-node" key={step}>
-          <span>{index + 1}</span>
-          <strong>{step}</strong>
-          <em>{index < 2 ? "POST" : "GET"}</em>
+    <section className="editor-surface flow-builder" aria-label="Flow builder">
+      <div className="flow-toolbar">
+        <div>
+          <strong>{flow.name}</strong>
+          <span>{flow.nodes.length} steps - {flow.edges.length} links</span>
         </div>
-      ))}
+        <label>
+          <span>Add request step</span>
+          <select value={serviceId} onChange={(event) => setServiceId(event.target.value)}>
+            {props.services.map((service) => <option value={service.id} key={service.id}>{service.name}</option>)}
+          </select>
+        </label>
+        <button type="button" className="flow-action-button" onClick={() => props.onAddFlowNode(flow.id, serviceId)}>Add Step</button>
+        <button type="button" className="flow-action-button" disabled={!selectedNode || selectedIndex <= 0} onClick={() => selectedNode && props.onReorderFlowNode(flow.id, selectedNode.id, "left")}>Move Left</button>
+        <button type="button" className="flow-action-button" disabled={!selectedNode || selectedIndex >= flow.nodes.length - 1} onClick={() => selectedNode && props.onReorderFlowNode(flow.id, selectedNode.id, "right")}>Move Right</button>
+        <button type="button" className="flow-action-button danger" disabled={!selectedNode} onClick={() => selectedNode && props.onDeleteFlowNode(flow.id, selectedNode.id)}>Delete Step</button>
+        <button type="button" className="primary-command" onClick={props.onRunFlow} disabled={props.runnerRunning}>
+          <Play size={17} />
+          <span>{props.runnerRunning ? "Running..." : "Run Flow"}</span>
+        </button>
+      </div>
+      <div className="flow-main" style={{ "--flow-details-width": `${flowDetailsWidth}px` } as CSSProperties}>
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={flowNodeTypes}
+          fitView
+          onConnect={connect}
+          onNodesChange={handleNodeChanges}
+          onNodeClick={(_event, node) => setSelectedNodeId(node.id)}
+          onNodeDragStop={(_event, node) => {
+            setDragPositions({});
+            props.onMoveFlowNode(flow.id, node.id, node.position);
+          }}
+        >
+          <Background />
+          <Controls />
+        </ReactFlow>
+        <ResizeHandle
+          ariaLabel="Resize flow details"
+          orientation="vertical"
+          onResize={(delta) => setFlowDetailsWidth((current) => clamp(current - delta, 220, 420))}
+        />
+        <aside className="flow-side-panel" aria-label="Flow step details">
+          <h2>Step Details</h2>
+          {selectedNode ? (
+            <>
+              <dl>
+                <dt>Step</dt><dd>{selectedNode.label}</dd>
+                <dt>Service</dt><dd>{props.services.find((service) => service.id === selectedNode.serviceId)?.name ?? "Missing Service"}</dd>
+                <dt>Status</dt><dd className={`flow-status-text ${selectedNode.status}`}>{selectedNode.status}</dd>
+                <dt>Order</dt><dd aria-label="Step order">{flow.nodes.findIndex((node) => node.id === selectedNode.id) + 1}</dd>
+              </dl>
+              <label className="flow-branch-target">
+                <span>Path target</span>
+                <select value={branchTarget?.id ?? ""} onChange={(event) => setBranchTargetId(event.target.value)} disabled={!branchTargets.length}>
+                  {branchTargets.map((node) => (
+                    <option value={node.id} key={node.id}>{node.label}</option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                className="flow-path-button success"
+                disabled={!branchTarget || successPathExists}
+                onClick={() => branchTarget && props.onConnectFlowNodes(flow.id, selectedNode.id, branchTarget.id, "success")}
+              >
+                {successPathExists ? "Success Path Exists" : "Add Success Path"}
+              </button>
+              <button
+                type="button"
+                className="flow-path-button failure"
+                disabled={!branchTarget || failurePathExists}
+                onClick={() => branchTarget && props.onConnectFlowNodes(flow.id, selectedNode.id, branchTarget.id, "failure")}
+              >
+                {failurePathExists ? "Failure Path Exists" : "Add Failure Path"}
+              </button>
+            </>
+          ) : (
+            <p>No step selected.</p>
+          )}
+        </aside>
+      </div>
     </section>
+  );
+}
+
+function FlowStepNode({ data }: NodeProps<FlowCanvasNode>) {
+  return (
+    <div className={`flow-node-card ${data.status}`}>
+      <Handle type="target" position={Position.Left} />
+      <span className={`method method-${data.method.toLowerCase()}`}>{data.method}</span>
+      <strong>{data.label}</strong>
+      <em>{data.serviceName}</em>
+      <small>{data.status}</small>
+      <Handle type="source" position={Position.Right} />
+    </div>
   );
 }
 
@@ -1338,6 +1862,8 @@ function PlaceholderView({ title, description }: { title: string; description: s
   );
 }
 
+type UtilityDockTab = "Response" | "Console" | "Problems";
+
 function BottomDock(props: {
   responseVisible: boolean;
   onToggleResponse: () => void;
@@ -1350,6 +1876,7 @@ function BottomDock(props: {
   onSaveResponse: () => void;
 }) {
   const [responseTab, setResponseTab] = useState<"Pretty" | "Raw" | "Headers" | "Error">("Pretty");
+  const [utilityTab, setUtilityTab] = useState<UtilityDockTab>("Response");
   const filteredEvents = props.consoleFilter === "Errors Only"
     ? props.runnerEvents.filter((event) => event.level === "error")
     : props.runnerEvents;
@@ -1357,84 +1884,115 @@ function BottomDock(props: {
 
   return (
     <section className="bottom-dock" aria-label="Response and console dock">
-      <div className="response-dock">
-        <header>
-          <nav aria-label="Response tabs">
-            {(["Pretty", "Raw", "Headers", "Error"] as const).map((tab) => (
-              <button type="button" className={responseTab === tab ? "active" : ""} onClick={() => setResponseTab(tab)} key={tab}>{tab}</button>
-            ))}
-          </nav>
-          <button
-            type="button"
-            className="response-toggle"
-            aria-label={props.responseVisible ? "Show empty response state" : "Show sample response"}
-            onClick={props.onToggleResponse}
-          >
-            {props.responseVisible ? "Empty" : "Body"}
-          </button>
-        </header>
-        {props.responseVisible && props.runnerResponse ? (
-          <div className="response-content">
-            <div className="response-meta">
-              <span className={props.runnerResponse.ok ? "http-ok" : "http-error"}>{props.runnerResponse.status} {props.runnerResponse.statusText}</span>
-              <span>{props.runnerResponse.durationMs} ms</span>
-              <span>{props.runnerResponse.rawBody.length} B</span>
-              <button type="button" disabled={!props.canSaveResponse} onClick={props.onSaveResponse}>Save Response</button>
+      <header className="utility-header">
+        <nav aria-label="Utility dock tabs">
+          {(["Response", "Console", "Problems"] as const).map((tab) => (
+            <button type="button" className={utilityTab === tab ? "active" : ""} onClick={() => setUtilityTab(tab)} key={tab}>
+              {tab}
+            </button>
+          ))}
+        </nav>
+        {utilityTab === "Response" ? (
+          <>
+            <nav aria-label="Response tabs">
+              {(["Pretty", "Raw", "Headers", "Error"] as const).map((tab) => (
+                <button type="button" className={responseTab === tab ? "active" : ""} onClick={() => setResponseTab(tab)} key={tab}>{tab}</button>
+              ))}
+            </nav>
+            <button
+              type="button"
+              className="response-toggle"
+              aria-label={props.responseVisible ? "Show empty response state" : "Show sample response"}
+              onClick={props.onToggleResponse}
+            >
+              {props.responseVisible ? "Empty" : "Body"}
+            </button>
+          </>
+        ) : null}
+        {utilityTab === "Console" ? (
+          <>
+            <select value={props.consoleFilter} onChange={(event) => props.onConsoleFilterChange(event.target.value)}>
+              <option>All Events</option>
+              <option>Errors Only</option>
+              <option>Current Request</option>
+            </select>
+            <label><input type="checkbox" defaultChecked /> Timestamps</label>
+            <button type="button">Clear</button>
+          </>
+        ) : null}
+      </header>
+      {utilityTab === "Response" ? (
+        <div className="utility-panel response-dock">
+          {props.responseVisible && props.runnerResponse ? (
+            <div className="response-content">
+              <div className="response-meta">
+                <span className={props.runnerResponse.ok ? "http-ok" : "http-error"}>{props.runnerResponse.status} {props.runnerResponse.statusText}</span>
+                <span>{props.runnerResponse.durationMs} ms</span>
+                <span>{props.runnerResponse.rawBody.length} B</span>
+                <button type="button" disabled={!props.canSaveResponse} onClick={props.onSaveResponse}>Save Response</button>
+              </div>
+              <div className="response-body">
+                {responseTab === "Pretty" ? <pre>{responseText || "No response body."}</pre> : null}
+                {responseTab === "Raw" ? <pre>{props.runnerResponse.rawBody || "No response body."}</pre> : null}
+                {responseTab === "Headers" ? <pre>{JSON.stringify(props.runnerResponse.headers, null, 2)}</pre> : null}
+                {responseTab === "Error" ? <pre>{props.runnerError ?? props.runnerResponse.parseError ?? (props.runnerResponse.ok ? "No errors." : `HTTP ${props.runnerResponse.status} ${props.runnerResponse.statusText}`)}</pre> : null}
+              </div>
             </div>
-            <div className="response-body">
-              {responseTab === "Pretty" ? <pre>{responseText || "No response body."}</pre> : null}
-              {responseTab === "Raw" ? <pre>{props.runnerResponse.rawBody || "No response body."}</pre> : null}
-              {responseTab === "Headers" ? <pre>{JSON.stringify(props.runnerResponse.headers, null, 2)}</pre> : null}
-              {responseTab === "Error" ? <pre>{props.runnerError ?? props.runnerResponse.parseError ?? (props.runnerResponse.ok ? "No errors." : `HTTP ${props.runnerResponse.status} ${props.runnerResponse.statusText}`)}</pre> : null}
+          ) : props.responseVisible && props.runnerError ? (
+            <div className="empty-response error">
+              <Archive size={34} />
+              <strong>Request failed.</strong>
+              <span>{props.runnerError}</span>
             </div>
-          </div>
-        ) : props.responseVisible && props.runnerError ? (
-          <div className="empty-response error">
-            <Archive size={34} />
-            <strong>Request failed.</strong>
-            <span>{props.runnerError}</span>
-          </div>
-        ) : (
-          <div className="empty-response">
-            <Archive size={34} />
-            <strong>No response yet.</strong>
-            <span>Send the request to inspect status, headers, timing, and body.</span>
-          </div>
-        )}
-      </div>
-      <div className="console-dock">
-        <header>
-          <strong><Terminal size={17} /> Console</strong>
-          <select value={props.consoleFilter} onChange={(event) => props.onConsoleFilterChange(event.target.value)}>
-            <option>All Events</option>
-            <option>Errors Only</option>
-            <option>Current Request</option>
-          </select>
-          <label><input type="checkbox" defaultChecked /> Show Timestamps</label>
-          <button type="button">Clear</button>
-          <button type="button">Export Log</button>
-        </header>
-        <ol>
-          {filteredEvents.length ? filteredEvents.map((event) => (
-            <li className={event.level} key={event.sequence}>
-              <span>{String(event.sequence).padStart(2, "0")}</span>
-              <em>{event.message}</em>
-            </li>
-          )) : (
-            <li><span>--</span><em>Send a request to see execution events.</em></li>
+          ) : (
+            <div className="empty-response">
+              <Archive size={34} />
+              <strong>No response yet.</strong>
+              <span>Send the request to inspect status, headers, timing, and body.</span>
+            </div>
           )}
-        </ol>
-      </div>
+        </div>
+      ) : null}
+      {utilityTab === "Console" ? (
+        <div className="utility-panel console-dock">
+          <ol>
+            {filteredEvents.length ? filteredEvents.map((event) => (
+              <li className={event.level} key={event.sequence}>
+                <span>{String(event.sequence).padStart(2, "0")}</span>
+                <em>{event.message}</em>
+              </li>
+            )) : (
+              <li><span>--</span><em>Send a request to see execution events.</em></li>
+            )}
+          </ol>
+        </div>
+      ) : null}
+      {utilityTab === "Problems" ? (
+        <div className={props.runnerError ? "utility-panel problems-dock error" : "utility-panel problems-dock"}>
+          {props.runnerError ? (
+            <>
+              <strong>1 problem</strong>
+              <p>{props.runnerError}</p>
+            </>
+          ) : (
+            <>
+              <strong>No problems</strong>
+              <p>Validation and runtime errors will appear here.</p>
+            </>
+          )}
+        </div>
+      ) : null}
     </section>
   );
 }
 
-function Inspector({ environment, activeTab }: { environment: string; activeTab: WorkbenchTab }) {
+function Inspector({ environment, activeTab, onClose }: { environment: string; activeTab: WorkbenchTab; onClose: () => void }) {
   return (
     <aside className="inspector" aria-label="Inspector">
       <div className="inspector-tabs">
         <button type="button" className="active">Inspector</button>
         <button type="button">Variables</button>
+        <button type="button" aria-label="Hide inspector" onClick={onClose}><X size={16} /></button>
       </div>
       <section>
         <h2>Environment</h2>
@@ -1474,13 +2032,6 @@ function Inspector({ environment, activeTab }: { environment: string; activeTab:
           <span>Body</span><strong>application/json</strong>
         </div>
       </section>
-      <div className="inspector-rail" aria-label="Inspector modes">
-        <button type="button" className="active" aria-label="Authorization"><Shield size={18} /></button>
-        <button type="button" aria-label="Variables"><Braces size={18} /></button>
-        <button type="button" aria-label="Scripts"><Code2 size={18} /></button>
-        <button type="button" aria-label="Docs"><BookOpen size={18} /></button>
-        <button type="button" aria-label="Settings"><SlidersHorizontal size={18} /></button>
-      </div>
     </aside>
   );
 }
@@ -1526,6 +2077,10 @@ function groupServices(project: RelayProject): Array<{ folder: string; items: Pr
   }
 
   return Array.from(grouped.entries()).map(([folder, items]) => ({ folder, items }));
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
 }
 
 function mergeCapturedVariables(current: ProjectVariable[], captured: ProjectVariable[]): ProjectVariable[] {
@@ -1606,12 +2161,14 @@ function slugForId(value: string): string {
 function ProjectFileDialog({
   dialog,
   projectName,
+  recentProjects,
   projectExists,
   onCancel,
   onSubmit
 }: {
   dialog: { mode: "open" | "save"; title: string; path: string };
   projectName: string;
+  recentProjects: RecentProject[];
   projectExists: (path: string) => Promise<boolean>;
   onCancel: () => void;
   onSubmit: (input: { path: string; password: string }) => Promise<void>;
@@ -1631,6 +2188,16 @@ function ProjectFileDialog({
       return;
     }
     await onSubmit({ path, password });
+  }
+
+  async function openRecent(pathToOpen: string) {
+    setPath(pathToOpen);
+    setSubmitting(true);
+    try {
+      await onSubmit({ path: pathToOpen, password });
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -1655,6 +2222,18 @@ function ProjectFileDialog({
             <span>Project password</span>
             <input value={password} onChange={(event) => setPassword(event.target.value)} type="password" />
           </label>
+          {dialog.mode === "open" && recentProjects.length ? (
+            <section className="recent-project-picker" aria-label="Recent projects">
+              <strong>Recent Projects</strong>
+              {recentProjects.map((recent) => (
+                <button type="button" key={recent.path} onClick={() => void openRecent(recent.path)} disabled={submitting}>
+                  <FolderOpen size={15} />
+                  <span>{recent.name}</span>
+                  <em>{recent.path}</em>
+                </button>
+              ))}
+            </section>
+          ) : null}
           <p>Project files use the `.restproj` extension. Secret-bearing project data is encrypted with the password before it is written.</p>
           {overwritePending ? <p className="overwrite-warning">A project already exists at this path. Confirm overwrite to continue.</p> : null}
           <div>

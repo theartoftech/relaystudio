@@ -16,7 +16,7 @@
 | --- | --- | --- |
 | UX Approval | 0-1 | Reviewable UX package, terminology, acceptance matrix, and implementation-ready backlog |
 | App Foundation | 2-4A | Cross-platform shell, local project format, service designer, and OpenAPI import |
-| Execution Core | 5-8 | Single request runner, saved responses, visual flows, variables, and mapping |
+| Execution Core | 5-8 | Single request runner, saved responses, visual flows, UX consolidation, variables, and mapping |
 | Enterprise Readiness | 9-11 | Role/error coverage, hardening, coverage gates, security checks, and live REST validation |
 | Beta Packaging | 12 | Installable macOS, Windows, and Linux beta builds |
 
@@ -124,7 +124,7 @@ Establish the cross-platform app shell, development workflow, and automated qual
 ### Work Items
 
 - Scaffold the Tauri app with macOS local launch support.
-- Add the activity bar, explorer pane, tabbed workbench, inspector pane, response dock, and console dock.
+- Add the initial activity bar, explorer pane, tabbed workbench, inspector pane, response dock, and console dock. Sprint 7A later consolidates this into the current simplified shell.
 - Add app menu structure for New, Open, Save, Save As, Import API Docs, Settings, and Close.
 - Add theme tokens for navy, royal blue, silver, white, cool gray, and error red.
 - Add window close interception hooks for future dirty-state prompts.
@@ -313,6 +313,10 @@ Persist response evidence for later inspection and review.
 
 ## Sprint 7: Visual Flow Builder
 
+### Status
+
+Implemented. See `sprint-7-implementation-status.md`.
+
 ### Objective
 
 Model chained REST workflows visually.
@@ -343,6 +347,48 @@ Model chained REST workflows visually.
 - Success and failure paths are visible.
 - Console output groups events by flow and step.
 - Flow editor state persists in the project file.
+
+## Sprint 7A: UX Consolidation
+
+### Status
+
+Implemented. See `sprint-7a-implementation-status.md`.
+
+### Objective
+
+Reduce visible workbench clutter and align the shell with common macOS and Windows desktop guidance.
+
+### Deliverables
+
+- Single primary project explorer.
+- Compact contextual toolbar.
+- Collapsed-by-default inspector.
+- Unified response, console, and problems utility dock.
+- Resizable explorer, editor, inspector, utility dock, and flow detail panes.
+- Updated automated and manual UX regression coverage.
+
+### Work Items
+
+- Remove the permanent activity rail and duplicate navigation choices.
+- Move global actions into the command palette or project/sidebar controls.
+- Keep the visible toolbar focused on search, environment, save, send/run, and inspector visibility.
+- Make inspector visibility explicit and reversible.
+- Replace side-by-side response and console panes with a tabbed bottom utility dock.
+- Add accessible drag and keyboard resizing for major workspace dividers.
+- Fix controlled flow-node dragging so selected nodes stay attached to the pointer while moving.
+- Update smoke tests to assert the simplified shell anatomy.
+
+### Acceptance Criteria
+
+- The first screen has one primary navigation surface.
+- Search text is not clipped.
+- Global commands remain reachable through `Cmd+K`.
+- Request tabs show `Send Request`; flow tabs show `Run Flow`.
+- Inspector opens on demand and is hidden by default.
+- Response, console, and problems remain one click away in the bottom dock.
+- Explorer, inspector, bottom utility dock, and flow details can be resized.
+- Flow nodes track the pointer during drag and persist their dropped position.
+- Coverage remains above 90%.
 
 ## Sprint 8: Flow Variables And Mapping
 

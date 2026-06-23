@@ -63,10 +63,35 @@ export interface ProjectService {
   authProfile: AuthProfile;
 }
 
+export type FlowNodeStatus = "idle" | "running" | "success" | "failed" | "skipped" | "blocked";
+export type FlowEdgeCondition = "success" | "failure";
+
+export interface FlowNodePosition {
+  x: number;
+  y: number;
+}
+
+export interface FlowNode {
+  id: string;
+  serviceId: string;
+  label: string;
+  position: FlowNodePosition;
+  status: FlowNodeStatus;
+}
+
+export interface FlowEdge {
+  id: string;
+  source: string;
+  target: string;
+  condition: FlowEdgeCondition;
+}
+
 export interface ProjectFlow {
   id: string;
   name: string;
   steps: string[];
+  nodes: FlowNode[];
+  edges: FlowEdge[];
 }
 
 export interface SavedResponseMetadata {
@@ -138,6 +163,26 @@ function service(input: {
     pathParams: input.pathParams ?? [],
     body: input.body ?? { contentType: "none", raw: "" },
     authProfile: auth === "none" ? { type: "none" } : { type: auth, tokenVariable: "accessToken" }
+  };
+}
+
+function flow(input: { id: string; name: string; steps: string[] }): ProjectFlow {
+  const nodes = input.steps.map((serviceId, index) => ({
+    id: `${input.id}-${serviceId}`,
+    serviceId,
+    label: serviceIdToLabel(serviceId),
+    position: { x: 80 + index * 230, y: 120 + (index % 2) * 92 },
+    status: "idle" as FlowNodeStatus
+  }));
+  return {
+    ...input,
+    nodes,
+    edges: nodes.slice(1).map((node, index) => ({
+      id: `${nodes[index].id}-success-${node.id}`,
+      source: nodes[index].id,
+      target: node.id,
+      condition: "success" as FlowEdgeCondition
+    }))
   };
 }
 
@@ -258,9 +303,9 @@ export function createSampleProject(now = new Date().toISOString()): RelayProjec
       { id: "production", name: "Production Environment", variables: [{ name: "baseUrl", value: "https://api.example.com", secret: false }] }
     ],
     flows: [
-      { id: "authenticated-read", name: "Authenticated Read", steps: ["login", "current-user", "list-products", "get-product"] },
-      { id: "create-cleanup", name: "Create And Cleanup", steps: ["login", "create-order", "get-order", "cleanup-order"] },
-      { id: "product-search", name: "Product Search", steps: ["login", "search-products"] }
+      flow({ id: "authenticated-read", name: "Authenticated Read", steps: ["login", "current-user", "list-products", "get-product"] }),
+      flow({ id: "create-cleanup", name: "Create And Cleanup", steps: ["login", "create-order", "get-order", "cleanup-order"] }),
+      flow({ id: "product-search", name: "Product Search", steps: ["login", "search-products"] })
     ],
     savedResponses: [
       {
@@ -321,6 +366,14 @@ export function createSampleProject(now = new Date().toISOString()): RelayProjec
       redactSecretsInConsole: true
     }
   };
+}
+
+function serviceIdToLabel(serviceId: string): string {
+  return serviceId
+    .split("-")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 export function createEmptyProject(now = new Date().toISOString()): RelayProject {

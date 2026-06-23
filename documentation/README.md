@@ -5,6 +5,7 @@ This folder contains the first implementation slice for Relay Studio: reviewable
 ## Files
 
 - [build-phase-plan.md](build-phase-plan.md): 2-week sprint breakdown from mockups through cross-platform beta, including OpenAPI/Swagger import.
+- [current-human-test-script.md](current-human-test-script.md): consolidated human QA script for the current uncommitted app state.
 - [detailed-sprint-plan.md](detailed-sprint-plan.md): review-ready sprint plan with objectives, deliverables, work items, acceptance criteria, dependencies, and quality gates.
 - [sprint-0-decision-record.md](sprint-0-decision-record.md): concluded Sprint 0 decision record approving the provided reference screenshots as the product direction.
 - [sprint-1-ux-blueprint.md](sprint-1-ux-blueprint.md): implemented Sprint 1 blueprint with shell anatomy, navigation, command placement, screen inventory, import flow, and test strategy.
@@ -17,6 +18,8 @@ This folder contains the first implementation slice for Relay Studio: reviewable
 - [sprint-4-implementation-status.md](sprint-4-implementation-status.md): delivered Sprint 4 REST service designer, request validation, and 90% coverage gate.
 - [sprint-5-implementation-status.md](sprint-5-implementation-status.md): delivered Sprint 5 single request runner, native HTTP execution, response dock, console diagnostics, and verification results.
 - [sprint-6-implementation-status.md](sprint-6-implementation-status.md): delivered Sprint 6 saved responses, redacted response artifacts, native/browser file persistence, reload workflow, and coverage results.
+- [sprint-7-implementation-status.md](sprint-7-implementation-status.md): delivered Sprint 7 visual flow builder, React Flow canvas, flow ordering, dependency validation, branch paths, console grouping, and coverage results.
+- [sprint-7a-implementation-status.md](sprint-7a-implementation-status.md): delivered Sprint 7A UX consolidation, including simplified navigation, contextual toolbar, optional inspector, and tabbed utility dock.
 - [visual-target.md](visual-target.md): selected Concept 3 visual direction and implementation guardrails.
 - [live-rest-acceptance-test-matrix.md](live-rest-acceptance-test-matrix.md): configurable live REST acceptance suite.
 - [mockups/index.html](mockups/index.html): static full-app mockup set.

@@ -18,6 +18,20 @@ describe("project model", () => {
       authProfile: { type: "none" }
     });
     expect(project.environments[0].variables.map((variable) => variable.name)).toContain("baseUrl");
+    expect(project.flows.find((flow) => flow.id === "authenticated-read")).toMatchObject({
+      steps: ["login", "current-user", "list-products", "get-product"],
+      nodes: [
+        { serviceId: "login", label: "Login", status: "idle" },
+        { serviceId: "current-user", label: "Current User", status: "idle" },
+        { serviceId: "list-products", label: "List Products", status: "idle" },
+        { serviceId: "get-product", label: "Get Product", status: "idle" }
+      ],
+      edges: [
+        { condition: "success" },
+        { condition: "success" },
+        { condition: "success" }
+      ]
+    });
     expect(createOrder).toMatchObject({
       method: "POST",
       path: "/api/orders",
