@@ -26,10 +26,10 @@ export function createService(partial: Partial<ProjectService> = {}): ProjectSer
   const authType = partial.authProfile?.type ?? "bearer";
   return {
     id,
-    folder: partial.folder ?? "New Services",
-    name: partial.name ?? "New Service",
+    folder: partial.folder ?? "Requests",
+    name: partial.name ?? "New Request",
     method: partial.method ?? "GET",
-    path: partial.path ?? "/api/new-service",
+    path: partial.path ?? "/api/new-request",
     auth: partial.auth ?? authType,
     timeoutMs: partial.timeoutMs ?? 30_000,
     retry: partial.retry ?? { attempts: 1, backoffMs: 250 },
@@ -89,7 +89,7 @@ export function validateService(service: ProjectService, environment?: ProjectEn
     issues.push({ field: "method", message: "Unsupported HTTP method.", severity: "error" });
   }
   if (!service.name.trim()) {
-    issues.push({ field: "name", message: "Service name is required.", severity: "error" });
+    issues.push({ field: "name", message: "Request name is required.", severity: "error" });
   }
   if (!service.path.startsWith("/")) {
     issues.push({ field: "path", message: "Path must start with /.", severity: "error" });
@@ -210,13 +210,13 @@ function validateAuth(service: ProjectService, environment?: ProjectEnvironment)
 
   const variableNames = new Set(environment?.variables.map((variable) => variable.name) ?? []);
   if (auth.type === "bearer" && !hasVariable(auth.tokenVariable, variableNames)) {
-    return [{ field: "auth", message: "Bearer auth requires a token variable.", severity: "error" }];
+    return [{ field: "auth", message: "Bearer auth requires an existing token variable name.", severity: "error" }];
   }
   if (auth.type === "apiKey" && (!auth.apiKeyName?.trim() || !auth.apiKeyValue?.trim())) {
     return [{ field: "auth", message: "API key auth requires a header name and value.", severity: "error" }];
   }
-  if (auth.type === "basic" && (!hasVariable(auth.usernameVariable, variableNames) || !hasVariable(auth.passwordVariable, variableNames))) {
-    return [{ field: "auth", message: "Basic auth requires username and password variables.", severity: "error" }];
+  if (auth.type === "basic" && (!auth.usernameVariable?.trim() || !auth.passwordVariable?.trim())) {
+    return [{ field: "auth", message: "Basic auth requires username and password.", severity: "error" }];
   }
   if (auth.type === "oauthClientCredentials" && (!hasVariable(auth.clientIdVariable, variableNames) || !hasVariable(auth.clientSecretVariable, variableNames) || !auth.tokenUrl?.trim())) {
     return [{ field: "auth", message: "OAuth client credentials require client id, client secret, and token URL.", severity: "error" }];
@@ -253,8 +253,8 @@ function buildAuthHeader(service: ProjectService, environment: ProjectEnvironmen
     return authRow(auth.apiKeyName, resolveVariable(auth.apiKeyValue, environment, true));
   }
   if (auth.type === "basic" && auth.usernameVariable && auth.passwordVariable) {
-    const username = resolveVariable(`{{${auth.usernameVariable}}}`, environment, false);
-    const password = resolveVariable(`{{${auth.passwordVariable}}}`, environment, true);
+    const username = resolveCredential(auth.usernameVariable, environment, false, "username");
+    const password = resolveCredential(auth.passwordVariable, environment, true, "password");
     return authRow("Authorization", `Basic ${username}:${password}`);
   }
   if (auth.type === "oauthClientCredentials") {
@@ -278,6 +278,18 @@ function applyPathParams(path: string, params: KeyValueRow[], environment: Proje
 
 function resolveVariable(value: string, environment: ProjectEnvironment, redactSecrets: boolean): string {
   return resolveTemplate(value, environment, redactSecrets);
+}
+
+function resolveCredential(value: string, environment: ProjectEnvironment, redactSecrets: boolean, secretKey: string): string {
+  const trimmed = value.trim();
+  if (trimmed.includes("{{")) {
+    return resolveTemplate(trimmed, environment, redactSecrets);
+  }
+  const variable = environment.variables.find((item) => item.name === trimmed);
+  if (!variable) {
+    return redactSecrets ? redactValue(secretKey, trimmed) : trimmed;
+  }
+  return redactSecrets && variable.secret ? redactValue(variable.name, variable.value) : variable.value;
 }
 
 function hasVariable(name: string | undefined, variableNames: Set<string>): boolean {

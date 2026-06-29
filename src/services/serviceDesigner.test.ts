@@ -108,6 +108,15 @@ describe("service designer helpers", () => {
     expect(none.generatedAuthHeader).toBeNull();
   });
 
+  it("accepts literal basic auth credentials when no matching variables exist", () => {
+    const preview = buildRequestPreview(createService({
+      authProfile: { type: "basic", usernameVariable: "admin", passwordVariable: "CpqStudio!2026" }
+    }), qa);
+
+    expect(preview.issues).toEqual([]);
+    expect(preview.generatedAuthHeader?.value).toBe("Basic admin:********");
+  });
+
   it("validates unsupported methods, bad paths, ranges, duplicates, missing path params, and malformed JSON", () => {
     const service = {
       ...createOrder,
@@ -150,9 +159,9 @@ describe("service designer helpers", () => {
     ] as const;
 
     expect(modes.map((authProfile) => validateService(createService({ authProfile }), qa)[0].message)).toEqual([
-      "Bearer auth requires a token variable.",
+      "Bearer auth requires an existing token variable name.",
       "API key auth requires a header name and value.",
-      "Basic auth requires username and password variables.",
+      "Basic auth requires username and password.",
       "OAuth client credentials require client id, client secret, and token URL.",
       "Custom header auth requires a header name and value."
     ]);

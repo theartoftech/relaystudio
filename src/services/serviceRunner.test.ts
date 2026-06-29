@@ -196,6 +196,16 @@ describe("service runner", () => {
     expect(custom.redactedHeaders["X-Custom-Auth"]).toBe("Bearer ********");
   });
 
+  it("uses literal basic auth credentials when they are not environment variable names", () => {
+    const request = buildExecutableRequest({
+      ...health,
+      authProfile: { type: "basic", usernameVariable: "admin", passwordVariable: "CpqStudio!2026" },
+      auth: "basic"
+    }, qa);
+
+    expect(request.headers.Authorization).toBe("Basic admin:CpqStudio!2026");
+  });
+
   it("normalizes network and timeout errors into console errors", async () => {
     const network = await runServiceRequest(createOrder, qa, async () => {
       throw new Error("Network connection failed.");

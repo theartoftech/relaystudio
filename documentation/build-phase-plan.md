@@ -124,7 +124,7 @@ Implemented. See `sprint-3-implementation-status.md`.
 ### Testing Scope
 
 - Project round trip.
-- Wrong password.
+- Unsupported project schema.
 - Corrupted project file.
 - Missing file.
 - Permission denied.
@@ -314,6 +314,10 @@ Implemented. See `sprint-7a-implementation-status.md`.
 
 ## Sprint 8: Flow Variables And Mapping
 
+### Status
+
+Implemented. See `sprint-8-implementation-status.md`.
+
 ### Goals
 
 - Pass data from one REST response into later REST calls.
@@ -342,6 +346,34 @@ Implemented. See `sprint-7a-implementation-status.md`.
 - Missing variable reference.
 - Failed upstream node blocks dependent node.
 - Cleanup deletion always runs when configured.
+
+## Sprint 8A: Flow UX Hardening
+
+### Status
+
+Implemented. See `sprint-8a-implementation-status.md`.
+
+### Goals
+
+- Make flows straightforward enough that users can understand, author, and debug chained REST workflows without reading documentation.
+- Treat flow authoring as Relay Studio's primary differentiator, not a secondary tool.
+
+### Build Scope
+
+- Simplify mapping setup for common token and identifier capture.
+- Show captured variables and consuming steps clearly without duplicating unrelated request details.
+- Improve flow empty states, step details, dependency labels, run statuses, and cleanup-step treatment.
+- Add starter templates for common flows: authenticated read and create/read/cleanup.
+- Improve diagnostics for failed mappings, skipped dependencies, and cleanup behavior.
+
+### Testing Scope
+
+- First-time user can create a simple authenticated flow.
+- Login response can capture a token and feed an authenticated request with minimal configuration.
+- Create response can capture an identifier and feed read/update/delete steps.
+- Mapping failures identify source step, JSONPath, and variable name.
+- Flow UI avoids duplicate information on the same work screen unless it improves confidence or prevents errors.
+- Coverage remains above 90%.
 
 ## Sprint 9: Role And Error Coverage
 
@@ -445,7 +477,7 @@ Implemented. See `sprint-7a-implementation-status.md`.
 
 - Tauri desktop shell.
 - React and TypeScript frontend.
-- Rust Tauri command layer for local file IO, encryption, and HTTP execution.
+- Rust Tauri command layer for local file IO and HTTP execution.
 - React Flow for workflow canvas.
 - Monaco or CodeMirror for request and response editors.
 - Zod for schema validation.

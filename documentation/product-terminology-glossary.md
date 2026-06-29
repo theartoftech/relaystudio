@@ -4,7 +4,7 @@
 
 | Term | Definition | UI Usage |
 | --- | --- | --- |
-| Project | Local Relay Studio workspace saved as an encrypted `.restproj` file | `Open Project`, `Save Project`, recent projects |
+| Project | Local Relay Studio workspace saved as a `.restproj` file | `Open Project`, `Save Project`, recent projects |
 | Service | Reusable REST request definition with method, URL, auth, params, headers, body, retry, and tests | Explorer item and request editor tab |
 | Service Folder | Grouping of related services inside a project | Auth, Products, Orders, Admin |
 | Request | A concrete executable HTTP call produced from a service plus resolved variables and auth | Request composer, console, response metadata |

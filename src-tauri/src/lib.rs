@@ -1,22 +1,19 @@
-use aes_gcm::aead::{Aead, KeyInit};
-use aes_gcm::{Aes256Gcm, Key, Nonce};
-use base64::engine::general_purpose::STANDARD as BASE64;
-use base64::Engine;
-use pbkdf2::pbkdf2_hmac;
-use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sha2::Sha256;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
+use tauri::menu::{MenuBuilder, SubmenuBuilder};
+use tauri::{Emitter, Manager};
 
 const PROJECT_FORMAT: &str = "relay-studio-restproj";
 const PROJECT_SCHEMA_VERSION: u16 = 1;
 const SAVED_RESPONSE_FORMAT: &str = "relay-studio-response";
 const SAVED_RESPONSE_SCHEMA_VERSION: u16 = 1;
-const KDF_ITERATIONS: u32 = 120_000;
+const MENU_OPEN_PROJECT: &str = "file.open_project";
+const MENU_OPEN_RECENT_PREFIX: &str = "file.open_recent.";
+const MENU_CLOSE_WINDOW: &str = "file.close_window";
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -24,25 +21,6 @@ struct RecentProject {
     name: String,
     path: String,
     opened_at: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct EncryptionMetadata {
-    algorithm: String,
-    kdf: String,
-    iterations: u32,
-    salt: String,
-    nonce: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ProjectEnvelope {
-    format: String,
-    schema_version: u16,
-    encryption: EncryptionMetadata,
-    ciphertext: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -71,13 +49,13 @@ fn app_version() -> String {
 }
 
 #[tauri::command]
-fn save_project_file(path: String, password: String, project: Value) -> Result<(), String> {
-    save_project_file_impl(Path::new(&path), &password, &project)
+fn save_project_file(path: String, project: Value) -> Result<(), String> {
+    save_project_file_impl(Path::new(&path), &project)
 }
 
 #[tauri::command]
-fn open_project_file(path: String, password: String) -> Result<Value, String> {
-    open_project_file_impl(Path::new(&path), &password)
+fn open_project_file(path: String) -> Result<Value, String> {
+    open_project_file_impl(Path::new(&path))
 }
 
 #[tauri::command]
@@ -88,6 +66,16 @@ fn project_file_exists(path: String) -> Result<bool, String> {
 }
 
 #[tauri::command]
+fn rename_project_file(path: String, name: String) -> Result<(), String> {
+    rename_project_file_impl(Path::new(&path), &name)
+}
+
+#[tauri::command]
+fn delete_project_file(path: String) -> Result<(), String> {
+    delete_project_file_impl(Path::new(&path))
+}
+
+#[tauri::command]
 fn list_recent_projects() -> Result<Vec<RecentProject>, String> {
     read_recent_projects()
 }
@@ -95,6 +83,18 @@ fn list_recent_projects() -> Result<Vec<RecentProject>, String> {
 #[tauri::command]
 fn remember_recent_project(project: RecentProject) -> Result<(), String> {
     remember_recent_project_impl(project)
+}
+
+#[tauri::command]
+fn forget_recent_project(path: String) -> Result<(), String> {
+    let project_path = Path::new(&path);
+    validate_project_path(project_path)?;
+    forget_recent_project_impl(project_path)
+}
+
+#[tauri::command]
+fn refresh_app_menu(app: tauri::AppHandle) -> Result<(), String> {
+    set_app_menu(&app)
 }
 
 #[tauri::command]
@@ -127,15 +127,92 @@ pub fn run() {
             save_project_file,
             open_project_file,
             project_file_exists,
+            rename_project_file,
+            delete_project_file,
             list_recent_projects,
             remember_recent_project,
+            forget_recent_project,
+            refresh_app_menu,
             execute_http_request,
             save_response_file,
             read_response_file,
             response_file_exists
         ])
+        .setup(|app| {
+            set_app_menu(app.handle())?;
+            Ok(())
+        })
+        .on_menu_event(|app, event| {
+            handle_app_menu_event(app, event.id().as_ref());
+        })
         .run(tauri::generate_context!())
         .expect("error while running Relay Studio");
+}
+
+fn set_app_menu(app: &tauri::AppHandle) -> Result<(), String> {
+    let mut recent_menu_builder = SubmenuBuilder::new(app, "Open Recent");
+    let recent_projects = read_recent_projects().unwrap_or_default();
+    if recent_projects.is_empty() {
+        recent_menu_builder =
+            recent_menu_builder.text("file.open_recent.empty", "No Recent Projects");
+    } else {
+        for (index, project) in recent_projects.iter().take(10).enumerate() {
+            recent_menu_builder = recent_menu_builder.text(
+                format!("{MENU_OPEN_RECENT_PREFIX}{index}"),
+                format!("{} — {}", project.name, project.path),
+            );
+        }
+    }
+    let recent_menu = recent_menu_builder
+        .build()
+        .map_err(|error| format!("Could not build recent projects menu: {error}"))?;
+    let file_menu = SubmenuBuilder::new(app, "File")
+        .text(MENU_OPEN_PROJECT, "Open...")
+        .item(&recent_menu)
+        .separator()
+        .text(MENU_CLOSE_WINDOW, "Close Window")
+        .build()
+        .map_err(|error| format!("Could not build file menu: {error}"))?;
+    let edit_menu = SubmenuBuilder::new(app, "Edit")
+        .undo()
+        .redo()
+        .separator()
+        .cut()
+        .copy()
+        .paste()
+        .select_all()
+        .build()
+        .map_err(|error| format!("Could not build edit menu: {error}"))?;
+    let app_menu = MenuBuilder::new(app)
+        .item(&file_menu)
+        .item(&edit_menu)
+        .build()
+        .map_err(|error| format!("Could not build application menu: {error}"))?;
+    app.set_menu(app_menu)
+        .map_err(|error| format!("Could not set application menu: {error}"))?;
+    Ok(())
+}
+
+fn handle_app_menu_event(app: &tauri::AppHandle, id: &str) {
+    if id == MENU_OPEN_PROJECT {
+        let _ = app.emit("relay-menu-open-project", ());
+        return;
+    }
+    if id == MENU_CLOSE_WINDOW {
+        if let Some(window) = app.get_webview_window("main") {
+            let _ = window.close();
+        }
+        return;
+    }
+    if let Some(index_text) = id.strip_prefix(MENU_OPEN_RECENT_PREFIX) {
+        if let Ok(index) = index_text.parse::<usize>() {
+            if let Ok(recent_projects) = read_recent_projects() {
+                if let Some(project) = recent_projects.get(index) {
+                    let _ = app.emit("relay-menu-open-recent", project.clone());
+                }
+            }
+        }
+    }
 }
 
 async fn execute_http_request_impl(
@@ -208,12 +285,11 @@ fn validate_http_request(request: &HttpRequestInput) -> Result<(), String> {
     Ok(())
 }
 
-fn save_project_file_impl(path: &Path, password: &str, project: &Value) -> Result<(), String> {
+fn save_project_file_impl(path: &Path, project: &Value) -> Result<(), String> {
     validate_project_path(path)?;
-    validate_password(password)?;
+    validate_project_schema(project)?;
 
-    let envelope = encrypt_project(password, project)?;
-    let serialized = serde_json::to_vec_pretty(&envelope)
+    let serialized = serde_json::to_vec_pretty(project)
         .map_err(|error| format!("Project serialization failed: {error}"))?;
 
     if let Some(parent) = path.parent() {
@@ -236,9 +312,8 @@ fn save_project_file_impl(path: &Path, password: &str, project: &Value) -> Resul
     Ok(())
 }
 
-fn open_project_file_impl(path: &Path, password: &str) -> Result<Value, String> {
+fn open_project_file_impl(path: &Path) -> Result<Value, String> {
     validate_project_path(path)?;
-    validate_password(password)?;
 
     let raw = fs::read(path).map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
@@ -247,10 +322,38 @@ fn open_project_file_impl(path: &Path, password: &str) -> Result<Value, String> 
             format!("Could not read project file: {error}")
         }
     })?;
-    let envelope: ProjectEnvelope = serde_json::from_slice(&raw)
+    let project: Value = serde_json::from_slice(&raw)
         .map_err(|error| format!("Project file is corrupted or unsupported: {error}"))?;
+    if project.get("encryption").is_some() && project.get("ciphertext").is_some() {
+        return Err("Password-protected project files are no longer supported.".to_string());
+    }
+    validate_project_schema(&project)?;
 
-    decrypt_project(password, &envelope)
+    Ok(project)
+}
+
+fn rename_project_file_impl(path: &Path, name: &str) -> Result<(), String> {
+    validate_project_path(path)?;
+    validate_project_name(name)?;
+    let mut project = open_project_file_impl(path)?;
+    let object = project
+        .as_object_mut()
+        .ok_or_else(|| "Project file payload must be a JSON object.".to_string())?;
+    object.insert("name".to_string(), Value::String(name.trim().to_string()));
+    save_project_file_impl(path, &project)?;
+    rename_recent_project_impl(path, name.trim())
+}
+
+fn delete_project_file_impl(path: &Path) -> Result<(), String> {
+    validate_project_path(path)?;
+    fs::remove_file(path).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            format!("Project file was not found: {}", path.display())
+        } else {
+            format!("Could not delete project file: {error}")
+        }
+    })?;
+    forget_recent_project_impl(path)
 }
 
 fn validate_project_path(path: &Path) -> Result<(), String> {
@@ -259,6 +362,23 @@ fn validate_project_path(path: &Path) -> Result<(), String> {
     }
     if path.extension().and_then(|ext| ext.to_str()) != Some("restproj") {
         return Err("Project file must use the .restproj extension.".to_string());
+    }
+    Ok(())
+}
+
+fn validate_project_name(name: &str) -> Result<(), String> {
+    if name.trim().is_empty() {
+        return Err("Project name is required.".to_string());
+    }
+    Ok(())
+}
+
+fn validate_project_schema(project: &Value) -> Result<(), String> {
+    if project.get("format").and_then(Value::as_str) != Some(PROJECT_FORMAT) {
+        return Err("Unsupported project file format.".to_string());
+    }
+    if project.get("schemaVersion").and_then(Value::as_u64) != Some(PROJECT_SCHEMA_VERSION.into()) {
+        return Err("Unsupported project schema version.".to_string());
     }
     Ok(())
 }
@@ -360,88 +480,6 @@ fn validate_response_artifact(artifact: &Value) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_password(password: &str) -> Result<(), String> {
-    if password.is_empty() {
-        return Err("Project password is required.".to_string());
-    }
-    Ok(())
-}
-
-fn encrypt_project(password: &str, project: &Value) -> Result<ProjectEnvelope, String> {
-    let plaintext = serde_json::to_vec(project)
-        .map_err(|error| format!("Project serialization failed: {error}"))?;
-    let mut salt = [0u8; 16];
-    let mut nonce_bytes = [0u8; 12];
-    rand::thread_rng().fill_bytes(&mut salt);
-    rand::thread_rng().fill_bytes(&mut nonce_bytes);
-
-    let mut key_bytes = [0u8; 32];
-    pbkdf2_hmac::<Sha256>(password.as_bytes(), &salt, KDF_ITERATIONS, &mut key_bytes);
-    let key = Key::<Aes256Gcm>::from_slice(&key_bytes);
-    let cipher = Aes256Gcm::new(key);
-    let nonce = Nonce::from_slice(&nonce_bytes);
-    let ciphertext = cipher
-        .encrypt(nonce, plaintext.as_ref())
-        .map_err(|_| "Project encryption failed.".to_string())?;
-
-    Ok(ProjectEnvelope {
-        format: PROJECT_FORMAT.to_string(),
-        schema_version: PROJECT_SCHEMA_VERSION,
-        encryption: EncryptionMetadata {
-            algorithm: "AES-256-GCM".to_string(),
-            kdf: "PBKDF2-HMAC-SHA256".to_string(),
-            iterations: KDF_ITERATIONS,
-            salt: BASE64.encode(salt),
-            nonce: BASE64.encode(nonce_bytes),
-        },
-        ciphertext: BASE64.encode(ciphertext),
-    })
-}
-
-fn decrypt_project(password: &str, envelope: &ProjectEnvelope) -> Result<Value, String> {
-    if envelope.format != PROJECT_FORMAT {
-        return Err("Unsupported project file format.".to_string());
-    }
-    if envelope.schema_version != PROJECT_SCHEMA_VERSION {
-        return Err(format!(
-            "Unsupported project schema version: {}",
-            envelope.schema_version
-        ));
-    }
-    if envelope.encryption.algorithm != "AES-256-GCM"
-        || envelope.encryption.kdf != "PBKDF2-HMAC-SHA256"
-    {
-        return Err("Unsupported project encryption settings.".to_string());
-    }
-
-    let salt = BASE64
-        .decode(&envelope.encryption.salt)
-        .map_err(|_| "Project file has invalid encryption salt.".to_string())?;
-    let nonce_bytes = BASE64
-        .decode(&envelope.encryption.nonce)
-        .map_err(|_| "Project file has invalid encryption nonce.".to_string())?;
-    let ciphertext = BASE64
-        .decode(&envelope.ciphertext)
-        .map_err(|_| "Project file has invalid encrypted payload.".to_string())?;
-
-    let mut key_bytes = [0u8; 32];
-    pbkdf2_hmac::<Sha256>(
-        password.as_bytes(),
-        &salt,
-        envelope.encryption.iterations,
-        &mut key_bytes,
-    );
-    let key = Key::<Aes256Gcm>::from_slice(&key_bytes);
-    let cipher = Aes256Gcm::new(key);
-    let nonce = Nonce::from_slice(&nonce_bytes);
-    let plaintext = cipher
-        .decrypt(nonce, ciphertext.as_ref())
-        .map_err(|_| "Wrong project password or corrupted project file.".to_string())?;
-
-    serde_json::from_slice(&plaintext)
-        .map_err(|error| format!("Decrypted project payload is invalid: {error}"))
-}
-
 fn temp_path_for(path: &Path) -> PathBuf {
     path.with_extension("restproj.tmp")
 }
@@ -480,8 +518,37 @@ fn remember_recent_project_impl(project: RecentProject) -> Result<(), String> {
     let mut recent = read_recent_projects().unwrap_or_default();
     recent.retain(|item| item.path != project.path);
     recent.insert(0, project);
-    recent.truncate(8);
+    recent.truncate(10);
+    write_recent_projects(&recent)
+}
 
+fn rename_recent_project_impl(path: &Path, name: &str) -> Result<(), String> {
+    let path_text = path.to_string_lossy().to_string();
+    let recent = read_recent_projects()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|project| {
+            if project.path == path_text {
+                RecentProject {
+                    name: name.to_string(),
+                    ..project
+                }
+            } else {
+                project
+            }
+        })
+        .collect::<Vec<_>>();
+    write_recent_projects(&recent)
+}
+
+fn forget_recent_project_impl(path: &Path) -> Result<(), String> {
+    let path_text = path.to_string_lossy().to_string();
+    let mut recent = read_recent_projects().unwrap_or_default();
+    recent.retain(|project| project.path != path_text);
+    write_recent_projects(&recent)
+}
+
+fn write_recent_projects(recent: &[RecentProject]) -> Result<(), String> {
     let path = recent_projects_path()?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
@@ -504,7 +571,7 @@ mod tests {
     }
 
     #[test]
-    fn encrypted_project_round_trips() {
+    fn project_file_round_trips_without_password() {
         let dir = tempdir().expect("tempdir");
         let path = dir.path().join("sample.restproj");
         let project = json!({
@@ -514,24 +581,33 @@ mod tests {
             "variables": [{ "name": "accessToken", "value": "secret-token", "secret": true }]
         });
 
-        save_project_file_impl(&path, "password", &project).expect("save");
+        save_project_file_impl(&path, &project).expect("save");
         let raw = fs::read_to_string(&path).expect("read");
-        assert!(!raw.contains("secret-token"));
+        assert!(raw.contains("Sample API Regression"));
 
-        let opened = open_project_file_impl(&path, "password").expect("open");
+        let opened = open_project_file_impl(&path).expect("open");
         assert_eq!(opened, project);
     }
 
     #[test]
-    fn wrong_password_is_rejected() {
+    fn password_protected_project_file_is_rejected() {
         let dir = tempdir().expect("tempdir");
         let path = dir.path().join("sample.restproj");
-        let project = json!({ "name": "Sample API Regression" });
+        let envelope = json!({
+            "format": "relay-studio-restproj",
+            "schemaVersion": 1,
+            "encryption": { "algorithm": "AES-256-GCM" },
+            "ciphertext": "abc123"
+        });
 
-        save_project_file_impl(&path, "password", &project).expect("save");
-        let error = open_project_file_impl(&path, "wrong").expect_err("wrong password");
+        fs::write(
+            &path,
+            serde_json::to_string_pretty(&envelope).expect("serialize"),
+        )
+        .expect("write envelope");
+        let error = open_project_file_impl(&path).expect_err("encrypted project");
 
-        assert!(error.contains("Wrong project password"));
+        assert!(error.contains("Password-protected project files are no longer supported"));
     }
 
     #[test]
@@ -540,7 +616,7 @@ mod tests {
         let path = dir.path().join("sample.restproj");
         fs::write(&path, "{not valid json").expect("write corrupted file");
 
-        let error = open_project_file_impl(&path, "password").expect_err("corrupted file");
+        let error = open_project_file_impl(&path).expect_err("corrupted file");
 
         assert!(error.contains("corrupted or unsupported"));
     }

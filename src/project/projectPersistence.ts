@@ -2,13 +2,16 @@ import type { RecentProject, RelayProject } from "./projectModel";
 
 export interface SaveProjectInput {
   path: string;
-  password: string;
   project: RelayProject;
 }
 
 export interface OpenProjectInput {
   path: string;
-  password: string;
+}
+
+export interface RenameProjectInput {
+  path: string;
+  name: string;
 }
 
 export interface ProjectPersistence {
@@ -17,6 +20,9 @@ export interface ProjectPersistence {
   projectExists(path: string): Promise<boolean>;
   listRecentProjects(): Promise<RecentProject[]>;
   rememberRecentProject(project: RecentProject): Promise<void>;
+  removeRecentProject(path: string): Promise<void>;
+  renameProject(input: RenameProjectInput): Promise<void>;
+  deleteProject(path: string): Promise<void>;
 }
 
 const STORAGE_PREFIX = "relay-studio:project:";
@@ -44,31 +50,26 @@ function assertProjectPath(path: string) {
   }
 }
 
-function assertPassword(password: string) {
-  if (!password) {
-    throw new Error("Project password is required.");
+function assertProjectName(name: string) {
+  if (!name.trim()) {
+    throw new Error("Project name is required.");
   }
 }
 
 class BrowserFallbackPersistence implements ProjectPersistence {
-  async saveProject({ path, password, project }: SaveProjectInput): Promise<void> {
+  async saveProject({ path, project }: SaveProjectInput): Promise<void> {
     assertProjectPath(path);
-    assertPassword(password);
-    localStorage.setItem(fallbackProjectKey(path), JSON.stringify({ password, project }));
+    localStorage.setItem(fallbackProjectKey(path), JSON.stringify(project));
   }
 
-  async openProject({ path, password }: OpenProjectInput): Promise<RelayProject> {
+  async openProject({ path }: OpenProjectInput): Promise<RelayProject> {
     assertProjectPath(path);
-    assertPassword(password);
     const raw = localStorage.getItem(fallbackProjectKey(path));
     if (!raw) {
       throw new Error(`Project file was not found: ${path}`);
     }
-    const parsed = JSON.parse(raw) as { password: string; project: RelayProject };
-    if (parsed.password !== password) {
-      throw new Error("Wrong project password.");
-    }
-    return parsed.project;
+    const parsed = JSON.parse(raw) as RelayProject | { project: RelayProject };
+    return "project" in parsed ? parsed.project : parsed;
   }
 
   async projectExists(path: string): Promise<boolean> {
@@ -83,28 +84,53 @@ class BrowserFallbackPersistence implements ProjectPersistence {
 
   async rememberRecentProject(project: RecentProject): Promise<void> {
     const current = await this.listRecentProjects();
-    const next = [project, ...current.filter((recent) => recent.path !== project.path)].slice(0, 8);
+    const next = [project, ...current.filter((recent) => recent.path !== project.path)].slice(0, 10);
     localStorage.setItem(RECENTS_KEY, JSON.stringify(next));
+  }
+
+  async removeRecentProject(path: string): Promise<void> {
+    assertProjectPath(path);
+    const current = await this.listRecentProjects();
+    localStorage.setItem(RECENTS_KEY, JSON.stringify(current.filter((recent) => recent.path !== path)));
+  }
+
+  async renameProject({ path, name }: RenameProjectInput): Promise<void> {
+    assertProjectPath(path);
+    assertProjectName(name);
+    const key = fallbackProjectKey(path);
+    const raw = localStorage.getItem(key);
+    if (raw) {
+      const parsed = JSON.parse(raw) as RelayProject | { project: RelayProject };
+      const project = "project" in parsed ? parsed.project : parsed;
+      localStorage.setItem(key, JSON.stringify({ ...project, name: name.trim(), updatedAt: new Date().toISOString() }));
+    }
+    const recent = await this.listRecentProjects();
+    localStorage.setItem(RECENTS_KEY, JSON.stringify(recent.map((item) => (
+      item.path === path ? { ...item, name: name.trim() } : item
+    ))));
+  }
+
+  async deleteProject(path: string): Promise<void> {
+    assertProjectPath(path);
+    localStorage.removeItem(fallbackProjectKey(path));
+    const recent = await this.listRecentProjects();
+    localStorage.setItem(RECENTS_KEY, JSON.stringify(recent.filter((item) => item.path !== path)));
   }
 }
 
 class TauriPersistence implements ProjectPersistence {
   async saveProject(input: SaveProjectInput): Promise<void> {
     assertProjectPath(input.path);
-    assertPassword(input.password);
     await invokeTauri("save_project_file", {
       path: input.path,
-      password: input.password,
       project: input.project
     });
   }
 
   async openProject(input: OpenProjectInput): Promise<RelayProject> {
     assertProjectPath(input.path);
-    assertPassword(input.password);
     return invokeTauri("open_project_file", {
-      path: input.path,
-      password: input.password
+      path: input.path
     });
   }
 
@@ -119,6 +145,22 @@ class TauriPersistence implements ProjectPersistence {
 
   async rememberRecentProject(project: RecentProject): Promise<void> {
     await invokeTauri("remember_recent_project", { project });
+  }
+
+  async removeRecentProject(path: string): Promise<void> {
+    assertProjectPath(path);
+    await invokeTauri("forget_recent_project", { path });
+  }
+
+  async renameProject(input: RenameProjectInput): Promise<void> {
+    assertProjectPath(input.path);
+    assertProjectName(input.name);
+    await invokeTauri("rename_project_file", { path: input.path, name: input.name.trim() });
+  }
+
+  async deleteProject(path: string): Promise<void> {
+    assertProjectPath(path);
+    await invokeTauri("delete_project_file", { path });
   }
 }
 

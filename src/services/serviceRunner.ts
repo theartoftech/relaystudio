@@ -217,7 +217,7 @@ function buildRuntimeAuthHeader(service: ProjectService, environment: ProjectEnv
     return {
       id: "generated-auth",
       name: "Authorization",
-      value: `Basic ${variableValue(environment, auth.usernameVariable)}:${variableValue(environment, auth.passwordVariable)}`,
+      value: `Basic ${credentialValue(environment, auth.usernameVariable)}:${credentialValue(environment, auth.passwordVariable)}`,
       enabled: true
     };
   }
@@ -261,6 +261,14 @@ function findHeader(headers: Record<string, string>, name: string): string {
 
 function variableValue(environment: ProjectEnvironment, name: string): string {
   return environment.variables.find((variable) => variable.name === name)?.value ?? "";
+}
+
+function credentialValue(environment: ProjectEnvironment, value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.includes("{{")) {
+    return resolveTemplate(trimmed, environment, false);
+  }
+  return environment.variables.find((variable) => variable.name === trimmed)?.value ?? trimmed;
 }
 
 function normalizeRunnerError(error: unknown): string {

@@ -103,14 +103,14 @@ Passwords should be supplied through local test configuration, never committed.
 
 - Bearer tokens, passwords, API keys, client secrets, and authorization headers are redacted everywhere except active credential entry controls.
 - Saved response files never include project credentials.
-- Project files encrypt secrets.
+- Project files are local `.restproj` files. Secret values are redacted in the workspace, logs, and saved response artifacts.
 - Console events can include request URL, method, status, timing, and non-secret headers.
 - Console events must not include secret header values, password fields, token values, or OAuth client secrets.
 - Exported diagnostics redact secrets by default.
 
 ## Coverage Expectations
 
-- Unit tests cover request construction, auth behavior, variable substitution, JSONPath extraction, project encryption, and typed errors.
+- Unit tests cover request construction, auth behavior, variable substitution, JSONPath extraction, project persistence, and typed errors.
 - Component tests cover service editor, auth panel, response viewer, console, flow mapping, and save prompt.
 - Playwright tests cover full user workflows.
 - Live REST acceptance tests run as a gated suite, separate from fast unit tests.

@@ -14,12 +14,15 @@ This folder contains the first implementation slice for Relay Studio: reviewable
 - [secret-redaction-policy.md](secret-redaction-policy.md): redaction rules and test expectations for credentials and secret-bearing data.
 - [sprint-2-acceptance-checklist.md](sprint-2-acceptance-checklist.md): explicit exit checklist for the desktop foundation scaffold.
 - [sprint-2-implementation-status.md](sprint-2-implementation-status.md): delivered Sprint 2 scaffold, verification results, QA evidence, and known deferred gaps.
-- [sprint-3-implementation-status.md](sprint-3-implementation-status.md): delivered Sprint 3 project persistence, encryption, dirty-state, and verification results.
+- [sprint-3-implementation-status.md](sprint-3-implementation-status.md): delivered Sprint 3 project persistence, dirty-state, and verification results.
 - [sprint-4-implementation-status.md](sprint-4-implementation-status.md): delivered Sprint 4 REST service designer, request validation, and 90% coverage gate.
 - [sprint-5-implementation-status.md](sprint-5-implementation-status.md): delivered Sprint 5 single request runner, native HTTP execution, response dock, console diagnostics, and verification results.
 - [sprint-6-implementation-status.md](sprint-6-implementation-status.md): delivered Sprint 6 saved responses, redacted response artifacts, native/browser file persistence, reload workflow, and coverage results.
 - [sprint-7-implementation-status.md](sprint-7-implementation-status.md): delivered Sprint 7 visual flow builder, React Flow canvas, flow ordering, dependency validation, branch paths, console grouping, and coverage results.
 - [sprint-7a-implementation-status.md](sprint-7a-implementation-status.md): delivered Sprint 7A UX consolidation, including simplified navigation, contextual toolbar, optional inspector, and tabbed utility dock.
+- [sprint-8-implementation-status.md](sprint-8-implementation-status.md): delivered Sprint 8 flow variables, JSONPath response mappings, runtime injection, and lifecycle flow coverage.
+- [sprint-8a-implementation-status.md](sprint-8a-implementation-status.md): delivered Sprint 8A flow UX hardening, templates, variable capture/consumption display, and cleanup-step affordances.
+- [sprint-8a-user-test-script.md](sprint-8a-user-test-script.md): human QA script for first-time flow authoring and debugging.
 - [visual-target.md](visual-target.md): selected Concept 3 visual direction and implementation guardrails.
 - [live-rest-acceptance-test-matrix.md](live-rest-acceptance-test-matrix.md): configurable live REST acceptance suite.
 - [mockups/index.html](mockups/index.html): static full-app mockup set.

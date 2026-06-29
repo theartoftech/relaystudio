@@ -8,7 +8,7 @@
 - Implementation stack: Tauri, React, TypeScript, Rust command layer, React Flow, Monaco or CodeMirror, Zod, JSONPath, Vitest, Testing Library, Playwright, Rust unit tests, dependency audit, and secret scanning.
 - Product direction: desktop-first IDE-style REST client following the Concept 3 Developer IDE Console visual target.
 - Sprint 0 status: concluded, with the provided reference screenshots approved as the primary visual and interaction target.
-- Security posture: local-first, encrypted project files, explicit secret redaction, no hosted database, and no committed credentials.
+- Security posture: local-first project files, explicit secret redaction, no hosted database, and no committed credentials.
 
 ## Release Milestones
 
@@ -16,7 +16,7 @@
 | --- | --- | --- |
 | UX Approval | 0-1 | Reviewable UX package, terminology, acceptance matrix, and implementation-ready backlog |
 | App Foundation | 2-4A | Cross-platform shell, local project format, service designer, and OpenAPI import |
-| Execution Core | 5-8 | Single request runner, saved responses, visual flows, UX consolidation, variables, and mapping |
+| Execution Core | 5-8A | Single request runner, saved responses, visual flows, UX consolidation, variables, mapping, and flow UX hardening |
 | Enterprise Readiness | 9-11 | Role/error coverage, hardening, coverage gates, security checks, and live REST validation |
 | Beta Packaging | 12 | Installable macOS, Windows, and Linux beta builds |
 
@@ -147,7 +147,7 @@ Implemented. See `sprint-3-implementation-status.md`.
 
 ### Objective
 
-Give users reliable local project persistence with encrypted secrets and safe close behavior.
+Give users reliable local project persistence and safe close behavior.
 
 ### Deliverables
 
@@ -161,8 +161,8 @@ Give users reliable local project persistence with encrypted secrets and safe cl
 
 - Define project schema for services, environments, variables, auth profiles, flows, saved response metadata, import sources, and settings.
 - Implement Rust file IO commands for create, open, save, save as, and recent projects.
-- Implement encryption for secrets and secret-bearing auth fields.
-- Add password entry and wrong-password handling where required by the file format.
+- Save project files without password prompts.
+- Keep secret values redacted in the workspace, console, and saved response artifacts.
 - Track dirty state across edits, imports, response saves, and flow changes.
 - Add Save, Do Not Save, and Cancel close prompt.
 - Add backup or temp-write behavior to avoid corrupting project files on failed saves.
@@ -170,8 +170,8 @@ Give users reliable local project persistence with encrypted secrets and safe cl
 ### Acceptance Criteria
 
 - Project data round trips without loss.
-- Secret fields are encrypted in saved files.
-- Wrong password, corrupted file, missing file, permission denied, and unsupported schema errors show recoverable messages.
+- Secret fields remain redacted in the workspace, console, and saved response artifacts.
+- Corrupted file, missing file, permission denied, and unsupported schema errors show recoverable messages.
 - Save As handles overwrite confirmation.
 - Closing with unsaved changes prompts correctly.
 
@@ -392,6 +392,10 @@ Reduce visible workbench clutter and align the shell with common macOS and Windo
 
 ## Sprint 8: Flow Variables And Mapping
 
+### Status
+
+Implemented. See `sprint-8-implementation-status.md`.
+
 ### Objective
 
 Pass values from one REST response into later REST calls.
@@ -420,6 +424,44 @@ Pass values from one REST response into later REST calls.
 - Failed upstream nodes block dependent nodes.
 - Secret variables are redacted in console, project files, diagnostics, and saved metadata.
 - Cleanup deletion runs when configured.
+
+## Sprint 8A: Flow UX Hardening
+
+### Status
+
+Implemented. See `sprint-8a-implementation-status.md`.
+
+### Objective
+
+Make flows the product's clearest differentiator by turning the basic flow variables and mapping functionality into a simple, confidence-building user experience.
+
+### Deliverables
+
+- Simplified step mapping workflow.
+- Clear captured-variable display per step.
+- Flow run diagnostics that identify the exact failed step, dependency, and mapping.
+- Safer cleanup-step affordances.
+- Flow templates for common REST workflows.
+- Human test script focused on first-time flow usability.
+
+### Work Items
+
+- Audit the flow builder for duplicated information and remove low-value summaries from the work surface.
+- Make token capture from login steps easy to configure and easy to verify without exposing secrets.
+- Add clear visual treatment for captured values, required inputs, skipped steps, failed mappings, and cleanup steps.
+- Improve empty states and first-run guidance for creating a flow from existing requests.
+- Add flow templates such as Login -> Authenticated Read and Login -> Create -> Read -> Cleanup.
+- Make mapping errors actionable with source step, JSONPath, variable name, and downstream impact.
+- Add component and e2e coverage for the primary flow authoring path.
+
+### Acceptance Criteria
+
+- A first-time user can create or understand a simple authenticated flow without documentation.
+- A user can tell which step produced a variable and which later step consumes it.
+- Failed mappings identify the exact source step and expression.
+- Cleanup steps are visibly distinct and do not look like ordinary read steps.
+- Flow screens avoid repeating information already visible in the same work area unless it materially improves confidence or error prevention.
+- Coverage remains above 90%.
 
 ## Sprint 9: Role And Error Coverage
 
@@ -467,7 +509,7 @@ Raise reliability, recoverability, and operational diagnostics to enterprise exp
 
 ### Work Items
 
-- Normalize app errors into typed categories for validation, auth, network, HTTP, filesystem, encryption, schema, import, and flow execution.
+- Normalize app errors into typed categories for validation, auth, network, HTTP, filesystem, schema, import, and flow execution.
 - Add recovery backup creation before risky project writes.
 - Validate project import and export schema.
 - Add diagnostics bundle export with redacted logs, app version, platform, project schema version, and recent console events.
@@ -534,7 +576,7 @@ Produce installable beta builds for macOS, Windows, and Linux.
 ### Work Items
 
 - Configure Tauri packaging for macOS, Windows, and Linux.
-- Validate app launch, file dialogs, encrypted project open/save, response saving, and close prompts on each platform.
+- Validate app launch, file dialogs, project open/save, response saving, and close prompts on each platform.
 - Run single request and flow smoke tests on each platform.
 - Verify platform-specific filesystem paths and permission failures.
 - Confirm code signing, notarization, or signing deferrals as appropriate.

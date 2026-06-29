@@ -76,7 +76,7 @@ Use this script to manually validate the current uncommitted Relay Studio build 
 4. In the dialog, click a recent project row.
 5. Expected result:
    - The recent project path is used directly.
-   - The project opens if the file still exists and the password is correct.
+   - The project opens if the file still exists.
    - Missing-file errors are shown in the project status area.
 
 ## Test 5: Request URL Editing
@@ -115,7 +115,7 @@ Use this script to manually validate the current uncommitted Relay Studio build 
    - No separate inspector icon rail is visible.
    - The editor gains horizontal space after closing the inspector.
 
-## Test 8: Service Designer Editing
+## Test 8: Request Designer Editing
 
 1. Select an existing service from the explorer.
 2. Edit the service name.
@@ -218,7 +218,50 @@ These sample services use placeholder endpoints unless you point the environment
    - Dropped node positions remain visually stable.
    - The project is marked dirty.
 
-## Test 15: Flow Run
+## Test 15: Flow Variables And Response Mapping
+
+1. Open `Authenticated Read` under `Flows`.
+2. Select the `Login` step.
+3. Confirm `Response Mappings` is visible.
+4. Confirm `$.accessToken` maps into `accessToken` and is marked secret.
+5. Click `Add Mapping`.
+6. Change the new JSONPath to `$.id`.
+7. Change the variable name to `userId`.
+8. Toggle `Secret`.
+9. Remove the new mapping.
+10. Change the login token mapping JSONPath to `$.doesNotExist`.
+11. Run the flow.
+12. Restore the JSONPath to `$.accessToken`.
+13. Open `Create Update Read Cleanup`.
+14. Confirm the flow has login, create, update, read, and cleanup steps.
+15. Expected result:
+   - Mapping edits are accepted and mark the project dirty.
+   - Missing JSONPath failures identify the source step and expression.
+   - Downstream success-dependent steps are skipped when token capture fails.
+   - The lifecycle flow captures `accessToken` and `orderId` for later steps.
+   - Secret captured values are not shown in console output.
+
+## Test 16: Flow UX Hardening
+
+1. Click `+` beside `Flows` in the explorer.
+2. Confirm the empty flow opens with flow templates.
+3. Click `Authenticated Read`.
+4. Confirm the generated flow has `3 steps - 2 links`.
+5. Confirm the login node or step details show it captures `accessToken`.
+6. Create another new flow.
+7. Click `Create Read Cleanup`.
+8. Confirm the generated flow captures `accessToken` and `orderId`.
+9. Confirm the cleanup node is visibly marked as cleanup work.
+10. Select a step and confirm `Captures` and `Consumes` show only flow-relevant variable information.
+11. Use `Capture Token` and `Capture Id` in `Response Mappings`.
+12. Expected result:
+   - Empty flows give useful starting points without requiring documentation.
+   - Captured variable names are visible on the flow canvas or selected-step details.
+   - Consumed variables make downstream dependencies understandable.
+   - Cleanup work is visually distinct before running the flow.
+   - The flow screen does not show duplicate request-preview summaries.
+
+## Test 17: Flow Run
 
 These sample services use placeholder endpoints unless you point the environment at a reachable REST API.
 
@@ -234,12 +277,12 @@ These sample services use placeholder endpoints unless you point the environment
    - Downstream success-dependent nodes show `skipped` after an upstream failure.
    - Missing dependencies block execution before requests are sent.
 
-## Test 16: Project Save And Reopen
+## Test 18: Project Save And Reopen
 
 1. Save the project to a temporary `.restproj` path.
 2. Close and reopen the project.
 3. Expected result:
-   - Services survive round trip.
+   - Requests survive round trip.
    - Flows survive round trip.
    - Flow nodes, links, and positions survive round trip.
    - Saved response metadata survives round trip.

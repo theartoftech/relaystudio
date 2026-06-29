@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { PROJECT_FORMAT, PROJECT_SCHEMA_VERSION, createEmptyProject, createSampleProject, touchProject } from "./projectModel";
 
 describe("project model", () => {
-  it("creates a versioned sample project with REST service designer fields", () => {
+  it("creates a versioned sample project with REST request designer fields", () => {
     const project = createSampleProject("2026-06-21T00:00:00.000Z");
     const createOrder = project.services.find((service) => service.id === "create-order");
 

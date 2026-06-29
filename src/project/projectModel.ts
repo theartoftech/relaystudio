@@ -86,12 +86,21 @@ export interface FlowEdge {
   condition: FlowEdgeCondition;
 }
 
+export interface FlowMapping {
+  id: string;
+  sourceNodeId: string;
+  jsonPath: string;
+  variableName: string;
+  secret: boolean;
+}
+
 export interface ProjectFlow {
   id: string;
   name: string;
   steps: string[];
   nodes: FlowNode[];
   edges: FlowEdge[];
+  mappings: FlowMapping[];
 }
 
 export interface SavedResponseMetadata {
@@ -166,7 +175,7 @@ function service(input: {
   };
 }
 
-function flow(input: { id: string; name: string; steps: string[] }): ProjectFlow {
+function flow(input: { id: string; name: string; steps: string[]; mappings?: Omit<FlowMapping, "id" | "sourceNodeId">[] }): ProjectFlow {
   const nodes = input.steps.map((serviceId, index) => ({
     id: `${input.id}-${serviceId}`,
     serviceId,
@@ -182,6 +191,11 @@ function flow(input: { id: string; name: string; steps: string[] }): ProjectFlow
       source: nodes[index].id,
       target: node.id,
       condition: "success" as FlowEdgeCondition
+    })),
+    mappings: (input.mappings ?? []).map((mapping, index) => ({
+      ...mapping,
+      id: `${input.id}-mapping-${index + 1}`,
+      sourceNodeId: nodes[index]?.id ?? nodes[0]?.id ?? ""
     }))
   };
 }
@@ -303,9 +317,27 @@ export function createSampleProject(now = new Date().toISOString()): RelayProjec
       { id: "production", name: "Production Environment", variables: [{ name: "baseUrl", value: "https://api.example.com", secret: false }] }
     ],
     flows: [
-      flow({ id: "authenticated-read", name: "Authenticated Read", steps: ["login", "current-user", "list-products", "get-product"] }),
-      flow({ id: "create-cleanup", name: "Create And Cleanup", steps: ["login", "create-order", "get-order", "cleanup-order"] }),
-      flow({ id: "product-search", name: "Product Search", steps: ["login", "search-products"] })
+      flow({
+        id: "authenticated-read",
+        name: "Authenticated Read",
+        steps: ["login", "current-user", "list-products", "get-product"],
+        mappings: [{ jsonPath: "$.accessToken", variableName: "accessToken", secret: true }]
+      }),
+      flow({
+        id: "create-cleanup",
+        name: "Create Update Read Cleanup",
+        steps: ["login", "create-order", "update-order", "get-order", "cleanup-order"],
+        mappings: [
+          { jsonPath: "$.accessToken", variableName: "accessToken", secret: true },
+          { jsonPath: "$.id", variableName: "orderId", secret: false }
+        ]
+      }),
+      flow({
+        id: "product-search",
+        name: "Product Search",
+        steps: ["login", "search-products"],
+        mappings: [{ jsonPath: "$.accessToken", variableName: "accessToken", secret: true }]
+      })
     ],
     savedResponses: [
       {

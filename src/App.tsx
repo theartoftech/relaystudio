@@ -1,23 +1,21 @@
 import {
   Background,
-  Controls,
   Handle,
   MarkerType,
   Position,
   ReactFlow,
-  applyNodeChanges,
   type Connection,
   type Edge,
   type Node,
   type NodeChange,
-  type NodeProps
+  type NodeProps,
+  type Viewport
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
   Archive,
   Box,
   Braces,
-  CheckCircle2,
   ChevronDown,
   Database,
   FileJson,
@@ -26,6 +24,7 @@ import {
   GitBranch,
   KeyRound,
   Lock,
+  Pencil,
   Play,
   Plus,
   Save,
@@ -33,7 +32,6 @@ import {
   Send,
   SlidersHorizontal,
   Trash2,
-  UserCircle,
   X,
   Zap
 } from "lucide-react";
@@ -43,6 +41,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   useEffect,
   useMemo,
+  useRef,
   useState
 } from "react";
 import {
@@ -50,8 +49,10 @@ import {
   createSampleProject,
   touchProject,
   type AuthMode,
+  type FlowMapping,
   type HttpMethod,
   type KeyValueRow,
+  type FlowNodePosition,
   type ProjectEnvironment,
   type ProjectFlow,
   type ProjectService,
@@ -68,6 +69,7 @@ import {
   createService,
   deleteService,
   duplicateService,
+  findVariableReferences,
   formatJsonBody,
   minifyJsonBody,
   removeRow,
@@ -77,18 +79,34 @@ import {
 } from "./services/serviceDesigner";
 import {
   addFlowNode,
+  addFlowMapping,
+  applyFlowTemplate,
   connectFlowNodes,
+  disconnectFlowNodes,
+  deleteFlowMapping,
   deleteFlowNode,
+  FLOW_TEMPLATES,
   normalizeFlow,
   reorderFlowNode,
-  runFlow
+  resolveFlowNodeService,
+  runFlow,
+  updateFlowMapping,
+  type FlowTemplateId
 } from "./services/flowBuilder";
+import {
+  centerFlowViewportForNodes,
+  nextActiveDragPositions,
+  recoverVisibleFlowPositions,
+  resetFlowLayoutPositions,
+  type FlowCanvasSize
+} from "./services/flowCanvasState";
 import { createSavedResponsePersistence, type SavedResponsePersistence } from "./services/savedResponsePersistence";
 import {
   artifactToExecutedResponse,
   buildSavedResponseDraft,
   defaultSavedResponsePath
 } from "./services/savedResponses";
+import { formatResponseSize } from "./services/responseFormatting";
 import { runServiceRequest, type ExecutableRequest, type ExecutedResponse, type RunnerConsoleEvent } from "./services/serviceRunner";
 
 type TabKind = "welcome" | "request" | "flow" | "response" | "import" | "settings";
@@ -100,6 +118,30 @@ interface WorkbenchTab {
   method?: "GET" | "POST" | "PUT" | "DELETE";
   dirty?: boolean;
 }
+
+interface SessionProjectSnapshot {
+  id: string;
+  name: string;
+  path: string;
+  project: RelayProject;
+  tabs: WorkbenchTab[];
+  activeTabId: string;
+  activeServiceId: string;
+  activeFlowId: string;
+  environment: string;
+  projectDirty: boolean;
+}
+
+interface ProjectListTarget {
+  source: "session" | "recent";
+  id?: string;
+  name: string;
+  path: string;
+}
+
+type PendingProjectOpen =
+  | { type: "session"; snapshotId: string }
+  | { type: "recent"; recent: RecentProject };
 
 const initialTabs: WorkbenchTab[] = [
   { id: "welcome", label: "Welcome", kind: "welcome" },
@@ -139,6 +181,8 @@ export function App() {
   const [project, setProject] = useState<RelayProject>(() => createSampleProject());
   const [projectPath, setProjectPath] = useState("/private/tmp/sample-api-regression.restproj");
   const [projectDirty, setProjectDirty] = useState(false);
+  const [shellReady, setShellReady] = useState(() => !hasTauriRuntimeSync());
+  const [sessionProjects, setSessionProjects] = useState<SessionProjectSnapshot[]>([]);
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
   const [persistence, setPersistence] = useState<ProjectPersistence | null>(null);
   const [savedResponsePersistence, setSavedResponsePersistence] = useState<SavedResponsePersistence | null>(null);
@@ -149,6 +193,11 @@ export function App() {
     title: string;
     path: string;
   }>(null);
+  const [newProjectDialogOpen, setNewProjectDialogOpen] = useState(false);
+  const [renameProjectDialog, setRenameProjectDialog] = useState<ProjectListTarget | null>(null);
+  const [deleteProjectDialog, setDeleteProjectDialog] = useState<ProjectListTarget | null>(null);
+  const [renameFlowDialog, setRenameFlowDialog] = useState<ProjectFlow | null>(null);
+  const [renameRequestDialog, setRenameRequestDialog] = useState<ProjectService | null>(null);
   const [tabs, setTabs] = useState(initialTabs);
   const [activeTabId, setActiveTabId] = useState("create-order");
   const [activeServiceId, setActiveServiceId] = useState("create-order");
@@ -159,6 +208,8 @@ export function App() {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [responseVisible, setResponseVisible] = useState(true);
   const [savePromptOpen, setSavePromptOpen] = useState(false);
+  const [pendingProjectOpen, setPendingProjectOpen] = useState<PendingProjectOpen | null>(null);
+  const [saveThenOpenProject, setSaveThenOpenProject] = useState<PendingProjectOpen | null>(null);
   const [consoleFilter, setConsoleFilter] = useState("All Events");
   const [runnerResponse, setRunnerResponse] = useState<ExecutedResponse | null>(null);
   const [runnerRequest, setRunnerRequest] = useState<ExecutableRequest | null>(null);
@@ -180,6 +231,7 @@ export function App() {
   const activeService = project.services.find((service) => service.id === activeServiceId) ?? project.services[0];
   const activeFlow = project.flows.find((flow) => flow.id === activeFlowId) ?? project.flows[0];
   const requestPreview = activeService && activeEnvironment ? buildRequestPreview(activeService, activeEnvironment) : null;
+  const welcomeTabActive = activeTab.kind === "welcome";
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -202,12 +254,77 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    void createProjectPersistence().then(async (createdPersistence) => {
-      setPersistence(createdPersistence);
-      setRecentProjects(await createdPersistence.listRecentProjects());
-    });
-    void createSavedResponsePersistence().then(setSavedResponsePersistence);
+    function refreshButtonTooltips() {
+      document.querySelectorAll<HTMLButtonElement>("button").forEach((button) => {
+        if (button.title.trim() && button.dataset.autoTitle !== "true") return;
+        const label = button.getAttribute("aria-label")?.trim() || button.textContent?.replace(/\s+/g, " ").trim();
+        if (label) {
+          button.title = label;
+          button.dataset.autoTitle = "true";
+        }
+      });
+    }
+
+    refreshButtonTooltips();
+    const observer = new MutationObserver(refreshButtonTooltips);
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    return () => observer.disconnect();
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function initializeShell() {
+      try {
+        const [createdPersistence, createdSavedResponsePersistence] = await Promise.all([
+          createProjectPersistence(),
+          createSavedResponsePersistence()
+        ]);
+        const recent = await createdPersistence.listRecentProjects();
+        if (cancelled) return;
+        setPersistence(createdPersistence);
+        setSavedResponsePersistence(createdSavedResponsePersistence);
+        setRecentProjects(recent);
+      } catch (error) {
+        if (!cancelled) {
+          setProjectError(error instanceof Error ? error.message : String(error));
+        }
+      } finally {
+        if (!cancelled) setShellReady(true);
+      }
+    }
+
+    void initializeShell();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let unsubscribeOpenProject: undefined | (() => void);
+    let unsubscribeOpenRecent: undefined | (() => void);
+
+    async function registerMenuListeners() {
+      try {
+        const { listen } = await import("@tauri-apps/api/event");
+        unsubscribeOpenProject = await listen("relay-menu-open-project", () => {
+          setProjectDialog({ mode: "open", title: "Open Project", path: "" });
+        });
+        unsubscribeOpenRecent = await listen<RecentProject>("relay-menu-open-recent", (event) => {
+          requestOpenRecentProject(event.payload);
+        });
+      } catch {
+        unsubscribeOpenProject = undefined;
+        unsubscribeOpenRecent = undefined;
+      }
+    }
+
+    void registerMenuListeners();
+    return () => {
+      unsubscribeOpenProject?.();
+      unsubscribeOpenRecent?.();
+    };
+  }, [hasDirtyState, projectPath, recentProjects, sessionProjects, tabs]);
 
   useEffect(() => {
     let unsubscribe: undefined | (() => void);
@@ -244,6 +361,9 @@ export function App() {
     return requestPreview?.url ?? "{{baseUrl}}/api/orders";
   }, [activeTab.kind, requestPreview?.url]);
   const requestUrl = editableRequestUrl ?? computedRequestUrl;
+  const activeTabRunsRequest = activeTab.kind === "request";
+  const activeTabHasComposer = activeTab.kind === "request" || activeTab.kind === "flow";
+  const activeTabHasBottomDock = activeTabHasComposer || activeTab.kind === "response";
   const workspaceStyle = {
     "--explorer-width": `${layoutSizes.explorerWidth}px`,
     "--inspector-width": `${layoutSizes.inspectorWidth}px`
@@ -255,6 +375,10 @@ export function App() {
   useEffect(() => {
     setEditableRequestUrl(null);
   }, [activeServiceId, activeTab.kind, environment]);
+
+  if (!shellReady) {
+    return <StartupShell />;
+  }
 
   function openPlaceholderTab(kind: TabKind, label: string) {
     const id = `${kind}-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
@@ -292,7 +416,18 @@ export function App() {
     setActiveTabId(flow.id);
   }
 
-  function updateProjectServices(nextServices: ProjectService[], message = "Service definition updated.") {
+  function handleSelectTab(tabId: string) {
+    const tab = tabs.find((item) => item.id === tabId);
+    setActiveTabId(tabId);
+    if (tab?.kind === "request" && project.services.some((service) => service.id === tab.id)) {
+      setActiveServiceId(tab.id);
+    }
+    if (tab?.kind === "flow" && project.flows.some((flow) => flow.id === tab.id)) {
+      setActiveFlowId(tab.id);
+    }
+  }
+
+  function updateProjectServices(nextServices: ProjectService[], message = "Request definition updated.") {
     setProject((current) => touchProject({ ...current, services: nextServices }));
     setProjectDirty(true);
     setTabs((current) => current.map((tab) => (tab.id === activeTabId ? { ...tab, dirty: true } : tab)));
@@ -333,6 +468,28 @@ export function App() {
     )));
   }
 
+  function handleRenameRequest(serviceId: string, name: string) {
+    const requestName = name.trim();
+    if (!requestName) {
+      setProjectError("Request name is required.");
+      return;
+    }
+    if (!project.services.some((service) => service.id === serviceId)) {
+      setProjectError("Request could not be renamed because it no longer exists.");
+      setRenameRequestDialog(null);
+      return;
+    }
+
+    updateProjectServices(
+      project.services.map((service) => (service.id === serviceId ? { ...service, name: requestName } : service)),
+      `Request renamed to ${requestName}.`
+    );
+    setTabs((current) => current.map((tab) => (
+      tab.id === serviceId ? { ...tab, label: requestName, dirty: true } : tab
+    )));
+    setRenameRequestDialog(null);
+  }
+
   function handleRequestUrlChange(value: string) {
     setEditableRequestUrl(value);
     if (!activeService || !activeEnvironment || activeTab.kind !== "request") return;
@@ -356,21 +513,21 @@ export function App() {
 
   function handleCreateService() {
     const next = createService({ id: `service-${project.services.length + 1}` });
-    updateProjectServices([...project.services, next], "New service created.");
+    updateProjectServices([...project.services, next], "New request created.");
     handleSelectService(next);
   }
 
   function handleDuplicateService() {
     if (!activeService) return;
     const copy = duplicateService(activeService, project.services.map((service) => service.id));
-    updateProjectServices([...project.services, copy], "Service duplicated.");
+    updateProjectServices([...project.services, copy], "Request duplicated.");
     handleSelectService(copy);
   }
 
   function handleDeleteService() {
     if (!activeService) return;
     const nextServices = deleteService(project.services, activeService.id);
-    updateProjectServices(nextServices, "Service deleted.");
+    updateProjectServices(nextServices, "Request deleted.");
     const nextActive = nextServices[0];
     if (nextActive) {
       handleSelectService(nextActive);
@@ -379,7 +536,7 @@ export function App() {
 
   function handleMoveService(direction: "up" | "down") {
     if (!activeService) return;
-    updateProjectServices(reorderService(project.services, activeService.id, direction), "Service order updated.");
+    updateProjectServices(reorderService(project.services, activeService.id, direction), "Request order updated.");
   }
 
   function handleAddFlowNode(flowId: string, serviceId: string) {
@@ -396,17 +553,54 @@ export function App() {
     updateFlow(flowId, (flow) => connectFlowNodes(flow, source, target, condition), `${condition === "success" ? "Success" : "Failure"} path added.`);
   }
 
+  function handleDisconnectFlowNodes(flowId: string, source: string, target: string, condition: "success" | "failure") {
+    updateFlow(flowId, (flow) => disconnectFlowNodes(flow, source, target, condition), `${condition === "success" ? "Success" : "Failure"} path removed.`);
+  }
+
   function handleReorderFlowNode(flowId: string, nodeId: string, direction: "left" | "right") {
     updateFlow(flowId, (flow) => reorderFlowNode(flow, nodeId, direction), "Flow step order updated.");
   }
 
   function handleMoveFlowNode(flowId: string, nodeId: string, position: { x: number; y: number }) {
-    updateFlow(flowId, (flow) => ({
-      ...flow,
-      nodes: normalizeFlow(flow).nodes.map((node) => (
-        node.id === nodeId ? { ...node, position } : node
+    const flow = project.flows.find((item) => item.id === flowId);
+    const node = flow ? normalizeFlow(flow).nodes.find((item) => item.id === nodeId) : undefined;
+    if (!node || positionsEqual(node.position, position)) return;
+    updateFlow(flowId, (currentFlow) => ({
+      ...currentFlow,
+      nodes: normalizeFlow(currentFlow).nodes.map((currentNode) => (
+        currentNode.id === nodeId ? { ...currentNode, position } : currentNode
       ))
     }), "Flow layout updated.");
+  }
+
+  function handleResetFlowLayout(flowId: string) {
+    updateFlow(flowId, (flow) => {
+      const normalized = normalizeFlow(flow);
+      const positions = resetFlowLayoutPositions(normalized.nodes);
+      return {
+        ...normalized,
+        nodes: normalized.nodes.map((node) => ({
+          ...node,
+          position: positions[node.id] ?? node.position
+        }))
+      };
+    }, "Flow layout reset.");
+  }
+
+  function handleAddFlowMapping(flowId: string, sourceNodeId: string, preset?: Partial<Omit<FlowMapping, "id" | "sourceNodeId">>) {
+    updateFlow(flowId, (flow) => addFlowMapping(flow, sourceNodeId, preset), "Flow mapping added.");
+  }
+
+  function handleUpdateFlowMapping(flowId: string, mappingId: string, patch: Partial<Omit<FlowMapping, "id">>) {
+    updateFlow(flowId, (flow) => updateFlowMapping(flow, mappingId, patch), "Flow mapping updated.");
+  }
+
+  function handleDeleteFlowMapping(flowId: string, mappingId: string) {
+    updateFlow(flowId, (flow) => deleteFlowMapping(flow, mappingId), "Flow mapping deleted.");
+  }
+
+  function handleApplyFlowTemplate(flowId: string, templateId: FlowTemplateId) {
+    updateFlow(flowId, (flow) => applyFlowTemplate(flow, templateId), "Flow template applied.");
   }
 
   function handleCreateFlow() {
@@ -416,7 +610,8 @@ export function App() {
       name: `New Flow ${flowNumber}`,
       steps: [],
       nodes: [],
-      edges: []
+      edges: [],
+      mappings: []
     };
     updateProjectFlows([...project.flows, nextFlow], "New flow created.");
     handleSelectFlow(nextFlow);
@@ -435,6 +630,71 @@ export function App() {
     if (activeFlowId === flowId) {
       setActiveFlowId(nextFlows[0]?.id ?? "");
     }
+  }
+
+  function handleRenameFlow(flowId: string, name: string) {
+    const flowName = name.trim();
+    if (!flowName) {
+      setProjectError("Flow name is required.");
+      return;
+    }
+    if (!project.flows.some((flow) => flow.id === flowId)) {
+      setProjectError("Flow could not be renamed because it no longer exists.");
+      setRenameFlowDialog(null);
+      return;
+    }
+
+    updateProjectFlows(
+      project.flows.map((flow) => (flow.id === flowId ? { ...flow, name: flowName } : flow)),
+      `Flow renamed to ${flowName}.`
+    );
+    setTabs((current) => current.map((tab) => (
+      tab.id === flowId || (tab.id === activeTabId && activeFlowId === flowId && tab.kind === "flow")
+        ? { ...tab, id: flowId, label: flowName, kind: "flow", dirty: true }
+        : tab
+    )));
+    if (activeFlowId === flowId) setActiveTabId(flowId);
+    setRenameFlowDialog(null);
+  }
+
+  function updateActiveEnvironment(updater: (environment: ProjectEnvironment) => ProjectEnvironment, message = "Environment updated.") {
+    if (!activeEnvironment) return;
+    setProject((current) => touchProject({
+      ...current,
+      environments: current.environments.map((item) => (
+        item.id === activeEnvironment.id ? updater(item) : item
+      ))
+    }));
+    setProjectDirty(true);
+    setTabs((current) => current.map((tab) => (tab.id === activeTabId ? { ...tab, dirty: true } : tab)));
+    setProjectMessage(message);
+    setProjectError(null);
+  }
+
+  function handleAddEnvironmentVariable() {
+    updateActiveEnvironment((current) => ({
+      ...current,
+      variables: [
+        ...current.variables,
+        { name: uniqueEnvironmentVariableName(current.variables, "newVariable"), value: "", secret: false }
+      ]
+    }), "Environment variable added.");
+  }
+
+  function handleUpdateEnvironmentVariable(index: number, patch: Partial<ProjectVariable>) {
+    updateActiveEnvironment((current) => ({
+      ...current,
+      variables: current.variables.map((variable, variableIndex) => (
+        variableIndex === index ? { ...variable, ...patch } : variable
+      ))
+    }), "Environment variable updated.");
+  }
+
+  function handleDeleteEnvironmentVariable(index: number) {
+    updateActiveEnvironment((current) => ({
+      ...current,
+      variables: current.variables.filter((_variable, variableIndex) => variableIndex !== index)
+    }), "Environment variable deleted.");
   }
 
   async function handleSendRequest() {
@@ -489,16 +749,26 @@ export function App() {
     if (!activeFlow || !activeEnvironment) return;
     setRunnerRunning(true);
     setRunnerError(null);
-    setResponseVisible(false);
+    setResponseVisible(true);
 
     const result = await runFlow(activeFlow, project.services, activeEnvironment);
-    updateProjectFlows(project.flows.map((flow) => (
-      flow.id === activeFlow.id ? result.flow : flow
-    )), result.issues.some((issue) => issue.severity === "error") ? "Flow blocked before execution." : "Flow run completed.");
+    setProject((current) => touchProject({
+      ...current,
+      flows: current.flows.map((flow) => (
+        flow.id === activeFlow.id ? result.flow : flow
+      )),
+      environments: current.environments.map((item) => (
+        item.id === activeEnvironment.id ? result.environment : item
+      ))
+    }));
+    setProjectDirty(true);
+    setTabs((current) => current.map((tab) => (tab.id === activeTabId ? { ...tab, dirty: true } : tab)));
+    setProjectMessage(result.issues.some((issue) => issue.severity === "error") ? "Flow blocked or failed during mapping." : "Flow run completed.");
+    setProjectError(null);
     setRunnerEvents(result.events);
-    setRunnerResponse(null);
-    setRunnerRequest(null);
-    setRunnerError(result.issues.length ? result.issues.map((issue) => issue.message).join(" ") : null);
+    setRunnerResponse(result.response);
+    setRunnerRequest(result.request);
+    setRunnerError(result.issues.length ? result.issues.map((issue) => issue.message).join(" ") : result.error);
     setRunnerRunning(false);
   }
 
@@ -585,6 +855,7 @@ export function App() {
     <main className="app-shell" aria-label="Relay Studio desktop shell">
       <TopCommandBar
         activeTab={activeTab}
+        canSendRequest={activeTabRunsRequest}
         projectName={project.name}
         projectDirty={hasDirtyState}
         environment={environment}
@@ -601,21 +872,34 @@ export function App() {
         <ProjectExplorer
           groupedServices={groupedServices}
           project={project}
+          projectPath={projectPath}
           projectDirty={hasDirtyState}
+          sessionProjects={sessionProjects}
           recentProjects={recentProjects}
           projectMessage={projectMessage}
           projectError={projectError}
-          onMarkDirty={markProjectDirty}
-          onCreateService={handleCreateService}
-          onOpenRecent={(recent) => setProjectDialog({ mode: "open", title: "Open Recent Project", path: recent.path })}
+          onCreateProject={() => setNewProjectDialogOpen(true)}
+          onOpenSessionProject={requestOpenSessionProject}
+          onOpenRecent={requestOpenRecentProject}
+          onRenameProject={setRenameProjectDialog}
+          onDeleteProject={setDeleteProjectDialog}
           onOpenSettings={() => openPlaceholderTab("settings", "Settings")}
           onOpenImport={() => openPlaceholderTab("import", "Import API Docs")}
           activeServiceId={activeService?.id ?? ""}
           onSelectService={handleSelectService}
+          onCreateRequest={handleCreateService}
+          onRenameRequest={(serviceId) => {
+            const service = project.services.find((item) => item.id === serviceId);
+            if (service) setRenameRequestDialog(service);
+          }}
           activeFlowId={activeFlow?.id ?? ""}
           onSelectFlow={handleSelectFlow}
           onCreateFlow={handleCreateFlow}
           onDeleteFlow={handleDeleteFlow}
+          onRenameFlow={(flowId) => {
+            const flow = project.flows.find((item) => item.id === flowId);
+            if (flow) setRenameFlowDialog(flow);
+          }}
           onOpenSavedResponse={handleOpenSavedResponse}
         />
         <ResizeHandle
@@ -627,15 +911,36 @@ export function App() {
           }))}
         />
 
-        <section className="workbench" aria-label="Workbench" style={workbenchStyle}>
-          <TabStrip tabs={tabs} activeTabId={activeTabId} onSelect={setActiveTabId} onClose={closeTab} onNewTab={handleCreateService} />
-          <RequestComposer
-            requestUrl={requestUrl}
-            activeTab={activeTab}
-            onRequestUrlChange={handleRequestUrlChange}
-            onSendRequest={handleSendRequest}
-            runnerRunning={runnerRunning}
+        <section className={welcomeTabActive ? "workbench welcome-workbench" : "workbench"} aria-label="Workbench" style={workbenchStyle}>
+          <TabStrip
+            tabs={tabs}
+            activeTabId={activeTabId}
+            onSelect={handleSelectTab}
+            onClose={closeTab}
+            onNewTab={handleCreateService}
+            onRenameRequest={(serviceId) => {
+              const service = project.services.find((item) => item.id === serviceId);
+              if (service) setRenameRequestDialog(service);
+            }}
+            onRenameFlow={(flowId) => {
+              const flow = project.flows.find((item) => item.id === flowId);
+              if (flow) setRenameFlowDialog(flow);
+            }}
           />
+          {activeTabHasComposer ? (
+            <RequestComposer
+              requestUrl={requestUrl}
+              activeTab={activeTab}
+              onRequestUrlChange={handleRequestUrlChange}
+              onMethodChange={(method) => {
+                if (activeTab.kind === "request") {
+                  updateActiveService((service) => ({ ...service, method }), "HTTP method updated.");
+                }
+              }}
+              onSendRequest={handleSendRequest}
+              runnerRunning={runnerRunning}
+            />
+          ) : null}
           <RequestEditor
             activeTab={activeTab}
             activeService={activeService}
@@ -651,30 +956,38 @@ export function App() {
             onAddFlowNode={handleAddFlowNode}
             onDeleteFlowNode={handleDeleteFlowNode}
             onConnectFlowNodes={handleConnectFlowNodes}
+            onDisconnectFlowNodes={handleDisconnectFlowNodes}
             onReorderFlowNode={handleReorderFlowNode}
             onMoveFlowNode={handleMoveFlowNode}
-            onRunFlow={handleRunFlow}
-            runnerRunning={runnerRunning}
+            onResetFlowLayout={handleResetFlowLayout}
+            onAddFlowMapping={handleAddFlowMapping}
+            onUpdateFlowMapping={handleUpdateFlowMapping}
+            onDeleteFlowMapping={handleDeleteFlowMapping}
+            onApplyFlowTemplate={handleApplyFlowTemplate}
           />
-          <ResizeHandle
-            ariaLabel="Resize utility dock"
-            orientation="horizontal"
-            onResize={(delta) => setLayoutSizes((current) => ({
-              ...current,
-              bottomDockHeight: clamp(current.bottomDockHeight - delta, 180, 520)
-            }))}
-          />
-          <BottomDock
-            responseVisible={responseVisible}
-            onToggleResponse={() => setResponseVisible((visible) => !visible)}
-            consoleFilter={consoleFilter}
-            onConsoleFilterChange={setConsoleFilter}
-            runnerResponse={runnerResponse}
-            runnerEvents={runnerEvents}
-            runnerError={runnerError}
-            canSaveResponse={Boolean(runnerResponse && runnerRequest)}
-            onSaveResponse={openSaveResponseDialog}
-          />
+          {activeTabHasBottomDock ? (
+            <>
+              <ResizeHandle
+                ariaLabel="Resize utility dock"
+                orientation="horizontal"
+                onResize={(delta) => setLayoutSizes((current) => ({
+                  ...current,
+                  bottomDockHeight: clamp(current.bottomDockHeight - delta, 180, 520)
+                }))}
+              />
+              <BottomDock
+                responseVisible={responseVisible}
+                onToggleResponse={() => setResponseVisible((visible) => !visible)}
+                consoleFilter={consoleFilter}
+                onConsoleFilterChange={setConsoleFilter}
+                runnerResponse={runnerResponse}
+                runnerEvents={runnerEvents}
+                runnerError={runnerError}
+                canSaveResponse={Boolean(runnerResponse && runnerRequest)}
+                onSaveResponse={openSaveResponseDialog}
+              />
+            </>
+          ) : null}
         </section>
 
         {inspectorOpen ? (
@@ -688,7 +1001,14 @@ export function App() {
                 inspectorWidth: clamp(current.inspectorWidth - delta, 240, 460)
               }))}
             />
-            <Inspector environment={environment} activeTab={activeTab} onClose={() => setInspectorOpen(false)} />
+            <Inspector
+              environment={activeEnvironment}
+              activeTab={activeTab}
+              onAddVariable={handleAddEnvironmentVariable}
+              onClose={() => setInspectorOpen(false)}
+              onDeleteVariable={handleDeleteEnvironmentVariable}
+              onUpdateVariable={handleUpdateEnvironmentVariable}
+            />
           </>
         ) : null}
       </section>
@@ -698,7 +1018,7 @@ export function App() {
           setCommandPaletteOpen(false);
           if (label === "Import API Docs") openPlaceholderTab("import", label);
           if (label === "Settings") openPlaceholderTab("settings", label);
-          if (label === "New Project") handleNewProject();
+          if (label === "New Project") setNewProjectDialogOpen(true);
           if (label === "Open Project") setProjectDialog({ mode: "open", title: "Open Project", path: projectPath });
           if (label === "Save Project") setProjectDialog({ mode: "save", title: "Save Project", path: projectPath });
           if (label === "Save Project As") setProjectDialog({ mode: "save", title: "Save Project As", path: "" });
@@ -711,13 +1031,23 @@ export function App() {
 
       {savePromptOpen ? (
         <SavePrompt
-          onCancel={() => setSavePromptOpen(false)}
+          onCancel={() => {
+            setPendingProjectOpen(null);
+            setSavePromptOpen(false);
+          }}
           onDiscard={() => {
             setProjectDirty(false);
             setTabs((current) => current.map((tab) => ({ ...tab, dirty: false })));
             setSavePromptOpen(false);
+            const pending = pendingProjectOpen;
+            setPendingProjectOpen(null);
+            if (pending) void openPendingProject(pending, { preserveCurrent: false });
           }}
           onSave={() => {
+            if (pendingProjectOpen) {
+              setSaveThenOpenProject(pendingProjectOpen);
+              setPendingProjectOpen(null);
+            }
             setSavePromptOpen(false);
             setProjectDialog({ mode: "save", title: "Save Project", path: projectPath });
           }}
@@ -731,13 +1061,62 @@ export function App() {
           recentProjects={recentProjects}
           projectExists={handleProjectExists}
           onCancel={() => setProjectDialog(null)}
-          onSubmit={async ({ path, password }) => {
+          onSubmit={async ({ path }) => {
             if (projectDialog.mode === "save") {
-              await handleSaveProject(path, password);
+              await handleSaveProject(path);
             } else {
-              await handleOpenProject(path, password);
+              await handleOpenProject(path);
             }
           }}
+        />
+      ) : null}
+
+      {newProjectDialogOpen ? (
+        <ProjectNameDialog
+          title="New Project"
+          initialName="Untitled API Project"
+          submitLabel="Create Project"
+          onCancel={() => setNewProjectDialogOpen(false)}
+          onSubmit={handleCreateNamedProject}
+        />
+      ) : null}
+
+      {renameProjectDialog ? (
+        <ProjectNameDialog
+          title="Rename Project"
+          initialName={renameProjectDialog.name}
+          submitLabel="Rename Project"
+          onCancel={() => setRenameProjectDialog(null)}
+          onSubmit={(name) => handleRenameProject(renameProjectDialog, name)}
+        />
+      ) : null}
+
+      {deleteProjectDialog ? (
+        <DeleteProjectDialog
+          target={deleteProjectDialog}
+          onCancel={() => setDeleteProjectDialog(null)}
+          onDelete={() => handleDeleteProject(deleteProjectDialog)}
+        />
+      ) : null}
+
+      {renameFlowDialog ? (
+        <ProjectNameDialog
+          title="Rename Flow"
+          initialName={renameFlowDialog.name}
+          submitLabel="Rename Flow"
+          onCancel={() => setRenameFlowDialog(null)}
+          onSubmit={(name) => handleRenameFlow(renameFlowDialog.id, name)}
+        />
+      ) : null}
+
+      {renameRequestDialog ? (
+        <ProjectNameDialog
+          title="Rename Request"
+          initialName={renameRequestDialog.name}
+          submitLabel="Rename Request"
+          fieldLabel="Request name"
+          onCancel={() => setRenameRequestDialog(null)}
+          onSubmit={(name) => handleRenameRequest(renameRequestDialog.id, name)}
         />
       ) : null}
 
@@ -752,14 +1131,9 @@ export function App() {
     </main>
   );
 
-  function markProjectDirty(message = "Project has unsaved changes.") {
-    setProjectDirty(true);
-    setTabs((current) => current.map((tab) => (tab.id === activeTabId ? { ...tab, dirty: true } : tab)));
-    setProjectMessage(message);
-    setProjectError(null);
-  }
-
-  function handleNewProject() {
+  function handleCreateNamedProject(name: string) {
+    const projectName = name.trim();
+    const snapshot = createSessionProjectSnapshot();
     const starterService = createService({
       id: "request-1",
       folder: "Requests",
@@ -771,8 +1145,11 @@ export function App() {
     });
     const nextProject = {
       ...createEmptyProject(),
+      id: slugForId(projectName),
+      name: projectName,
       services: [starterService]
     };
+    setSessionProjects((current) => upsertSessionProjectSnapshot(current, snapshot));
     setProject(nextProject);
     setProjectPath("");
     setEnvironment(nextProject.environments[0]?.name ?? "QA Environment");
@@ -785,36 +1162,112 @@ export function App() {
     ]);
     setActiveTabId(starterService.id);
     setEditableRequestUrl(null);
-    setProjectMessage("New unsaved project created with a starter request.");
+    setNewProjectDialogOpen(false);
+    setProjectMessage(`New unsaved project "${projectName}" created with a starter request.`);
     setProjectError(null);
   }
 
-  async function handleSaveProject(path: string, password: string) {
+  function createSessionProjectSnapshot(): SessionProjectSnapshot {
+    return {
+      id: `${project.id}:${projectPath || "unsaved"}`,
+      name: project.name,
+      path: projectPath,
+      project,
+      tabs,
+      activeTabId,
+      activeServiceId,
+      activeFlowId,
+      environment,
+      projectDirty
+    };
+  }
+
+  function requestOpenSessionProject(snapshotId: string) {
+    requestProjectOpen({ type: "session", snapshotId });
+  }
+
+  function requestOpenRecentProject(recent: RecentProject) {
+    requestProjectOpen({ type: "recent", recent });
+  }
+
+  function requestProjectOpen(pending: PendingProjectOpen) {
+    if (hasDirtyState) {
+      setPendingProjectOpen(pending);
+      setSavePromptOpen(true);
+      return;
+    }
+    void openPendingProject(pending, { preserveCurrent: true });
+  }
+
+  async function openPendingProject(pending: PendingProjectOpen, options: { preserveCurrent: boolean }) {
+    if (options.preserveCurrent) {
+      preserveCurrentProjectBeforeSwitch(pending);
+    }
+    if (pending.type === "session") {
+      openSessionProjectNow(pending.snapshotId);
+    } else {
+      await handleOpenProject(pending.recent.path);
+    }
+  }
+
+  function preserveCurrentProjectBeforeSwitch(pending: PendingProjectOpen) {
+    const snapshot = createSessionProjectSnapshot();
+    if (pending.type === "session" && pending.snapshotId === snapshot.id) return;
+    if (pending.type === "recent" && pending.recent.path === projectPath) return;
+    setSessionProjects((current) => upsertSessionProjectSnapshot(current, snapshot));
+  }
+
+  function openSessionProjectNow(snapshotId: string) {
+    const snapshot = sessionProjects.find((item) => item.id === snapshotId);
+    if (!snapshot) return;
+    const restoredTabs = reconcileTabsForProject(snapshot.project, snapshot.tabs);
+    const restoredActiveTabId = reconcileActiveTabId(snapshot.project, restoredTabs, snapshot.activeTabId, snapshot.activeServiceId, snapshot.activeFlowId);
+    setSessionProjects((current) => current.filter((item) => item.id !== snapshotId));
+    setProject(snapshot.project);
+    setProjectPath(snapshot.path);
+    setTabs(restoredTabs);
+    setActiveTabId(restoredActiveTabId);
+    setActiveServiceId(snapshot.activeServiceId);
+    setActiveFlowId(snapshot.activeFlowId);
+    setEnvironment(snapshot.environment);
+    setProjectDirty(snapshot.projectDirty);
+    setEditableRequestUrl(null);
+    setProjectMessage(`Restored ${snapshot.name}.`);
+    setProjectError(null);
+  }
+
+  async function handleSaveProject(path: string) {
     try {
       const projectPersistence = persistence ?? await createProjectPersistence();
       if (!persistence) setPersistence(projectPersistence);
-      const updated = touchProject(project);
-      await projectPersistence.saveProject({ path, password, project: updated });
+      const updated = touchProject(normalizeProjectForSave(project));
+      await projectPersistence.saveProject({ path, project: updated });
       const recent = { name: updated.name, path, openedAt: new Date().toISOString() };
       await projectPersistence.rememberRecentProject(recent);
       setProject(updated);
       setProjectPath(path);
       setProjectDirty(false);
       setTabs((current) => current.map((tab) => ({ ...tab, dirty: false })));
-      setRecentProjects(await projectPersistence.listRecentProjects());
+      await refreshRecentProjects(projectPersistence);
       setProjectDialog(null);
-      setProjectMessage(`Project saved to ${path}.`);
+      const pending = saveThenOpenProject;
+      setSaveThenOpenProject(null);
+      if (pending) {
+        await openPendingProject(pending, { preserveCurrent: true });
+      } else {
+        setProjectMessage(`Project saved to ${path}.`);
+      }
       setProjectError(null);
     } catch (error) {
       setProjectError(error instanceof Error ? error.message : String(error));
     }
   }
 
-  async function handleOpenProject(path: string, password: string) {
+  async function handleOpenProject(path: string) {
+    const projectPersistence = persistence ?? await createProjectPersistence();
+    if (!persistence) setPersistence(projectPersistence);
     try {
-      const projectPersistence = persistence ?? await createProjectPersistence();
-      if (!persistence) setPersistence(projectPersistence);
-      const opened = await projectPersistence.openProject({ path, password });
+      const opened = await projectPersistence.openProject({ path });
       const recent = { name: opened.name, path, openedAt: new Date().toISOString() };
       await projectPersistence.rememberRecentProject(recent);
       setProject(opened);
@@ -823,14 +1276,24 @@ export function App() {
       setActiveServiceId(opened.services[0]?.id ?? "");
       setActiveFlowId(opened.flows[0]?.id ?? "");
       setProjectDirty(false);
-      setTabs(initialTabs.map((tab) => ({ ...tab, dirty: false })));
+      setTabs(createDefaultTabsForProject(opened));
       setActiveTabId("welcome");
-      setRecentProjects(await projectPersistence.listRecentProjects());
+      await refreshRecentProjects(projectPersistence);
       setProjectDialog(null);
       setProjectMessage(`Project opened from ${path}.`);
       setProjectError(null);
     } catch (error) {
-      setProjectError(error instanceof Error ? error.message : String(error));
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.startsWith("Project file was not found")) {
+        try {
+          await projectPersistence.removeRecentProject(path);
+          await refreshRecentProjects(projectPersistence);
+        } catch {
+          setRecentProjects((current) => current.filter((recent) => recent.path !== path));
+        }
+      }
+      setProjectDialog(null);
+      setProjectError(message);
     }
   }
 
@@ -839,10 +1302,85 @@ export function App() {
     if (!persistence) setPersistence(projectPersistence);
     return projectPersistence.projectExists(path);
   }
+
+  async function handleRenameProject(target: ProjectListTarget, name: string) {
+    const projectName = name.trim();
+    try {
+      const projectPersistence = persistence ?? await createProjectPersistence();
+      if (!persistence) setPersistence(projectPersistence);
+      if (target.path) {
+        await projectPersistence.renameProject({ path: target.path, name: projectName });
+        await refreshRecentProjects(projectPersistence);
+      }
+      setSessionProjects((current) => current.map((snapshot) => (
+        snapshot.id === target.id || (target.path && snapshot.path === target.path)
+          ? { ...snapshot, name: projectName, project: { ...snapshot.project, name: projectName } }
+          : snapshot
+      )));
+      if (target.path && target.path === projectPath) {
+        setProject((current) => ({ ...current, name: projectName }));
+      }
+      setRenameProjectDialog(null);
+      setProjectMessage(`Project renamed to ${projectName}.`);
+      setProjectError(null);
+    } catch (error) {
+      setProjectError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function handleDeleteProject(target: ProjectListTarget) {
+    try {
+      const projectPersistence = persistence ?? await createProjectPersistence();
+      if (!persistence) setPersistence(projectPersistence);
+      if (target.path) {
+        await projectPersistence.deleteProject(target.path);
+        await refreshRecentProjects(projectPersistence);
+      }
+      setSessionProjects((current) => current.filter((snapshot) => (
+        snapshot.id !== target.id && (!target.path || snapshot.path !== target.path)
+      )));
+      if (target.path && target.path === projectPath) {
+        setProjectPath("");
+        setProjectDirty(true);
+        setTabs((current) => current.map((tab) => ({ ...tab, dirty: true })));
+      }
+      setDeleteProjectDialog(null);
+      setProjectMessage(`Deleted project ${target.name}.`);
+      setProjectError(null);
+    } catch (error) {
+      setProjectError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function refreshRecentProjects(projectPersistence: ProjectPersistence) {
+    const recent = await projectPersistence.listRecentProjects();
+    setRecentProjects(recent);
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("refresh_app_menu");
+    } catch {
+      // Browser fallback does not have a native menu to refresh.
+    }
+  }
+}
+
+function StartupShell() {
+  return (
+    <main className="app-shell startup-shell" aria-label="Relay Studio starting">
+      <div className="startup-panel" role="status" aria-live="polite">
+        <span className="brand-mark" aria-hidden="true"><Zap size={24} strokeWidth={2.4} /></span>
+        <div>
+          <strong>Relay Studio</strong>
+          <span>Preparing workspace...</span>
+        </div>
+      </div>
+    </main>
+  );
 }
 
 interface TopCommandBarProps {
   activeTab: WorkbenchTab;
+  canSendRequest: boolean;
   projectName: string;
   projectDirty: boolean;
   environment: string;
@@ -856,7 +1394,6 @@ interface TopCommandBarProps {
 }
 
 function TopCommandBar(props: TopCommandBarProps) {
-  const actionLabel = props.activeTab.kind === "flow" ? "Run Flow" : "Send Request";
   return (
     <header className="top-command-bar">
       <div className="brand-lockup" aria-label="Relay Studio">
@@ -876,10 +1413,19 @@ function TopCommandBar(props: TopCommandBarProps) {
           <Save size={18} />
           <span>{props.projectDirty ? "Save *" : "Save"}</span>
         </button>
-        <button type="button" className="primary-command" onClick={props.onSendRequest} disabled={props.runnerRunning}>
-          {props.activeTab.kind === "flow" ? <Play size={18} /> : <Send size={18} />}
-          <span>{props.runnerRunning ? "Running..." : actionLabel}</span>
-        </button>
+        {props.canSendRequest ? (
+          <button
+            type="button"
+            className="primary-command"
+            aria-label="Send Request"
+            title="Send Request"
+            onClick={props.onSendRequest}
+            disabled={props.runnerRunning}
+          >
+            <Send size={18} />
+            <span>{props.runnerRunning ? "Running..." : "Send Request"}</span>
+          </button>
+        ) : null}
         <label className="environment-select">
           <span className="status-dot" />
           <select value={props.environment} onChange={(event) => props.onEnvironmentChange(event.target.value)}>
@@ -897,7 +1443,6 @@ function TopCommandBar(props: TopCommandBarProps) {
         >
           <SlidersHorizontal size={19} />
         </button>
-        <button type="button" className="chrome-icon" aria-label="User"><UserCircle size={21} /></button>
       </div>
     </header>
   );
@@ -958,29 +1503,48 @@ function ResizeHandle({
 function ProjectExplorer(props: {
   groupedServices: Array<{ folder: string; items: ProjectService[] }>;
   project: RelayProject;
+  projectPath: string;
   projectDirty: boolean;
+  sessionProjects: SessionProjectSnapshot[];
   recentProjects: RecentProject[];
   projectMessage: string;
   projectError: string | null;
   activeServiceId: string;
   onSelectService: (service: ProjectService) => void;
+  onCreateRequest: () => void;
+  onRenameRequest: (serviceId: string) => void;
   activeFlowId: string;
   onSelectFlow: (flow: ProjectFlow) => void;
   onCreateFlow: () => void;
   onDeleteFlow: (flowId: string) => void;
-  onMarkDirty: () => void;
+  onRenameFlow: (flowId: string) => void;
+  onOpenSessionProject: (snapshotId: string) => void;
   onOpenRecent: (recent: RecentProject) => void;
+  onRenameProject: (target: ProjectListTarget) => void;
+  onDeleteProject: (target: ProjectListTarget) => void;
   onOpenImport: () => void;
   onOpenSettings: () => void;
-  onCreateService: () => void;
+  onCreateProject: () => void;
   onOpenSavedResponse: (metadata: SavedResponseMetadata) => void;
 }) {
   const [contextMenu, setContextMenu] = useState<null | {
     x: number;
     y: number;
-    target: "flows" | "flow";
+    target: "requests" | "request" | "flows" | "flow" | "project";
+    serviceId?: string;
     flowId?: string;
+    projectTarget?: ProjectListTarget;
   }>(null);
+  const visibleSessionProjects = props.sessionProjects
+    .filter((snapshot) => !isActiveProjectListTarget(props.project.name, props.projectPath, snapshot.name, snapshot.path))
+    .slice(0, 5);
+  const visibleSessionProjectPaths = new Set(visibleSessionProjects.map((snapshot) => snapshot.path).filter(Boolean));
+  const visibleSessionProjectNames = new Set(visibleSessionProjects.map((snapshot) => snapshot.name.toLowerCase()));
+  const visibleRecentProjects = props.recentProjects.filter((recent) => (
+    !isActiveProjectListTarget(props.project.name, props.projectPath, recent.name, recent.path)
+      && !visibleSessionProjectPaths.has(recent.path)
+      && !visibleSessionProjectNames.has(recent.name.toLowerCase())
+  )).slice(0, Math.max(0, 5 - visibleSessionProjects.length));
 
   useEffect(() => {
     if (!contextMenu) return;
@@ -1001,13 +1565,13 @@ function ProjectExplorer(props: {
         <div>
           <p>Explorer</p>
           <h1>{props.project.name}{props.projectDirty ? " *" : ""}</h1>
-          <span>{props.project.services.length} services - {props.project.flows.length} flows</span>
+          <span>{props.project.services.length} requests - {props.project.flows.length} flows</span>
         </div>
-        <button type="button" aria-label="New service" onClick={props.onCreateService}><Plus size={17} /></button>
+        <button type="button" aria-label="New project" onClick={props.onCreateProject}><Plus size={17} /></button>
       </div>
       <label className="explorer-search">
         <Search size={16} />
-        <input placeholder="Search projects and services" />
+        <input placeholder="Search projects and requests" />
       </label>
       <button type="button" className="import-callout" onClick={props.onOpenImport}>
         <Database size={18} />
@@ -1015,7 +1579,11 @@ function ProjectExplorer(props: {
         <strong>Import API Docs</strong>
       </button>
       <div className="tree-scroll">
-        <TreeSection title="Services" count={String(props.project.services.length)}>
+        <TreeSection
+          title="Requests"
+          count={String(props.project.services.length)}
+          onContextMenu={(position) => setContextMenu({ ...position, target: "requests" })}
+        >
           {props.groupedServices.map((group) => (
             <div className="tree-folder" key={group.folder}>
               <button type="button" className="tree-folder-label">
@@ -1029,6 +1597,16 @@ function ProjectExplorer(props: {
                   className={item.id === props.activeServiceId ? "tree-item selected" : "tree-item"}
                   key={item.id}
                   onClick={() => props.onSelectService(item)}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setContextMenu({
+                      x: event.clientX,
+                      y: event.clientY,
+                      target: "request",
+                      serviceId: item.id
+                    });
+                  }}
                 >
                   <span className={`method method-${item.method.toLowerCase()}`}>{item.method}</span>
                   <span>{item.name}</span>
@@ -1066,14 +1644,33 @@ function ProjectExplorer(props: {
             </button>
           ))}
         </TreeSection>
-        {contextMenu ? (
+        {contextMenu && contextMenu.target !== "project" ? (
           <div
             className="tree-context-menu"
             role="menu"
-            aria-label={contextMenu.target === "flow" ? "Flow context menu" : "Flows context menu"}
+            aria-label={contextMenuLabel(contextMenu.target)}
             style={{ left: contextMenu.x, top: contextMenu.y }}
             onClick={(event) => event.stopPropagation()}
           >
+            {contextMenu.target === "requests" ? (
+              <button type="button" role="menuitem" onClick={() => {
+                setContextMenu(null);
+                props.onCreateRequest();
+              }}>
+                <Plus size={14} />
+                <span>Add Request</span>
+              </button>
+            ) : null}
+            {contextMenu.target === "request" && contextMenu.serviceId ? (
+              <button type="button" role="menuitem" onClick={() => {
+                const serviceId = contextMenu.serviceId as string;
+                setContextMenu(null);
+                props.onRenameRequest(serviceId);
+              }}>
+                <Pencil size={14} />
+                <span>Rename Request</span>
+              </button>
+            ) : null}
             {contextMenu.target === "flows" ? (
               <button type="button" role="menuitem" onClick={() => {
                 setContextMenu(null);
@@ -1084,14 +1681,24 @@ function ProjectExplorer(props: {
               </button>
             ) : null}
             {contextMenu.target === "flow" && contextMenu.flowId ? (
-              <button type="button" role="menuitem" className="danger" onClick={() => {
-                const flowId = contextMenu.flowId as string;
-                setContextMenu(null);
-                props.onDeleteFlow(flowId);
-              }}>
-                <Trash2 size={14} />
-                <span>Delete Flow</span>
-              </button>
+              <>
+                <button type="button" role="menuitem" onClick={() => {
+                  const flowId = contextMenu.flowId as string;
+                  setContextMenu(null);
+                  props.onRenameFlow(flowId);
+                }}>
+                  <Pencil size={14} />
+                  <span>Rename Flow</span>
+                </button>
+                <button type="button" role="menuitem" className="danger" onClick={() => {
+                  const flowId = contextMenu.flowId as string;
+                  setContextMenu(null);
+                  props.onDeleteFlow(flowId);
+                }}>
+                  <Trash2 size={14} />
+                  <span>Delete Flow</span>
+                </button>
+              </>
             ) : null}
           </div>
         ) : null}
@@ -1127,23 +1734,91 @@ function ProjectExplorer(props: {
             </button>
           ))}
         </TreeSection>
-        <TreeSection title="Recent Projects" count={String(props.recentProjects.length)}>
-          {props.recentProjects.length ? props.recentProjects.map((recent) => (
-            <button type="button" className="tree-item recent-project" key={recent.path} onClick={() => props.onOpenRecent(recent)}>
+        <TreeSection title="Recent Projects" count={String(visibleSessionProjects.length + visibleRecentProjects.length)}>
+          {visibleSessionProjects.length ? visibleSessionProjects.map((snapshot) => (
+            <button
+              type="button"
+              className="tree-item recent-project"
+              key={snapshot.id}
+              onClick={() => props.onOpenSessionProject(snapshot.id)}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                setContextMenu({
+                  x: event.clientX,
+                  y: event.clientY,
+                  target: "project",
+                  projectTarget: { source: "session", id: snapshot.id, name: snapshot.name, path: snapshot.path }
+                });
+              }}
+            >
               <FolderOpen size={15} />
-              <span>{recent.name}</span>
+              <span className="recent-project-label">
+                <span>{snapshot.name}</span>
+                <em>{snapshot.path || "Unsaved session"}</em>
+              </span>
             </button>
-          )) : (
+          )) : null}
+          {visibleRecentProjects.length ? visibleRecentProjects.map((recent) => (
+            <button
+              type="button"
+              className="tree-item recent-project"
+              key={recent.path}
+              onClick={() => props.onOpenRecent(recent)}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                setContextMenu({
+                  x: event.clientX,
+                  y: event.clientY,
+                  target: "project",
+                  projectTarget: { source: "recent", name: recent.name, path: recent.path }
+                });
+              }}
+            >
+              <FolderOpen size={15} />
+              <span className="recent-project-label">
+                <span>{recent.name}</span>
+                <em>{recent.path}</em>
+              </span>
+            </button>
+          )) : null}
+          {!visibleSessionProjects.length && !visibleRecentProjects.length ? (
             <span className="tree-empty">No recent projects yet.</span>
-          )}
+          ) : null}
         </TreeSection>
+        {contextMenu?.target === "project" && contextMenu.projectTarget ? (
+          <div
+            className="tree-context-menu"
+            role="menu"
+            aria-label="Project context menu"
+            style={{ left: contextMenu.x, top: contextMenu.y }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button type="button" role="menuitem" onClick={() => {
+              const target = contextMenu.projectTarget as ProjectListTarget;
+              setContextMenu(null);
+              props.onRenameProject(target);
+            }}>
+              <Pencil size={14} />
+              <span>Rename Project</span>
+            </button>
+            <button type="button" role="menuitem" className="danger" onClick={() => {
+              const target = contextMenu.projectTarget as ProjectListTarget;
+              setContextMenu(null);
+              props.onDeleteProject(target);
+            }}>
+              <Trash2 size={14} />
+              <span>Delete Project</span>
+            </button>
+          </div>
+        ) : null}
       </div>
       <div className={props.projectError ? "project-status error" : "project-status"}>
         {props.projectError ?? props.projectMessage}
       </div>
       <div className="explorer-footer">
         <span>Project</span>
-        <button type="button" onClick={props.onMarkDirty}>Mark Dirty</button>
         <button type="button" onClick={props.onOpenSettings}>Settings</button>
       </div>
     </aside>
@@ -1165,11 +1840,15 @@ function TreeSection({
   onContextMenu?: (position: { x: number; y: number }) => void;
   children: React.ReactNode;
 }) {
+  const [expanded, setExpanded] = useState(true);
+
   return (
-    <section className="tree-section">
+    <section className={onAction ? "tree-section has-action" : "tree-section"} aria-label={title}>
       <button
         type="button"
-        className="tree-section-heading"
+        className={expanded ? "tree-section-heading expanded" : "tree-section-heading"}
+        aria-expanded={expanded}
+        onClick={() => setExpanded((current) => !current)}
         onContextMenu={onContextMenu ? (event) => {
           event.preventDefault();
           onContextMenu({ x: event.clientX, y: event.clientY });
@@ -1184,7 +1863,7 @@ function TreeSection({
           <Plus size={14} />
         </button>
       ) : null}
-      {children}
+      {expanded ? children : null}
     </section>
   );
 }
@@ -1195,7 +1874,24 @@ function TabStrip(props: {
   onSelect: (id: string) => void;
   onClose: (id: string) => void;
   onNewTab: () => void;
+  onRenameRequest: (id: string) => void;
+  onRenameFlow: (id: string) => void;
 }) {
+  const [contextMenu, setContextMenu] = useState<null | { x: number; y: number; tabId: string; kind: "request" | "flow" }>(null);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    function closeContextMenu() {
+      setContextMenu(null);
+    }
+    window.addEventListener("click", closeContextMenu);
+    window.addEventListener("keydown", closeContextMenu);
+    return () => {
+      window.removeEventListener("click", closeContextMenu);
+      window.removeEventListener("keydown", closeContextMenu);
+    };
+  }, [contextMenu]);
+
   return (
     <div className="tab-strip" role="tablist" aria-label="Open editors">
       {props.tabs.map((tab) => (
@@ -1206,6 +1902,11 @@ function TabStrip(props: {
           key={tab.id}
           className={tab.id === props.activeTabId ? "tab active" : "tab"}
           onClick={() => props.onSelect(tab.id)}
+          onContextMenu={isRequestOrFlowTabKind(tab.kind) ? (event) => {
+            event.preventDefault();
+            const kind = tab.kind === "request" ? "request" : "flow";
+            setContextMenu({ x: event.clientX, y: event.clientY, tabId: tab.id, kind });
+          } : undefined}
         >
           {tab.method ? <span className={`tab-method method-${tab.method.toLowerCase()}`}>{tab.method}</span> : null}
           {tab.kind === "flow" ? <GitBranch size={15} /> : null}
@@ -1218,9 +1919,38 @@ function TabStrip(props: {
           }} />
         </button>
       ))}
-      <button type="button" className="new-tab" aria-label="New request" onClick={props.onNewTab}>
+      <button type="button" className="new-tab" aria-label="New request tab" onClick={props.onNewTab}>
         <Plus size={17} />
       </button>
+      {contextMenu ? (
+        <div
+          className="tree-context-menu"
+          role="menu"
+          aria-label={contextMenu.kind === "flow" ? "Flow tab context menu" : "Request tab context menu"}
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          {contextMenu.kind === "flow" ? (
+            <button type="button" role="menuitem" onClick={() => {
+              const tabId = contextMenu.tabId;
+              setContextMenu(null);
+              props.onRenameFlow(tabId);
+            }}>
+              <Pencil size={14} />
+              <span>Rename Flow</span>
+            </button>
+          ) : (
+            <button type="button" role="menuitem" onClick={() => {
+              const tabId = contextMenu.tabId;
+              setContextMenu(null);
+              props.onRenameRequest(tabId);
+            }}>
+              <Pencil size={14} />
+              <span>Rename Request</span>
+            </button>
+          )}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1229,12 +1959,14 @@ function RequestComposer({
   requestUrl,
   activeTab,
   onRequestUrlChange,
+  onMethodChange,
   onSendRequest,
   runnerRunning
 }: {
   requestUrl: string;
   activeTab: WorkbenchTab;
   onRequestUrlChange: (value: string) => void;
+  onMethodChange: (method: HttpMethod) => void;
   onSendRequest: () => void;
   runnerRunning: boolean;
 }) {
@@ -1242,15 +1974,12 @@ function RequestComposer({
     <div className="request-composer" aria-label="Request composer">
       <div className="breadcrumb">
         <span>Sample API Regression</span>
-        <span>Services</span>
+        <span>Requests</span>
         <span>{activeTab.label}</span>
       </div>
       <div className="request-row">
-        <select aria-label="HTTP method" value={activeTab.method ?? "POST"} onChange={() => undefined}>
-          <option>GET</option>
-          <option>POST</option>
-          <option>PUT</option>
-          <option>DELETE</option>
+        <select aria-label="HTTP method" value={activeTab.method ?? "POST"} onChange={(event) => onMethodChange(event.target.value as HttpMethod)}>
+          {HTTP_METHODS.map((method) => <option key={method}>{method}</option>)}
         </select>
         <input
           aria-label="Request URL"
@@ -1262,12 +1991,16 @@ function RequestComposer({
           <option>HTTP/1.1</option>
           <option>HTTP/2</option>
         </select>
-        <button type="button" className="primary-command send-button" onClick={onSendRequest} disabled={runnerRunning}>
-          <Send size={18} />
+        <button
+          type="button"
+          className="primary-command send-button"
+          aria-label={activeTab.kind === "flow" ? "Run Flow" : "Send Request"}
+          title={activeTab.kind === "flow" ? "Run Flow" : "Send Request"}
+          onClick={onSendRequest}
+          disabled={runnerRunning}
+        >
+          {activeTab.kind === "flow" ? <Play size={18} /> : <Send size={18} />}
           <span>{runnerRunning ? "Running..." : activeTab.kind === "flow" ? "Run Flow" : "Send Request"}</span>
-        </button>
-        <button type="button" className="split-action" aria-label="Request actions">
-          <ChevronDown size={17} />
         </button>
       </div>
     </div>
@@ -1289,10 +2022,14 @@ function RequestEditor({
   onAddFlowNode,
   onDeleteFlowNode,
   onConnectFlowNodes,
+  onDisconnectFlowNodes,
   onReorderFlowNode,
   onMoveFlowNode,
-  onRunFlow,
-  runnerRunning
+  onResetFlowLayout,
+  onAddFlowMapping,
+  onUpdateFlowMapping,
+  onDeleteFlowMapping,
+  onApplyFlowTemplate
 }: {
   activeTab: WorkbenchTab;
   activeService: ProjectService | undefined;
@@ -1308,17 +2045,21 @@ function RequestEditor({
   onAddFlowNode: (flowId: string, serviceId: string) => void;
   onDeleteFlowNode: (flowId: string, nodeId: string) => void;
   onConnectFlowNodes: (flowId: string, source: string, target: string, condition: "success" | "failure") => void;
+  onDisconnectFlowNodes: (flowId: string, source: string, target: string, condition: "success" | "failure") => void;
   onReorderFlowNode: (flowId: string, nodeId: string, direction: "left" | "right") => void;
   onMoveFlowNode: (flowId: string, nodeId: string, position: { x: number; y: number }) => void;
-  onRunFlow: () => void;
-  runnerRunning: boolean;
+  onResetFlowLayout: (flowId: string) => void;
+  onAddFlowMapping: (flowId: string, sourceNodeId: string, preset?: Partial<Omit<FlowMapping, "id" | "sourceNodeId">>) => void;
+  onUpdateFlowMapping: (flowId: string, mappingId: string, patch: Partial<Omit<FlowMapping, "id">>) => void;
+  onDeleteFlowMapping: (flowId: string, mappingId: string) => void;
+  onApplyFlowTemplate: (flowId: string, templateId: FlowTemplateId) => void;
 }) {
   if (activeTab.kind === "welcome") {
-    return <PlaceholderView title="Welcome" description="Open a service, import API docs, or run a flow." />;
+    return <WelcomeView />;
   }
 
   if (activeTab.kind === "import") {
-    return <PlaceholderView title="Import API Docs" description="Paste an OpenAPI URL or choose a local Swagger file to preview services." />;
+    return <PlaceholderView title="Import API Docs" description="Paste an OpenAPI URL or choose a local Swagger file to preview requests." />;
   }
 
   if (activeTab.kind === "flow") {
@@ -1332,27 +2073,30 @@ function RequestEditor({
         onAddFlowNode={onAddFlowNode}
         onDeleteFlowNode={onDeleteFlowNode}
         onConnectFlowNodes={onConnectFlowNodes}
+        onDisconnectFlowNodes={onDisconnectFlowNodes}
         onReorderFlowNode={onReorderFlowNode}
         onMoveFlowNode={onMoveFlowNode}
-        onRunFlow={onRunFlow}
-        runnerRunning={runnerRunning}
+        onResetFlowLayout={onResetFlowLayout}
+        onAddFlowMapping={onAddFlowMapping}
+        onUpdateFlowMapping={onUpdateFlowMapping}
+        onDeleteFlowMapping={onDeleteFlowMapping}
+        onApplyFlowTemplate={onApplyFlowTemplate}
       />
     );
   }
 
   if (activeTab.kind === "settings") {
-    return <PlaceholderView title="Settings" description="Manage defaults, close behavior, redaction, and encrypted project settings." />;
+    return <PlaceholderView title="Settings" description="Manage defaults, close behavior, redaction, and project settings." />;
   }
 
   if (!activeService || !activeEnvironment || !requestPreview) {
-    return <PlaceholderView title="No Service Selected" description="Create or select a service to edit its reusable REST request." />;
+    return <PlaceholderView title="No Request Selected" description="Create or select a request to edit its REST call." />;
   }
 
   return (
     <ServiceDesignerEditor
       service={activeService}
       environment={activeEnvironment}
-      preview={requestPreview}
       onCreateService={onCreateService}
       onDuplicateService={onDuplicateService}
       onDeleteService={onDeleteService}
@@ -1365,7 +2109,6 @@ function RequestEditor({
 function ServiceDesignerEditor(props: {
   service: ProjectService;
   environment: ProjectEnvironment;
-  preview: RequestPreview;
   onCreateService: () => void;
   onDuplicateService: () => void;
   onDeleteService: () => void;
@@ -1385,7 +2128,7 @@ function ServiceDesignerEditor(props: {
   }
 
   return (
-    <section className="editor-surface service-designer" aria-label="REST service designer">
+    <section className="editor-surface service-designer" aria-label="REST request designer">
       <nav className="editor-tabs" aria-label="Request editor tabs">
         {["Authorization", "Headers", "Query Params", "Path Params", "Body", "Retry", "Settings"].map((tab) => (
           <button type="button" className={activePanel === tab ? "active" : ""} key={tab} onClick={() => setActivePanel(tab)}>
@@ -1397,9 +2140,9 @@ function ServiceDesignerEditor(props: {
       <div className="service-designer-main">
         <section className="service-detail-panel">
           <header>
-            <strong>Service Detail</strong>
+            <strong>Request Detail</strong>
             <div>
-              <button type="button" onClick={props.onCreateService}>New Service</button>
+              <button type="button" onClick={props.onCreateService}>New Request</button>
               <button type="button" onClick={props.onDuplicateService}>Duplicate</button>
               <button type="button" onClick={() => props.onMoveService("up")}>Move Up</button>
               <button type="button" onClick={() => props.onMoveService("down")}>Move Down</button>
@@ -1408,22 +2151,22 @@ function ServiceDesignerEditor(props: {
           </header>
           <div className="service-form-grid">
             <label>
-              <span>Service name</span>
-              <input aria-label="Service name" value={service.name} onChange={(event) => update({ name: event.target.value }, "Service renamed.")} />
+              <span>Request name</span>
+              <input aria-label="Request name" value={service.name} onChange={(event) => update({ name: event.target.value }, "Request renamed.")} />
             </label>
             <label>
               <span>Folder</span>
-              <input aria-label="Service folder" value={service.folder} onChange={(event) => update({ folder: event.target.value }, "Service folder updated.")} />
+              <input aria-label="Request folder" value={service.folder} onChange={(event) => update({ folder: event.target.value }, "Request folder updated.")} />
             </label>
             <label>
               <span>Method</span>
-              <select aria-label="Service method" value={service.method} onChange={(event) => update({ method: event.target.value as HttpMethod }, "HTTP method updated.")}>
+              <select aria-label="Request method" value={service.method} onChange={(event) => update({ method: event.target.value as HttpMethod }, "HTTP method updated.")}>
                 {HTTP_METHODS.map((method) => <option key={method}>{method}</option>)}
               </select>
             </label>
             <label>
               <span>Path</span>
-              <input aria-label="Service path" value={service.path} onChange={(event) => update({ path: event.target.value }, "Service path updated.")} />
+              <input aria-label="Request path" value={service.path} onChange={(event) => update({ path: event.target.value }, "Request path updated.")} />
             </label>
             <label>
               <span>Timeout ms</span>
@@ -1431,7 +2174,12 @@ function ServiceDesignerEditor(props: {
             </label>
           </div>
           {activePanel === "Authorization" ? (
-            <AuthorizationPanel service={service} preview={props.preview} onAuthModeChange={updateAuth} onUpdateService={props.onUpdateService} />
+            <AuthorizationPanel
+              environment={props.environment}
+              service={service}
+              onAuthModeChange={updateAuth}
+              onUpdateService={props.onUpdateService}
+            />
           ) : null}
           {activePanel === "Headers" ? (
             <RowsPanel title="Headers" rows={service.headers} onChange={(headers) => update({ headers }, "Headers updated.")} />
@@ -1449,22 +2197,24 @@ function ServiceDesignerEditor(props: {
             <RetryPanel service={service} onUpdate={update} />
           ) : null}
           {activePanel === "Settings" ? (
-            <SettingsPanel service={service} environment={props.environment} preview={props.preview} />
+            <SettingsPanel service={service} environment={props.environment} />
           ) : null}
         </section>
-        <RequestPreviewPanel preview={props.preview} />
       </div>
     </section>
   );
 }
 
 function AuthorizationPanel(props: {
+  environment: ProjectEnvironment;
   service: ProjectService;
-  preview: RequestPreview;
   onAuthModeChange: (type: AuthMode) => void;
   onUpdateService: (updater: (service: ProjectService) => ProjectService, message?: string) => void;
 }) {
   const auth = props.service.authProfile;
+  const variableNames = props.environment.variables.map((variable) => variable.name);
+  const selectedTokenVariable = auth.tokenVariable ?? "";
+  const selectedVariableExists = variableNames.includes(selectedTokenVariable);
 
   function updateAuthProfile(patch: ProjectService["authProfile"]) {
     props.onUpdateService((service) => ({ ...service, authProfile: { ...service.authProfile, ...patch } }), "Authorization updated.");
@@ -1481,11 +2231,20 @@ function AuthorizationPanel(props: {
         </label>
         {auth.type === "bearer" ? (
           <label>
-            <span>Token variable</span>
-            <div className="input-with-icon">
-              <input aria-label="Token variable" value={auth.tokenVariable ?? ""} onChange={(event) => updateAuthProfile({ type: auth.type, tokenVariable: event.target.value })} />
-              <Braces size={16} />
-            </div>
+            <span>Bearer token variable name</span>
+            <select
+              aria-label="Bearer token variable name"
+              value={selectedTokenVariable}
+              onChange={(event) => updateAuthProfile({ type: auth.type, tokenVariable: event.target.value })}
+            >
+              {!selectedTokenVariable ? <option value="">Select token variable</option> : null}
+              {selectedTokenVariable && !selectedVariableExists ? (
+                <option value={selectedTokenVariable}>Missing: {selectedTokenVariable}</option>
+              ) : null}
+              {variableNames.map((name) => (
+                <option value={name} key={name}>{name}</option>
+              ))}
+            </select>
           </label>
         ) : null}
         {auth.type === "apiKey" ? (
@@ -1496,8 +2255,8 @@ function AuthorizationPanel(props: {
         ) : null}
         {auth.type === "basic" ? (
           <>
-            <label><span>Username variable</span><input aria-label="Username variable" value={auth.usernameVariable ?? ""} onChange={(event) => updateAuthProfile({ type: auth.type, usernameVariable: event.target.value })} /></label>
-            <label><span>Password variable</span><input aria-label="Password variable" value={auth.passwordVariable ?? ""} onChange={(event) => updateAuthProfile({ type: auth.type, passwordVariable: event.target.value })} /></label>
+            <label><span>Username or variable</span><input aria-label="Username or variable" value={auth.usernameVariable ?? ""} onChange={(event) => updateAuthProfile({ type: auth.type, usernameVariable: event.target.value })} /></label>
+            <label><span>Password or variable</span><input aria-label="Password or variable" value={auth.passwordVariable ?? ""} onChange={(event) => updateAuthProfile({ type: auth.type, passwordVariable: event.target.value })} /></label>
           </>
         ) : null}
         {auth.type === "oauthClientCredentials" ? (
@@ -1513,17 +2272,6 @@ function AuthorizationPanel(props: {
             <label><span>Header value</span><input aria-label="Custom auth value" value={auth.customHeaderValue ?? ""} onChange={(event) => updateAuthProfile({ type: auth.type, customHeaderValue: event.target.value })} /></label>
           </>
         ) : null}
-      </div>
-      <div className="generated-preview">
-        <div>
-          <strong>Generated request auth</strong>
-          <span className="status-ready"><CheckCircle2 size={16} /> {props.preview.issues.some((issue) => issue.field === "auth") ? "Needs input" : "Ready"}</span>
-        </div>
-        <dl>
-          <dt>{props.preview.generatedAuthHeader?.name ?? "Auth"}</dt>
-          <dd>{props.preview.generatedAuthHeader?.value ?? "No generated auth header"}</dd>
-        </dl>
-        <p>Generated auth stays separate from user-defined headers and redacts secret values.</p>
       </div>
     </section>
   );
@@ -1605,43 +2353,15 @@ function RetryPanel({ service, onUpdate }: { service: ProjectService; onUpdate: 
   );
 }
 
-function SettingsPanel({ service, environment, preview }: { service: ProjectService; environment: ProjectEnvironment; preview: RequestPreview }) {
+function SettingsPanel({ service, environment }: { service: ProjectService; environment: ProjectEnvironment }) {
   return (
     <section className="settings-panel">
       <dl>
         <dt>Environment</dt><dd>{environment.name}</dd>
         <dt>Timeout</dt><dd>{service.timeoutMs} ms</dd>
         <dt>Retry</dt><dd>{service.retry.attempts} attempt(s), {service.retry.backoffMs} ms backoff</dd>
-        <dt>Validation</dt><dd>{preview.issues.length ? `${preview.issues.length} issue(s)` : "Ready"}</dd>
       </dl>
     </section>
-  );
-}
-
-function RequestPreviewPanel({ preview }: { preview: RequestPreview }) {
-  return (
-    <aside className="request-preview-panel" aria-label="Request construction preview">
-      <header>
-        <strong>Request Preview</strong>
-        <span className={preview.issues.some((issue) => issue.severity === "error") ? "preview-status error" : "preview-status"}>{preview.issues.length ? "Needs Review" : "Ready"}</span>
-      </header>
-      <dl>
-        <dt>Method</dt><dd>{preview.method}</dd>
-        <dt>URL</dt><dd>{preview.url}</dd>
-        <dt>Generated Auth</dt><dd>{preview.generatedAuthHeader ? `${preview.generatedAuthHeader.name}: ${preview.generatedAuthHeader.value}` : "None"}</dd>
-        <dt>Headers</dt><dd>{preview.headers.length}</dd>
-        <dt>Query Params</dt><dd>{preview.queryParams.length}</dd>
-        <dt>Path Params</dt><dd>{preview.pathParams.length}</dd>
-      </dl>
-      <section>
-        <strong>Validation</strong>
-        {preview.issues.length ? (
-          <ul>
-            {preview.issues.map((issue) => <li key={`${issue.field}-${issue.message}`} className={issue.severity}>{issue.message}</li>)}
-          </ul>
-        ) : <p>No blocking issues.</p>}
-      </section>
-    </aside>
   );
 }
 
@@ -1656,11 +2376,23 @@ function authLabel(mode: AuthMode): string {
   }[mode];
 }
 
+function normalizeProjectForSave(project: RelayProject): RelayProject {
+  return {
+    ...project,
+    flows: project.flows.map((flow) => normalizeFlow(flow))
+  };
+}
+
 interface FlowCanvasNodeData extends Record<string, unknown> {
   label: string;
   method: string;
   serviceName: string;
+  missingRequest: boolean;
   status: string;
+  cleanup: boolean;
+  mappingCount: number;
+  capturedVariables: string[];
+  consumedVariables: string[];
 }
 
 type FlowCanvasNode = Node<FlowCanvasNodeData, "flowStep">;
@@ -1669,24 +2401,59 @@ const flowNodeTypes = {
   flowStep: FlowStepNode
 };
 
+const defaultFlowViewport: Viewport = { x: 0, y: 0, zoom: 1 };
+const flowNodeWidth = 178;
+const flowNodeHeight = 96;
+const flowCanvasPadding = 42;
+const flowDragThresholdPx = 3;
+
+interface FlowCanvasDragState {
+  nodeId: string;
+  startPointer: FlowNodePosition;
+  startPosition: FlowNodePosition;
+}
+
 function FlowBuilderEditor(props: {
   flow: ProjectFlow;
   services: ProjectService[];
   onAddFlowNode: (flowId: string, serviceId: string) => void;
   onDeleteFlowNode: (flowId: string, nodeId: string) => void;
   onConnectFlowNodes: (flowId: string, source: string, target: string, condition: "success" | "failure") => void;
+  onDisconnectFlowNodes: (flowId: string, source: string, target: string, condition: "success" | "failure") => void;
   onReorderFlowNode: (flowId: string, nodeId: string, direction: "left" | "right") => void;
   onMoveFlowNode: (flowId: string, nodeId: string, position: { x: number; y: number }) => void;
-  onRunFlow: () => void;
-  runnerRunning: boolean;
+  onResetFlowLayout: (flowId: string) => void;
+  onAddFlowMapping: (flowId: string, sourceNodeId: string, preset?: Partial<Omit<FlowMapping, "id" | "sourceNodeId">>) => void;
+  onUpdateFlowMapping: (flowId: string, mappingId: string, patch: Partial<Omit<FlowMapping, "id">>) => void;
+  onDeleteFlowMapping: (flowId: string, mappingId: string) => void;
+  onApplyFlowTemplate: (flowId: string, templateId: FlowTemplateId) => void;
 }) {
   const flow = normalizeFlow(props.flow);
+  const templateOptions = FLOW_TEMPLATES.map((template) => ({
+    template,
+    missingRequestNames: flowTemplateRequiredServiceIds(template.id)
+      .filter((serviceId) => !resolveFlowNodeService({ serviceId, label: requestIdToLabel(serviceId) }, props.services).service)
+      .map(requestIdToLabel)
+  }));
   const [selectedNodeId, setSelectedNodeId] = useState(flow.nodes[0]?.id ?? "");
   const [serviceId, setServiceId] = useState(props.services[0]?.id ?? "");
   const [branchTargetId, setBranchTargetId] = useState(flow.nodes[1]?.id ?? "");
   const [flowDetailsWidth, setFlowDetailsWidth] = useState(260);
   const [dragPositions, setDragPositions] = useState<Record<string, { x: number; y: number }>>({});
+  const [flowViewport, setFlowViewport] = useState<Viewport>(defaultFlowViewport);
+  const [flowCanvasSize, setFlowCanvasSize] = useState<FlowCanvasSize | null>(null);
+  const [flowInteractive, setFlowInteractive] = useState(true);
+  const activeDraggedNodeId = useRef<string | null>(null);
+  const dragState = useRef<FlowCanvasDragState | null>(null);
+  const flowCanvasRef = useRef<HTMLDivElement | null>(null);
+  const recoveredPositions = recoverVisibleFlowPositions(flow.nodes, flowCanvasSize);
+  const flowCanvasKey = flow.id;
   const selectedNode = flow.nodes.find((node) => node.id === selectedNodeId) ?? flow.nodes[0];
+  const selectedService = selectedNode ? resolveFlowNodeService(selectedNode, props.services).service : undefined;
+  const missingRequestCount = flow.nodes.filter((node) => !resolveFlowNodeService(node, props.services).service).length;
+  const selectedMappings = selectedNode ? flow.mappings.filter((mapping) => mapping.sourceNodeId === selectedNode.id) : [];
+  const selectedConsumedVariables = flowConsumedVariables(selectedService);
+  const selectedIsCleanupStep = isCleanupService(selectedService);
   const branchTargets = selectedNode ? flow.nodes.filter((node) => node.id !== selectedNode.id) : [];
   const branchTarget = branchTargets.find((node) => node.id === branchTargetId) ?? branchTargets[0];
   const selectedIndex = selectedNode ? flow.nodes.findIndex((node) => node.id === selectedNode.id) : -1;
@@ -1697,16 +2464,24 @@ function FlowBuilderEditor(props: {
     edge.source === selectedNode.id && edge.target === branchTarget.id && edge.condition === "failure"
   )));
   const nodes: FlowCanvasNode[] = flow.nodes.map((node) => {
-    const service = props.services.find((item) => item.id === node.serviceId);
+    const service = resolveFlowNodeService(node, props.services).service;
     return {
       id: node.id,
       type: "flowStep",
-      position: dragPositions[node.id] ?? node.position,
+      position: dragPositions[node.id] ?? recoveredPositions?.[node.id] ?? node.position,
       data: {
         label: node.label,
         method: service?.method ?? "GET",
-        serviceName: service?.name ?? "Missing Service",
-        status: node.status
+        serviceName: service?.name ?? "Missing Request",
+        missingRequest: !service,
+        status: node.status,
+        cleanup: isCleanupService(service),
+        mappingCount: flow.mappings.filter((mapping) => mapping.sourceNodeId === node.id).length,
+        capturedVariables: flow.mappings
+          .filter((mapping) => mapping.sourceNodeId === node.id)
+          .map((mapping) => mapping.variableName)
+          .filter(Boolean),
+        consumedVariables: flowConsumedVariables(service)
       }
     };
   });
@@ -1733,8 +2508,94 @@ function FlowBuilderEditor(props: {
   }
 
   function handleNodeChanges(changes: NodeChange<FlowCanvasNode>[]) {
-    const changedNodes = applyNodeChanges(changes, nodes);
-    setDragPositions(Object.fromEntries(changedNodes.map((node) => [node.id, node.position])));
+    const nextDragPositions = nextActiveDragPositions(activeDraggedNodeId.current, changes);
+    if (nextDragPositions) setDragPositions(nextDragPositions);
+  }
+
+  function startCanvasNodeDrag(event: ReactPointerEvent<HTMLButtonElement>, node: FlowCanvasNode) {
+    if (event.button !== 0 || !flowInteractive) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    activeDraggedNodeId.current = node.id;
+    dragState.current = {
+      nodeId: node.id,
+      startPointer: { x: event.clientX, y: event.clientY },
+      startPosition: node.position
+    };
+    setSelectedNodeId(node.id);
+  }
+
+  function moveCanvasNode(event: ReactPointerEvent<HTMLButtonElement>) {
+    const currentDrag = dragState.current;
+    if (!currentDrag) return;
+    const position = {
+      x: currentDrag.startPosition.x + (event.clientX - currentDrag.startPointer.x) / flowViewport.zoom,
+      y: currentDrag.startPosition.y + (event.clientY - currentDrag.startPointer.y) / flowViewport.zoom
+    };
+    setDragPositions({ [currentDrag.nodeId]: position });
+  }
+
+  function stopCanvasNodeDrag(event: ReactPointerEvent<HTMLButtonElement>) {
+    const currentDrag = dragState.current;
+    if (!currentDrag) return;
+    event.currentTarget.releasePointerCapture(event.pointerId);
+    const pointerDelta = Math.hypot(
+      event.clientX - currentDrag.startPointer.x,
+      event.clientY - currentDrag.startPointer.y
+    );
+    const position = {
+      x: currentDrag.startPosition.x + (event.clientX - currentDrag.startPointer.x) / flowViewport.zoom,
+      y: currentDrag.startPosition.y + (event.clientY - currentDrag.startPointer.y) / flowViewport.zoom
+    };
+    activeDraggedNodeId.current = null;
+    dragState.current = null;
+    setDragPositions({});
+    if (pointerDelta >= flowDragThresholdPx && !positionsEqual(currentDrag.startPosition, position)) {
+      props.onMoveFlowNode(flow.id, currentDrag.nodeId, position);
+    }
+  }
+
+  function zoomFlow(direction: "in" | "out") {
+    setFlowViewport((current) => {
+      const nextZoom = clamp(current.zoom * (direction === "in" ? 1.15 : 0.85), 0.35, 1.8);
+      return centerFlowViewportForNodes(nodes, flowCanvasSize, nextZoom, {
+        nodeWidth: flowNodeWidth,
+        nodeHeight: flowNodeHeight,
+        padding: flowCanvasPadding
+      });
+    });
+  }
+
+  function fitFlowToView() {
+    if (!flowCanvasSize || !nodes.length) {
+      setFlowViewport(defaultFlowViewport);
+      return;
+    }
+    const minX = Math.min(...nodes.map((node) => node.position.x));
+    const minY = Math.min(...nodes.map((node) => node.position.y));
+    const maxX = Math.max(...nodes.map((node) => node.position.x + flowNodeWidth));
+    const maxY = Math.max(...nodes.map((node) => node.position.y + flowNodeHeight));
+    const availableWidth = Math.max(1, flowCanvasSize.width - flowCanvasPadding * 2);
+    const availableHeight = Math.max(1, flowCanvasSize.height - flowCanvasPadding * 2);
+    const nextZoom = clamp(Math.min(
+      availableWidth / Math.max(1, maxX - minX),
+      availableHeight / Math.max(1, maxY - minY),
+      1
+    ), 0.35, 1.2);
+    setFlowViewport(centerFlowViewportForNodes(nodes, flowCanvasSize, nextZoom, {
+      nodeWidth: flowNodeWidth,
+      nodeHeight: flowNodeHeight,
+      padding: flowCanvasPadding
+    }));
+  }
+
+  function defaultFlowViewportForCurrentCanvas() {
+    if (!flowCanvasSize || !nodes.length) return defaultFlowViewport;
+    return centerFlowViewportForNodes(nodes, flowCanvasSize, 1, {
+      nodeWidth: flowNodeWidth,
+      nodeHeight: flowNodeHeight,
+      padding: flowCanvasPadding
+    });
   }
 
   useEffect(() => {
@@ -1742,6 +2603,27 @@ function FlowBuilderEditor(props: {
       setSelectedNodeId(flow.nodes[0]?.id ?? "");
     }
   }, [flow.nodes, selectedNodeId]);
+
+  useEffect(() => {
+    setFlowViewport(defaultFlowViewportForCurrentCanvas());
+  }, [flow.id]);
+
+  useEffect(() => {
+    const element = flowCanvasRef.current;
+    if (!element || typeof ResizeObserver === "undefined") return undefined;
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      const width = Math.floor(entry.contentRect.width);
+      const height = Math.floor(entry.contentRect.height);
+      if (width < 120 || height < 120) return;
+      setFlowCanvasSize((current) => (
+        current?.width === width && current.height === height ? current : { width, height }
+      ));
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     if (!selectedNode) return;
@@ -1757,6 +2639,7 @@ function FlowBuilderEditor(props: {
         <div>
           <strong>{flow.name}</strong>
           <span>{flow.nodes.length} steps - {flow.edges.length} links</span>
+          {missingRequestCount ? <span className="flow-warning">{missingRequestCount} missing request{missingRequestCount === 1 ? "" : "s"}</span> : null}
         </div>
         <label>
           <span>Add request step</span>
@@ -1767,29 +2650,93 @@ function FlowBuilderEditor(props: {
         <button type="button" className="flow-action-button" onClick={() => props.onAddFlowNode(flow.id, serviceId)}>Add Step</button>
         <button type="button" className="flow-action-button" disabled={!selectedNode || selectedIndex <= 0} onClick={() => selectedNode && props.onReorderFlowNode(flow.id, selectedNode.id, "left")}>Move Left</button>
         <button type="button" className="flow-action-button" disabled={!selectedNode || selectedIndex >= flow.nodes.length - 1} onClick={() => selectedNode && props.onReorderFlowNode(flow.id, selectedNode.id, "right")}>Move Right</button>
+        <button type="button" className="flow-action-button" onClick={() => props.onResetFlowLayout(flow.id)}>Reset Layout</button>
         <button type="button" className="flow-action-button danger" disabled={!selectedNode} onClick={() => selectedNode && props.onDeleteFlowNode(flow.id, selectedNode.id)}>Delete Step</button>
-        <button type="button" className="primary-command" onClick={props.onRunFlow} disabled={props.runnerRunning}>
-          <Play size={17} />
-          <span>{props.runnerRunning ? "Running..." : "Run Flow"}</span>
-        </button>
       </div>
       <div className="flow-main" style={{ "--flow-details-width": `${flowDetailsWidth}px` } as CSSProperties}>
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          nodeTypes={flowNodeTypes}
-          fitView
-          onConnect={connect}
-          onNodesChange={handleNodeChanges}
-          onNodeClick={(_event, node) => setSelectedNodeId(node.id)}
-          onNodeDragStop={(_event, node) => {
-            setDragPositions({});
-            props.onMoveFlowNode(flow.id, node.id, node.position);
-          }}
-        >
-          <Background />
-          <Controls />
-        </ReactFlow>
+        {!flow.nodes.length ? (
+          <div className="flow-template-panel" aria-label="Flow templates">
+            <strong>Start with a flow template</strong>
+            <p>Choose a common REST chain, then adjust the steps and mappings.</p>
+            <div className="flow-template-actions">
+              {templateOptions.map(({ template, missingRequestNames }) => (
+                <button
+                  type="button"
+                  key={template.id}
+                  disabled={missingRequestNames.length > 0}
+                  onClick={() => props.onApplyFlowTemplate(flow.id, template.id)}
+                >
+                  <span>{template.name}</span>
+                  <small>{template.description}</small>
+                  {missingRequestNames.length ? (
+                    <small className="template-missing-requests">
+                      Requires missing requests: {missingRequestNames.join(", ")}
+                    </small>
+                  ) : null}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+        <div className="flow-canvas-shell" ref={flowCanvasRef} aria-label="Flow canvas">
+          <ReactFlow
+            key={flowCanvasKey}
+            nodes={nodes}
+            edges={edges}
+            nodeTypes={flowNodeTypes}
+            viewport={flowViewport}
+            width={flowCanvasSize?.width}
+            height={flowCanvasSize?.height}
+            autoPanOnNodeDrag={false}
+            panOnDrag={false}
+            panOnScroll={false}
+            preventScrolling={false}
+            onConnect={connect}
+            onNodesChange={handleNodeChanges}
+            onNodeClick={(_event, node) => setSelectedNodeId(node.id)}
+            onNodeDragStart={(_event, node) => {
+              setFlowViewport(defaultFlowViewportForCurrentCanvas());
+              activeDraggedNodeId.current = node.id;
+              setSelectedNodeId(node.id);
+            }}
+            onNodeDragStop={(_event, node) => {
+              activeDraggedNodeId.current = null;
+              setFlowViewport(defaultFlowViewportForCurrentCanvas());
+              setDragPositions({});
+              const original = flow.nodes.find((currentNode) => currentNode.id === node.id)?.position;
+              if (original && !positionsEqual(original, node.position)) {
+                props.onMoveFlowNode(flow.id, node.id, node.position);
+              }
+            }}
+          >
+            <Background />
+          </ReactFlow>
+          <div className="flow-control-panel" aria-label="Control Panel">
+            <button type="button" aria-label="Zoom In" title="Zoom In" onClick={() => zoomFlow("in")}><Plus size={17} /></button>
+            <button type="button" aria-label="Zoom Out" title="Zoom Out" onClick={() => zoomFlow("out")}>-</button>
+            <button type="button" aria-label="Fit View" title="Fit View" onClick={fitFlowToView}>[]</button>
+            <button
+              type="button"
+              aria-label={flowInteractive ? "Lock Flow Layout" : "Unlock Flow Layout"}
+              aria-pressed={!flowInteractive}
+              title={flowInteractive ? "Lock Flow Layout" : "Unlock Flow Layout"}
+              onClick={() => setFlowInteractive((current) => !current)}
+            >
+              {flowInteractive ? "Lock" : "Unlock"}
+            </button>
+          </div>
+          <FlowRenderLayer
+            nodes={nodes}
+            edges={edges}
+            selectedNodeId={selectedNode?.id ?? ""}
+            viewport={flowViewport}
+            interactive={flowInteractive}
+            onNodeSelect={setSelectedNodeId}
+            onNodePointerDown={startCanvasNodeDrag}
+            onNodePointerMove={moveCanvasNode}
+            onNodePointerUp={stopCanvasNodeDrag}
+          />
+        </div>
         <ResizeHandle
           ariaLabel="Resize flow details"
           orientation="vertical"
@@ -1801,10 +2748,33 @@ function FlowBuilderEditor(props: {
             <>
               <dl>
                 <dt>Step</dt><dd>{selectedNode.label}</dd>
-                <dt>Service</dt><dd>{props.services.find((service) => service.id === selectedNode.serviceId)?.name ?? "Missing Service"}</dd>
+                <dt>Request</dt><dd>{selectedService?.name ?? "Missing Request"}</dd>
                 <dt>Status</dt><dd className={`flow-status-text ${selectedNode.status}`}>{selectedNode.status}</dd>
                 <dt>Order</dt><dd aria-label="Step order">{flow.nodes.findIndex((node) => node.id === selectedNode.id) + 1}</dd>
+                {selectedIsCleanupStep ? <><dt>Role</dt><dd>Cleanup</dd></> : null}
               </dl>
+              <section className="flow-variable-summary" aria-label="Flow variable summary">
+                <div>
+                  <strong>Captures</strong>
+                  {selectedMappings.length ? (
+                    <div className="flow-chip-list">
+                      {selectedMappings.map((mapping) => (
+                        <span className={`flow-chip ${mapping.secret ? "secret" : ""}`} key={mapping.id}>
+                          {mapping.variableName || "Unnamed"} <small>{mapping.jsonPath}</small>
+                        </span>
+                      ))}
+                    </div>
+                  ) : <p className="empty-inline">No variables captured.</p>}
+                </div>
+                <div>
+                  <strong>Consumes</strong>
+                  {selectedConsumedVariables.length ? (
+                    <div className="flow-chip-list">
+                      {selectedConsumedVariables.map((name) => <span className="flow-chip" key={name}>{name}</span>)}
+                    </div>
+                  ) : <p className="empty-inline">No variables used.</p>}
+                </div>
+              </section>
               <label className="flow-branch-target">
                 <span>Path target</span>
                 <select value={branchTarget?.id ?? ""} onChange={(event) => setBranchTargetId(event.target.value)} disabled={!branchTargets.length}>
@@ -1815,20 +2785,98 @@ function FlowBuilderEditor(props: {
               </label>
               <button
                 type="button"
-                className="flow-path-button success"
-                disabled={!branchTarget || successPathExists}
-                onClick={() => branchTarget && props.onConnectFlowNodes(flow.id, selectedNode.id, branchTarget.id, "success")}
+                className={successPathExists ? "flow-path-button remove" : "flow-path-button success"}
+                disabled={!branchTarget}
+                onClick={() => {
+                  if (!branchTarget) return;
+                  if (successPathExists) {
+                    props.onDisconnectFlowNodes(flow.id, selectedNode.id, branchTarget.id, "success");
+                  } else {
+                    props.onConnectFlowNodes(flow.id, selectedNode.id, branchTarget.id, "success");
+                  }
+                }}
               >
-                {successPathExists ? "Success Path Exists" : "Add Success Path"}
+                {successPathExists ? "Remove Success Path" : "Add Success Path"}
               </button>
               <button
                 type="button"
-                className="flow-path-button failure"
-                disabled={!branchTarget || failurePathExists}
-                onClick={() => branchTarget && props.onConnectFlowNodes(flow.id, selectedNode.id, branchTarget.id, "failure")}
+                className={failurePathExists ? "flow-path-button remove" : "flow-path-button failure"}
+                disabled={!branchTarget}
+                onClick={() => {
+                  if (!branchTarget) return;
+                  if (failurePathExists) {
+                    props.onDisconnectFlowNodes(flow.id, selectedNode.id, branchTarget.id, "failure");
+                  } else {
+                    props.onConnectFlowNodes(flow.id, selectedNode.id, branchTarget.id, "failure");
+                  }
+                }}
               >
-                {failurePathExists ? "Failure Path Exists" : "Add Failure Path"}
+                {failurePathExists ? "Remove Failure Path" : "Add Failure Path"}
               </button>
+              <section className="flow-mapping-panel" aria-label="Response mappings">
+                <header>
+                  <strong>Response Mappings</strong>
+                  <button type="button" className="flow-action-button" onClick={() => props.onAddFlowMapping(flow.id, selectedNode.id)}>
+                    Add Mapping
+                  </button>
+                </header>
+                <div className="flow-mapping-quick-actions" aria-label="Quick capture mappings">
+                  <button
+                    type="button"
+                    className="flow-action-button"
+                    onClick={() => props.onAddFlowMapping(flow.id, selectedNode.id, {
+                      jsonPath: "$.accessToken",
+                      variableName: "accessToken",
+                      secret: true
+                    })}
+                  >
+                    Capture Token
+                  </button>
+                  <button
+                    type="button"
+                    className="flow-action-button"
+                    onClick={() => props.onAddFlowMapping(flow.id, selectedNode.id, {
+                      jsonPath: "$.id",
+                      variableName: selectedService && selectedService.id.includes("order") ? "orderId" : "recordId",
+                      secret: false
+                    })}
+                  >
+                    Capture Id
+                  </button>
+                </div>
+                {selectedMappings.length ? selectedMappings.map((mapping) => (
+                  <div className="flow-mapping-row" key={mapping.id}>
+                    <label>
+                      <span>JSONPath</span>
+                      <input
+                        aria-label="Mapping JSONPath"
+                        value={mapping.jsonPath}
+                        onChange={(event) => props.onUpdateFlowMapping(flow.id, mapping.id, { jsonPath: event.target.value })}
+                      />
+                    </label>
+                    <label>
+                      <span>Variable</span>
+                      <input
+                        aria-label="Mapping variable"
+                        value={mapping.variableName}
+                        onChange={(event) => props.onUpdateFlowMapping(flow.id, mapping.id, { variableName: event.target.value })}
+                      />
+                    </label>
+                    <label className="flow-mapping-secret">
+                      <input
+                        aria-label={`Mark ${mapping.variableName || "mapping"} as secret`}
+                        type="checkbox"
+                        checked={mapping.secret}
+                        onChange={(event) => props.onUpdateFlowMapping(flow.id, mapping.id, { secret: event.target.checked })}
+                      />
+                      <span>Secret</span>
+                    </label>
+                    <button type="button" className="flow-action-button danger" onClick={() => props.onDeleteFlowMapping(flow.id, mapping.id)}>
+                      Remove
+                    </button>
+                  </div>
+                )) : <p className="empty-inline">No response mappings for this step.</p>}
+              </section>
             </>
           ) : (
             <p>No step selected.</p>
@@ -1840,15 +2888,183 @@ function FlowBuilderEditor(props: {
 }
 
 function FlowStepNode({ data }: NodeProps<FlowCanvasNode>) {
+  return <FlowNodeCard data={data} showHandles />;
+}
+
+function FlowNodeCard({ data, showHandles = false }: { data: FlowCanvasNodeData; showHandles?: boolean }) {
   return (
-    <div className={`flow-node-card ${data.status}`}>
-      <Handle type="target" position={Position.Left} />
+    <div className={`flow-node-card ${data.status} ${data.cleanup ? "cleanup" : ""} ${data.missingRequest ? "missing-request" : ""}`}>
+      {showHandles ? <Handle type="target" position={Position.Left} /> : null}
       <span className={`method method-${data.method.toLowerCase()}`}>{data.method}</span>
       <strong>{data.label}</strong>
       <em>{data.serviceName}</em>
-      <small>{data.status}</small>
-      <Handle type="source" position={Position.Right} />
+      <div className="node-badges">
+        {data.missingRequest ? <small>missing request</small> : null}
+        {data.cleanup ? <small>cleanup</small> : null}
+        {data.capturedVariables.slice(0, 2).map((name) => <small key={name}>captures {name}</small>)}
+        {data.mappingCount > data.capturedVariables.length ? <small>{data.mappingCount} capture{data.mappingCount === 1 ? "" : "s"}</small> : null}
+        {data.consumedVariables.length ? <small>{data.consumedVariables.length} variable{data.consumedVariables.length === 1 ? "" : "s"}</small> : null}
+        {!data.cleanup && !data.mappingCount && !data.consumedVariables.length ? <small>{data.status}</small> : null}
+      </div>
+      {showHandles ? <Handle type="source" position={Position.Right} /> : null}
     </div>
+  );
+}
+
+function FlowRenderLayer({
+  nodes,
+  edges,
+  selectedNodeId,
+  viewport,
+  interactive,
+  onNodeSelect,
+  onNodePointerDown,
+  onNodePointerMove,
+  onNodePointerUp
+}: {
+  nodes: FlowCanvasNode[];
+  edges: Edge[];
+  selectedNodeId: string;
+  viewport: Viewport;
+  interactive: boolean;
+  onNodeSelect: (nodeId: string) => void;
+  onNodePointerDown: (event: ReactPointerEvent<HTMLButtonElement>, node: FlowCanvasNode) => void;
+  onNodePointerMove: (event: ReactPointerEvent<HTMLButtonElement>) => void;
+  onNodePointerUp: (event: ReactPointerEvent<HTMLButtonElement>) => void;
+}) {
+  const nodesById = new Map(nodes.map((node) => [node.id, node]));
+
+  return (
+    <div
+      className="flow-render-layer"
+      aria-label="Rendered flow diagram"
+    >
+      <div
+        className="flow-render-world"
+        style={{
+          transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})`
+        }}
+      >
+        <svg className="flow-route-layer">
+          {edges.map((edge) => {
+            const source = nodesById.get(edge.source);
+            const target = nodesById.get(edge.target);
+            if (!source || !target) return null;
+            const sourceX = source.position.x + flowNodeWidth;
+            const sourceY = source.position.y + flowNodeHeight / 2;
+            const targetX = target.position.x;
+            const targetY = target.position.y + flowNodeHeight / 2;
+            const midpoint = Math.max(36, (targetX - sourceX) / 2);
+            const path = `M ${sourceX} ${sourceY} C ${sourceX + midpoint} ${sourceY}, ${targetX - midpoint} ${targetY}, ${targetX} ${targetY}`;
+            return (
+              <g className={`flow-route ${edge.label === "Failure" ? "failure" : "success"}`} key={edge.id}>
+                <path d={path} />
+                <text x={(sourceX + targetX) / 2} y={(sourceY + targetY) / 2 - 8}>{edge.label}</text>
+              </g>
+            );
+          })}
+        </svg>
+        {nodes.map((node) => (
+          <button
+            type="button"
+            className={node.id === selectedNodeId ? "flow-render-node selected" : "flow-render-node"}
+            aria-label={`Flow step ${node.data.label}`}
+            data-testid={`flow-render-node-${node.id}`}
+            aria-disabled={!interactive}
+            onClick={() => onNodeSelect(node.id)}
+            key={node.id}
+            onPointerDown={(event) => onNodePointerDown(event, node)}
+            onPointerMove={onNodePointerMove}
+            onPointerUp={onNodePointerUp}
+            onPointerCancel={onNodePointerUp}
+            style={{
+              transform: `translate(${node.position.x}px, ${node.position.y}px)`
+            }}
+          >
+            <FlowNodeCard data={node.data} />
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function flowConsumedVariables(service?: ProjectService): string[] {
+  if (!service) return [];
+  const values = [
+    service.path,
+    ...service.headers.map((row) => row.value),
+    ...service.queryParams.map((row) => row.value),
+    ...service.pathParams.map((row) => row.value),
+    service.body.raw
+  ];
+  const references = values.flatMap((value) => findVariableReferences(value));
+  const auth = service.authProfile;
+
+  if (auth.type === "bearer" && auth.tokenVariable) references.push(auth.tokenVariable);
+  if (auth.type === "apiKey" && auth.apiKeyValue) references.push(...findVariableReferences(auth.apiKeyValue));
+  if (auth.type === "basic") {
+    if (auth.usernameVariable) references.push(auth.usernameVariable);
+    if (auth.passwordVariable) references.push(auth.passwordVariable);
+  }
+  if (auth.type === "oauthClientCredentials") {
+    if (auth.tokenUrl) references.push(...findVariableReferences(auth.tokenUrl));
+    if (auth.clientIdVariable) references.push(auth.clientIdVariable);
+    if (auth.clientSecretVariable) references.push(auth.clientSecretVariable);
+  }
+  if (auth.type === "customHeader" && auth.customHeaderValue) {
+    references.push(...findVariableReferences(auth.customHeaderValue));
+  }
+
+  return references
+    .map((name) => name.trim())
+    .filter(Boolean)
+    .filter((name, index, names) => names.indexOf(name) === index);
+}
+
+function isCleanupService(service?: ProjectService): boolean {
+  if (!service) return false;
+  const searchable = `${service.id} ${service.name}`.toLowerCase();
+  return service.method === "DELETE"
+    || searchable.includes("cleanup")
+    || searchable.includes("delete")
+    || searchable.includes("cancel");
+}
+
+function flowTemplateRequiredServiceIds(templateId: FlowTemplateId): string[] {
+  if (templateId === "authenticated-read") {
+    return ["login", "current-user", "list-products"];
+  }
+  return ["login", "create-order", "get-order", "cleanup-order"];
+}
+
+function requestIdToLabel(serviceId: string): string {
+  return serviceId
+    .split("-")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function WelcomeView() {
+  return (
+    <section className="welcome-view" aria-label="Welcome overview">
+      <div>
+        <h1>Welcome to Relay Studio</h1>
+        <p>
+          Relay Studio is a desktop REST workspace for designing requests, managing environment variables,
+          saving response evidence, and building multi-step API flows.
+        </p>
+        <p>
+          Use the explorer to open or create requests, then promote repeatable chains into flows when one
+          request needs data captured from another.
+        </p>
+        <p>
+          Projects are saved as local <code>.restproj</code> files so demos and test workspaces can move
+          between machines without requiring a hosted backend.
+        </p>
+      </div>
+    </section>
   );
 }
 
@@ -1881,6 +3097,7 @@ function BottomDock(props: {
     ? props.runnerEvents.filter((event) => event.level === "error")
     : props.runnerEvents;
   const responseText = props.runnerResponse?.prettyBody || props.runnerResponse?.rawBody || "";
+  const canToggleResponseBody = Boolean(props.runnerResponse || props.runnerError);
 
   return (
     <section className="bottom-dock" aria-label="Response and console dock">
@@ -1899,14 +3116,16 @@ function BottomDock(props: {
                 <button type="button" className={responseTab === tab ? "active" : ""} onClick={() => setResponseTab(tab)} key={tab}>{tab}</button>
               ))}
             </nav>
-            <button
-              type="button"
-              className="response-toggle"
-              aria-label={props.responseVisible ? "Show empty response state" : "Show sample response"}
-              onClick={props.onToggleResponse}
-            >
-              {props.responseVisible ? "Empty" : "Body"}
-            </button>
+            {canToggleResponseBody ? (
+              <button
+                type="button"
+                className="response-toggle"
+                aria-label={props.responseVisible ? "Hide response body" : "Show response body"}
+                onClick={props.onToggleResponse}
+              >
+                {props.responseVisible ? "Hide Body" : "Show Body"}
+              </button>
+            ) : null}
           </>
         ) : null}
         {utilityTab === "Console" ? (
@@ -1926,9 +3145,11 @@ function BottomDock(props: {
           {props.responseVisible && props.runnerResponse ? (
             <div className="response-content">
               <div className="response-meta">
-                <span className={props.runnerResponse.ok ? "http-ok" : "http-error"}>{props.runnerResponse.status} {props.runnerResponse.statusText}</span>
-                <span>{props.runnerResponse.durationMs} ms</span>
-                <span>{props.runnerResponse.rawBody.length} B</span>
+                <span className={`response-pill ${props.runnerResponse.ok ? "success" : "error"}`}>
+                  {props.runnerResponse.status} {props.runnerResponse.statusText}
+                </span>
+                <span className="response-pill">{props.runnerResponse.durationMs} ms</span>
+                <span className="response-pill">{formatResponseSize(props.runnerResponse.rawBody)}</span>
                 <button type="button" disabled={!props.canSaveResponse} onClick={props.onSaveResponse}>Save Response</button>
               </div>
               <div className="response-body">
@@ -1986,40 +3207,60 @@ function BottomDock(props: {
   );
 }
 
-function Inspector({ environment, activeTab, onClose }: { environment: string; activeTab: WorkbenchTab; onClose: () => void }) {
+function Inspector({
+  environment,
+  activeTab,
+  onAddVariable,
+  onClose,
+  onDeleteVariable,
+  onUpdateVariable
+}: {
+  environment: ProjectEnvironment | undefined;
+  activeTab: WorkbenchTab;
+  onAddVariable: () => void;
+  onClose: () => void;
+  onDeleteVariable: (index: number) => void;
+  onUpdateVariable: (index: number, patch: Partial<ProjectVariable>) => void;
+}) {
+  const [variableFilter, setVariableFilter] = useState("");
+  const variables = environment?.variables ?? [];
+  const visibleVariables = variables
+    .map((variable, index) => ({ variable, index }))
+    .filter(({ variable }) => variable.name.toLowerCase().includes(variableFilter.toLowerCase()));
+
   return (
     <aside className="inspector" aria-label="Inspector">
       <div className="inspector-tabs">
         <button type="button" className="active">Inspector</button>
-        <button type="button">Variables</button>
         <button type="button" aria-label="Hide inspector" onClick={onClose}><X size={16} /></button>
       </div>
-      <section>
-        <h2>Environment</h2>
-        <label>
-          <span>Active Environment</span>
-          <select value={environment} onChange={() => undefined}>
-            <option>{environment}</option>
-          </select>
-        </label>
-      </section>
-      <section>
+      <section className="inspector-variables-panel">
         <h2>Variables</h2>
         <label className="filter-field">
           <Search size={15} />
-          <input placeholder="Filter variables" />
+          <input
+            aria-label="Filter variables"
+            placeholder="Filter variables"
+            value={variableFilter}
+            onChange={(event) => setVariableFilter(event.target.value)}
+          />
         </label>
-        <VariableRow name="baseUrl" value="https://api.example.com" />
-        <VariableRow name="accessToken" value="********" secret />
-        <VariableRow name="productId" value="prod-1001" />
-        <VariableRow name="orderId" value="ord-20260621-0001" />
-        <button type="button" className="secondary-full"><Plus size={16} /> Add Variable</button>
+        {visibleVariables.length ? visibleVariables.map(({ variable, index }) => (
+          <VariableRow
+            key={`${variable.name}-${index}`}
+            index={index}
+            variable={variable}
+            onDelete={onDeleteVariable}
+            onUpdate={onUpdateVariable}
+          />
+        )) : <p className="empty-inline">No variables match the filter.</p>}
+        <button type="button" className="secondary-full" onClick={onAddVariable}><Plus size={16} /> Add Variable</button>
       </section>
       <section>
         <h2>Auth Snapshot</h2>
         <div className="snapshot-grid">
           <span>Type</span><strong>Bearer Token</strong>
-          <span>Token</span><strong>{"{{accessToken}}"}</strong>
+          <span>Token</span><strong>{variables.some((variable) => variable.name === "accessToken") ? "{{accessToken}}" : "Not configured"}</strong>
           <span>Status</span><strong className="ready-text">Ready</strong>
         </div>
       </section>
@@ -2036,32 +3277,66 @@ function Inspector({ environment, activeTab, onClose }: { environment: string; a
   );
 }
 
-function VariableRow({ name, value, secret = false }: { name: string; value: string; secret?: boolean }) {
+function VariableRow({
+  index,
+  variable,
+  onDelete,
+  onUpdate
+}: {
+  index: number;
+  variable: ProjectVariable;
+  onDelete: (index: number) => void;
+  onUpdate: (index: number, patch: Partial<ProjectVariable>) => void;
+}) {
   return (
     <div className="variable-row">
-      <span>{name}</span>
-      <code>{value}</code>
-      {secret ? <KeyRound size={14} /> : null}
+      <input
+        aria-label={`Variable name ${index + 1}`}
+        value={variable.name}
+        onChange={(event) => onUpdate(index, { name: event.target.value })}
+      />
+      <input
+        aria-label={`Variable value ${variable.name || index + 1}`}
+        type={variable.secret ? "password" : "text"}
+        value={variable.value}
+        onChange={(event) => onUpdate(index, { value: event.target.value })}
+      />
+      <label className="variable-secret-toggle" title="Secret">
+        <input
+          aria-label={`Secret ${variable.name || index + 1}`}
+          checked={variable.secret}
+          type="checkbox"
+          onChange={(event) => onUpdate(index, { secret: event.target.checked })}
+        />
+        <KeyRound size={14} />
+      </label>
+      <button type="button" aria-label={`Delete variable ${variable.name || index + 1}`} onClick={() => onDelete(index)}>
+        <Trash2 size={14} />
+      </button>
     </div>
   );
 }
 
 function CommandPalette({ onClose, onChoose }: { onClose: () => void; onChoose: (label: string) => void }) {
+  const [query, setQuery] = useState("");
+  const filteredCommands = commandItems.filter((label) => label.toLowerCase().includes(query.trim().toLowerCase()));
+
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
       <section className="command-palette" role="dialog" aria-modal="true" aria-label="Command palette" onMouseDown={(event) => event.stopPropagation()}>
         <label>
           <Search size={18} />
-          <input autoFocus placeholder="Search commands" />
+          <input autoFocus placeholder="Search commands" value={query} onChange={(event) => setQuery(event.target.value)} />
           <kbd>Esc</kbd>
         </label>
         <div>
-          {commandItems.map((label) => (
+          {filteredCommands.map((label) => (
             <button type="button" key={label} onClick={() => onChoose(label)}>
               <span>{label}</span>
               <em>{label === "Send Request" ? "Cmd Enter" : label === "Settings" ? "Cmd ," : ""}</em>
             </button>
           ))}
+          {!filteredCommands.length ? <p className="empty-inline">No matching commands.</p> : null}
         </div>
       </section>
     </div>
@@ -2081,6 +3356,80 @@ function groupServices(project: RelayProject): Array<{ folder: string; items: Pr
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
+}
+
+function positionsEqual(first: FlowNodePosition, second: FlowNodePosition): boolean {
+  return Math.abs(first.x - second.x) < 0.5 && Math.abs(first.y - second.y) < 0.5;
+}
+
+function contextMenuLabel(target: "requests" | "request" | "flows" | "flow" | "project"): string {
+  if (target === "requests") return "Requests context menu";
+  if (target === "request") return "Request context menu";
+  if (target === "flows") return "Flows context menu";
+  if (target === "flow") return "Flow context menu";
+  return "Project context menu";
+}
+
+function createDefaultTabsForProject(project: RelayProject): WorkbenchTab[] {
+  return reconcileTabsForProject(project, [
+    { id: "welcome", label: "Welcome", kind: "welcome" },
+    ...project.services.slice(0, 2).map((service) => ({
+      id: service.id,
+      label: service.name,
+      kind: "request" as const,
+      method: service.method
+    })),
+    ...project.flows.slice(0, 1).map((flow) => ({
+      id: flow.id,
+      label: flow.name,
+      kind: "flow" as const
+    })),
+    ...project.savedResponses.slice(0, 1).map((response) => ({
+      id: response.id,
+      label: response.fileName,
+      kind: "response" as const,
+      method: response.method
+    }))
+  ]);
+}
+
+function reconcileTabsForProject(project: RelayProject, tabs: WorkbenchTab[]): WorkbenchTab[] {
+  const reconciled = tabs.flatMap((tab): WorkbenchTab[] => {
+    if (tab.kind === "welcome") return [{ ...tab, id: "welcome", label: "Welcome" }];
+    if (tab.kind === "request") {
+      const service = project.services.find((item) => item.id === tab.id);
+      return service ? [{ ...tab, label: service.name, method: service.method }] : [];
+    }
+    if (tab.kind === "flow") {
+      const flow = project.flows.find((item) => item.id === tab.id);
+      return flow ? [{ ...tab, label: flow.name }] : [];
+    }
+    if (tab.kind === "response") {
+      const response = project.savedResponses.find((item) => item.id === tab.id);
+      return response ? [{ ...tab, label: response.fileName, method: response.method }] : [];
+    }
+    return [tab];
+  });
+  return reconciled.some((tab) => tab.id === "welcome")
+    ? reconciled
+    : [{ id: "welcome", label: "Welcome", kind: "welcome" }, ...reconciled];
+}
+
+function reconcileActiveTabId(
+  project: RelayProject,
+  tabs: WorkbenchTab[],
+  activeTabId: string,
+  activeServiceId: string,
+  activeFlowId: string
+): string {
+  if (tabs.some((tab) => tab.id === activeTabId)) return activeTabId;
+  if (activeFlowId && project.flows.some((flow) => flow.id === activeFlowId) && tabs.some((tab) => tab.id === activeFlowId)) return activeFlowId;
+  if (activeServiceId && project.services.some((service) => service.id === activeServiceId) && tabs.some((tab) => tab.id === activeServiceId)) return activeServiceId;
+  return tabs[0]?.id ?? "welcome";
+}
+
+function isRequestOrFlowTabKind(kind: TabKind): kind is "request" | "flow" {
+  return kind === "request" || kind === "flow";
 }
 
 function mergeCapturedVariables(current: ProjectVariable[], captured: ProjectVariable[]): ProjectVariable[] {
@@ -2154,8 +3503,131 @@ function upsertEnvironmentVariable(variables: ProjectVariable[], variable: Proje
     : [...variables, variable];
 }
 
+function uniqueEnvironmentVariableName(variables: ProjectVariable[], baseName: string): string {
+  const names = new Set(variables.map((variable) => variable.name));
+  if (!names.has(baseName)) return baseName;
+  let index = 2;
+  while (names.has(`${baseName}${index}`)) {
+    index += 1;
+  }
+  return `${baseName}${index}`;
+}
+
 function slugForId(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "param";
+}
+
+function isActiveProjectListTarget(
+  activeName: string,
+  activePath: string,
+  candidateName: string,
+  candidatePath: string
+): boolean {
+  if (activePath && candidatePath) {
+    return activePath === candidatePath;
+  }
+  return activeName.trim().toLowerCase() === candidateName.trim().toLowerCase();
+}
+
+function hasTauriRuntimeSync(): boolean {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
+
+function ProjectNameDialog({
+  title,
+  initialName,
+  submitLabel,
+  fieldLabel = "Project name",
+  onCancel,
+  onSubmit
+}: {
+  title: string;
+  initialName: string;
+  submitLabel: string;
+  fieldLabel?: string;
+  onCancel: () => void;
+  onSubmit: (name: string) => void | Promise<void>;
+}) {
+  const [name, setName] = useState(initialName);
+  const [submitting, setSubmitting] = useState(false);
+  const trimmedName = name.trim();
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section className="project-file-dialog" role="dialog" aria-modal="true" aria-label={title}>
+        <header>
+          <strong>{title}</strong>
+          <button type="button" aria-label={`Close ${title.toLowerCase()} dialog`} onClick={onCancel}><X size={17} /></button>
+        </header>
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!trimmedName) return;
+            setSubmitting(true);
+            void Promise.resolve(onSubmit(trimmedName)).finally(() => setSubmitting(false));
+          }}
+        >
+          <label>
+            <span>{fieldLabel}</span>
+            <input
+              aria-label={fieldLabel}
+              autoFocus
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              onFocus={(event) => event.target.select()}
+            />
+          </label>
+          {!trimmedName ? <p className="overwrite-warning">{fieldLabel} is required.</p> : null}
+          <div>
+            <button type="submit" className="primary-command" disabled={submitting || !trimmedName}>
+              {submitting ? "Working..." : submitLabel}
+            </button>
+            <button type="button" onClick={onCancel}>Cancel</button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+}
+
+function DeleteProjectDialog({
+  target,
+  onCancel,
+  onDelete
+}: {
+  target: ProjectListTarget;
+  onCancel: () => void;
+  onDelete: () => void | Promise<void>;
+}) {
+  const [submitting, setSubmitting] = useState(false);
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section className="project-file-dialog" role="dialog" aria-modal="true" aria-label="Delete Project">
+        <header>
+          <strong>Delete Project</strong>
+          <button type="button" aria-label="Close delete project dialog" onClick={onCancel}><X size={17} /></button>
+        </header>
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            setSubmitting(true);
+            void Promise.resolve(onDelete()).finally(() => setSubmitting(false));
+          }}
+        >
+          <p className="delete-warning">
+            This action is destructive and will completely delete the project file for <strong>{target.name}</strong>.
+          </p>
+          {target.path ? <p className="project-path-copy">{target.path}</p> : <p className="project-path-copy">This unsaved project will be removed from Recent Projects.</p>}
+          <div>
+            <button type="submit" className="primary-command danger-command" disabled={submitting}>
+              {submitting ? "Deleting..." : "Delete Project"}
+            </button>
+            <button type="button" onClick={onCancel}>Cancel</button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
 }
 
 function ProjectFileDialog({
@@ -2171,30 +3643,29 @@ function ProjectFileDialog({
   recentProjects: RecentProject[];
   projectExists: (path: string) => Promise<boolean>;
   onCancel: () => void;
-  onSubmit: (input: { path: string; password: string }) => Promise<void>;
+  onSubmit: (input: { path: string }) => Promise<void>;
 }) {
   const [path, setPath] = useState(dialog.path || `/private/tmp/${projectName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.restproj`);
-  const [password, setPassword] = useState("relay-studio");
   const [submitting, setSubmitting] = useState(false);
   const [overwritePending, setOverwritePending] = useState(false);
 
   useEffect(() => {
     setOverwritePending(false);
-  }, [path, password]);
+  }, [path]);
 
   async function handleSubmit() {
     if (dialog.mode === "save" && path !== dialog.path && !overwritePending && await projectExists(path)) {
       setOverwritePending(true);
       return;
     }
-    await onSubmit({ path, password });
+    await onSubmit({ path });
   }
 
   async function openRecent(pathToOpen: string) {
     setPath(pathToOpen);
     setSubmitting(true);
     try {
-      await onSubmit({ path: pathToOpen, password });
+      await onSubmit({ path: pathToOpen });
     } finally {
       setSubmitting(false);
     }
@@ -2218,10 +3689,6 @@ function ProjectFileDialog({
             <span>Project file path</span>
             <input value={path} onChange={(event) => setPath(event.target.value)} placeholder="/path/to/project.restproj" />
           </label>
-          <label>
-            <span>Project password</span>
-            <input value={password} onChange={(event) => setPassword(event.target.value)} type="password" />
-          </label>
           {dialog.mode === "open" && recentProjects.length ? (
             <section className="recent-project-picker" aria-label="Recent projects">
               <strong>Recent Projects</strong>
@@ -2234,7 +3701,7 @@ function ProjectFileDialog({
               ))}
             </section>
           ) : null}
-          <p>Project files use the `.restproj` extension. Secret-bearing project data is encrypted with the password before it is written.</p>
+          <p>Project files use the `.restproj` extension. Secret values remain redacted in the workspace and console output.</p>
           {overwritePending ? <p className="overwrite-warning">A project already exists at this path. Confirm overwrite to continue.</p> : null}
           <div>
             <button type="submit" className="primary-command" disabled={submitting}>
@@ -2314,6 +3781,16 @@ function SaveResponseDialog({
       </section>
     </div>
   );
+}
+
+function upsertSessionProjectSnapshot(
+  current: SessionProjectSnapshot[],
+  snapshot: SessionProjectSnapshot
+): SessionProjectSnapshot[] {
+  return [
+    snapshot,
+    ...current.filter((item) => item.id !== snapshot.id)
+  ].slice(0, 5);
 }
 
 function SavePrompt({
