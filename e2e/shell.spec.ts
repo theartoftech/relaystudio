@@ -28,6 +28,83 @@ test("opens inspector immediately at narrower desktop widths", async ({ page }) 
   await expect(inspector.getByText("Variables")).toBeVisible();
 });
 
+test("uses compact desktop density at common workbench sizes", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+
+  const measurements = await page.evaluate(() => {
+    const shell = document.querySelector<HTMLElement>(".app-shell");
+    const explorer = document.querySelector<HTMLElement>(".project-explorer");
+    const commandBar = document.querySelector<HTMLElement>(".top-command-bar");
+    const tabStrip = document.querySelector<HTMLElement>(".tab-strip");
+    const requestInput = document.querySelector<HTMLElement>(".request-row input");
+    const bottomDock = document.querySelector<HTMLElement>(".bottom-dock");
+    const primaryCommand = document.querySelector<HTMLElement>(".primary-command");
+    const utilityButton = document.querySelector<HTMLElement>(".utility-header nav button");
+    if (!shell || !explorer || !commandBar || !tabStrip || !requestInput || !bottomDock || !primaryCommand || !utilityButton) {
+      throw new Error("Required workbench density elements were not rendered.");
+    }
+    return {
+      explorerWidth: Math.round(explorer.getBoundingClientRect().width),
+      commandBarHeight: Math.round(commandBar.getBoundingClientRect().height),
+      tabStripHeight: Math.round(tabStrip.getBoundingClientRect().height),
+      requestInputHeight: Math.round(requestInput.getBoundingClientRect().height),
+      bottomDockHeight: Math.round(bottomDock.getBoundingClientRect().height),
+      primaryButtonFontSize: Number.parseFloat(getComputedStyle(primaryCommand).fontSize),
+      utilityButtonFontSize: Number.parseFloat(getComputedStyle(utilityButton).fontSize),
+      fontFamily: getComputedStyle(shell).fontFamily
+    };
+  });
+
+  expect(measurements.explorerWidth).toBeLessThanOrEqual(302);
+  expect(measurements.commandBarHeight).toBeLessThanOrEqual(45);
+  expect(measurements.tabStripHeight).toBeLessThanOrEqual(37);
+  expect(measurements.requestInputHeight).toBeLessThanOrEqual(33);
+  expect(measurements.bottomDockHeight).toBeLessThanOrEqual(246);
+  expect(measurements.primaryButtonFontSize).toBeLessThanOrEqual(12);
+  expect(measurements.utilityButtonFontSize).toBeLessThanOrEqual(12);
+  expect(measurements.fontFamily).toContain("system-ui");
+});
+
+test("keeps compact flow controls aligned and visible at 1180x820", async ({ page }) => {
+  await page.setViewportSize({ width: 1180, height: 820 });
+  await page.goto("/");
+
+  await page.getByRole("tab", { name: /Authenticated Read/i }).click();
+
+  const toolbar = page.locator(".flow-toolbar");
+  await expect(toolbar).toBeVisible();
+  await expect(toolbar.getByLabel("Add request step")).toBeVisible();
+  await expect(toolbar.getByRole("button", { name: "Add Step" })).toBeVisible();
+  await expect(toolbar.getByRole("button", { name: "Reset Layout" })).toBeVisible();
+
+  const geometry = await page.evaluate(() => {
+    const toolbarElement = document.querySelector<HTMLElement>(".flow-toolbar");
+    const select = document.querySelector<HTMLElement>(".flow-toolbar select");
+    const addButton = document.querySelector<HTMLButtonElement>(".flow-toolbar button[aria-label='Add Step']");
+    if (!toolbarElement || !select || !addButton) {
+      throw new Error("Flow toolbar elements were not rendered.");
+    }
+    const toolbarBox = toolbarElement.getBoundingClientRect();
+    const selectBox = select.getBoundingClientRect();
+    const addBox = addButton.getBoundingClientRect();
+    return {
+      toolbarHeight: Math.round(toolbarBox.height),
+      selectMidpoint: Math.round(selectBox.top + selectBox.height / 2),
+      addButtonMidpoint: Math.round(addBox.top + addBox.height / 2),
+      addButtonWidth: Math.round(addBox.width),
+      addButtonFontSize: Number.parseFloat(getComputedStyle(addButton).fontSize),
+      overflow: toolbarElement.scrollWidth - toolbarElement.clientWidth
+    };
+  });
+
+  expect(geometry.toolbarHeight).toBeLessThanOrEqual(56);
+  expect(Math.abs(geometry.selectMidpoint - geometry.addButtonMidpoint)).toBeLessThanOrEqual(3);
+  expect(geometry.addButtonWidth).toBeLessThanOrEqual(34);
+  expect(geometry.addButtonFontSize).toBeLessThanOrEqual(12);
+  expect(geometry.overflow).toBeLessThanOrEqual(12);
+});
+
 test("opens command palette and import placeholder", async ({ page }) => {
   await page.goto("/");
 
@@ -172,6 +249,90 @@ test("shows visible missing-request flow nodes from saved projects", async ({ pa
   await expect(page.getByLabel("Flow step details").getByText("Missing Request")).toBeVisible();
 });
 
+test("scrolls the flow workspace to bounded offscreen nodes", async ({ page }) => {
+  const project = {
+    id: "project-wide-flow",
+    name: "Wide Flow Project",
+    format: "relay-studio-restproj",
+    schemaVersion: 1,
+    createdAt: "2026-06-29T21:35:40.000Z",
+    updatedAt: "2026-06-29T21:35:40.000Z",
+    services: [
+      {
+        id: "request-1",
+        folder: "Requests",
+        name: "Health Check",
+        method: "GET",
+        path: "/api/health",
+        auth: "none",
+        timeoutMs: 30000,
+        retry: { attempts: 0, backoffMs: 0 },
+        headers: [],
+        queryParams: [],
+        pathParams: [],
+        body: { contentType: "none", raw: "" },
+        authProfile: { type: "none" }
+      }
+    ],
+    environments: [
+      { id: "qa", name: "QA Environment", variables: [{ name: "baseUrl", value: "https://api.example.com", secret: false }] }
+    ],
+    flows: [
+      {
+        id: "flow-wide",
+        name: "Wide Flow",
+        steps: ["login", "current-user", "list-products", "get-product"],
+        nodes: [
+          { id: "flow-wide-login", label: "Login", position: { x: 80, y: 120 }, serviceId: "login", status: "idle" },
+          { id: "flow-wide-current-user", label: "Current User", position: { x: 310, y: 212 }, serviceId: "current-user", status: "idle" },
+          { id: "flow-wide-list-products", label: "List Products", position: { x: 540, y: 120 }, serviceId: "list-products", status: "idle" },
+          { id: "flow-wide-get-product", label: "Get Product", position: { x: 1120, y: 212 }, serviceId: "get-product", status: "idle" }
+        ],
+        edges: [
+          { condition: "success", id: "flow-wide-login-success-current-user", source: "flow-wide-login", target: "flow-wide-current-user" },
+          { condition: "success", id: "flow-wide-current-user-success-list-products", source: "flow-wide-current-user", target: "flow-wide-list-products" },
+          { condition: "success", id: "flow-wide-list-products-success-get-product", source: "flow-wide-list-products", target: "flow-wide-get-product" }
+        ],
+        mappings: []
+      }
+    ],
+    savedResponses: [],
+    importSources: [],
+    settings: { askToSaveOnClose: true, redactSecretsInConsole: true }
+  };
+  await page.addInitScript((seedProject) => {
+    localStorage.setItem("relay-studio:project:/private/tmp/wide-flow.restproj", JSON.stringify(seedProject));
+    localStorage.setItem("relay-studio:recent-projects", JSON.stringify([
+      { name: "Wide Flow Project", path: "/private/tmp/wide-flow.restproj", openedAt: "2026-06-29T21:35:40.000Z" }
+    ]));
+  }, project);
+  await page.setViewportSize({ width: 960, height: 640 });
+  await page.goto("/");
+
+  await page.getByLabel("Project explorer").getByRole("button", { name: /Wide Flow Project/ }).click();
+  await page.getByLabel("Project explorer").getByRole("button", { name: /Wide Flow/ }).click();
+
+  const canvas = page.getByLabel("Flow canvas");
+  await expect.poll(async () => canvas.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
+
+  const metrics = await canvas.evaluate((element) => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth
+  }));
+  expect(metrics.scrollWidth).toBeGreaterThan(metrics.clientWidth);
+  expect(metrics.scrollWidth).toBeLessThanOrEqual(1350);
+
+  await canvas.evaluate((element) => {
+    element.scrollLeft = element.scrollWidth;
+  });
+
+  const canvasBox = await canvas.boundingBox();
+  const getProductBox = await canvas.getByTestId("flow-render-node-flow-wide-get-product").boundingBox();
+  if (!canvasBox || !getProductBox) throw new Error("Flow canvas or Get Product node was not measurable.");
+  expect(getProductBox.x).toBeGreaterThanOrEqual(canvasBox.x);
+  expect(getProductBox.x + getProductBox.width).toBeLessThanOrEqual(canvasBox.x + canvasBox.width + 1);
+});
+
 test("keeps action boxes and routes visible after save and pane resizing", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
@@ -239,6 +400,40 @@ test("keeps one flow run control and removes a manually added success path", asy
   await builder.getByRole("button", { name: "Remove Success Path" }).click();
   await expect(builder.getByText("4 steps - 3 links")).toBeVisible();
   await expect(builder.getByRole("button", { name: "Add Success Path" })).toBeEnabled();
+});
+
+test("manages flow response mappings in a table dialog", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+
+  await page.getByRole("tab", { name: /Authenticated Read/i }).click();
+  const builder = page.getByLabel("Flow builder");
+  const mappings = builder.getByLabel("Response mappings");
+
+  await expect(mappings.getByText("1 mapping configured.")).toBeVisible();
+  await expect(mappings.locator("input")).toHaveCount(0);
+  await mappings.getByRole("button", { name: "Manage Response Mappings" }).click();
+
+  const dialog = page.getByRole("dialog", { name: "Response Mappings" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("table", { name: "Response mapping table" })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Capture Token" })).toHaveCount(0);
+  await expect(dialog.getByRole("button", { name: "Capture Id" })).toHaveCount(0);
+  await expect(dialog.getByLabel("JSONPath examples")).toBeVisible();
+  await expect(dialog.getByText("Top-level field named accessToken.")).toBeVisible();
+  await expect(dialog.getByText("First item in an array.")).toBeVisible();
+  await dialog.getByLabel("Mapping 1 variable").fill("sessionToken");
+  await dialog.getByRole("button", { name: "Add Mapping" }).click();
+  await expect(dialog.getByLabel("Mapping 2 JSONPath")).toBeVisible();
+  await dialog.getByLabel("Mapping 2 variable").fill("recordId");
+  await dialog.getByLabel("Mapping 2 JSONPath").fill("$.id");
+  await dialog.getByRole("button", { name: "Delete mapping 2" }).click();
+  await expect(dialog.getByLabel("Mapping 2 variable")).toHaveCount(0);
+  await dialog.getByRole("button", { name: "Done" }).click();
+
+  await expect(dialog).toHaveCount(0);
+  await expect(mappings.getByText("1 mapping configured.")).toBeVisible();
+  await expect(mappings.getByText("sessionToken")).toBeVisible();
 });
 
 test("keeps flow nodes visible after window resize", async ({ page }) => {

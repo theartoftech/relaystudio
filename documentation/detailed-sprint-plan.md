@@ -16,9 +16,10 @@
 | --- | --- | --- |
 | UX Approval | 0-1 | Reviewable UX package, terminology, acceptance matrix, and implementation-ready backlog |
 | App Foundation | 2-4A | Cross-platform shell, local project format, service designer, and OpenAPI import |
-| Execution Core | 5-8A | Single request runner, saved responses, visual flows, UX consolidation, variables, mapping, and flow UX hardening |
-| Enterprise Readiness | 9-11 | Role/error coverage, hardening, coverage gates, security checks, and live REST validation |
-| Beta Packaging | 12 | Installable macOS, Windows, and Linux beta builds |
+| Execution Core | 5-8B | Single request runner, saved responses, visual flows, UX consolidation, variables, mapping, flow UX hardening, and desktop density polish |
+| Platform Compliance | 9A-10B | Shared, macOS, and Windows shell work to meet platform design guidance, simplify command surfaces, and add platform-specific verification |
+| Enterprise Readiness | 11-13 | Role/error coverage, hardening, coverage gates, security checks, and live REST validation |
+| Beta Packaging | 14 | Installable macOS, Windows, and Linux beta builds |
 
 ## Sprint 0: UX Intent And Mockup Review
 
@@ -463,7 +464,162 @@ Make flows the product's clearest differentiator by turning the basic flow varia
 - Flow screens avoid repeating information already visible in the same work area unless it materially improves confidence or error prevention.
 - Coverage remains above 90%.
 
-## Sprint 9: Role And Error Coverage
+## Sprint 8B: Desktop Density Pass
+
+### Status
+
+Implemented. See `sprint-8b-implementation-status.md`.
+
+### Objective
+
+Increase usable work area by tightening Relay Studio's desktop UI density while preserving readability, accessibility, and the current flow/request workflows.
+
+### Deliverables
+
+- Native-first font stack for macOS, Windows, and Linux.
+- Compact design tokens for font size, control height, tab height, tree row height, and panel padding.
+- Denser explorer, request composer, request detail form, flow toolbar, inspector, and response dock.
+- Updated default pane widths and bottom dock height.
+- Regression tests that prove the denser shell still renders without clipping, overlap, or inaccessible controls.
+
+### Work Items
+
+- Replace the global font stack with a native-first stack: `-apple-system`, `BlinkMacSystemFont`, `SF Pro Text`, `Segoe UI`, `system-ui`, and `sans-serif`.
+- Replace code/editor fonts with a native monospace stack: `ui-monospace`, `SF Mono`, `Cascadia Mono`, `Consolas`, and `monospace`.
+- Add density tokens in `src/styles.css` for base UI text, label text, code text, control height, compact control height, tab height, and tree row height.
+- Reduce top command bar height, tab strip height, request composer vertical padding, form input heights, flow toolbar height, and bottom dock default height.
+- Reduce default explorer and inspector widths while keeping resize handles and minimum usable widths.
+- Tighten flow node card padding and badge styling without making the canvas harder to scan.
+- Keep code and JSON viewers readable; reduce chrome and padding before reducing code text below 12px.
+- Update screenshot/e2e tests for common desktop sizes including 1180x820 and 1440x900.
+
+### Acceptance Criteria
+
+- More horizontal and vertical work area is available for the request editor and flow canvas at 1440x900.
+- Explorer, inspector, response dock, and flow detail panels use less space without clipped labels or overlapping controls.
+- Request method, URL, protocol, and send/run actions remain readable and keyboard reachable.
+- Flow toolbar actions fit with less horizontal pressure.
+- JSON and response bodies remain readable.
+- The app continues to feel like a native desktop workbench, not a zoomed-out web dashboard.
+- Coverage remains above 90%.
+
+## Sprint 9A: Platform Shell Contract
+
+### Objective
+
+Define the shared shell contract and platform override boundaries before more shell polish lands.
+
+### Deliverables
+
+- Shared shell command contract.
+- Platform-adapter boundary for shell chrome.
+- Native macOS menu structure definition.
+- Windows title bar and command model definition.
+
+### Work Items
+
+- Define shared command IDs, labels, shortcuts, enablement rules, and intended command surfaces.
+- Route Save, Save As, Close Tab, Close Window, and project-switch behavior through one dirty-state policy.
+- Separate shared workbench content from platform-specific menu and title bar behavior.
+- Add macOS `File`, `Edit`, `View`, `Window`, and `Help` menu structure with document actions moved out of the app menu.
+- Define Windows title bar drag regions, interactive regions, and command ownership rules.
+
+### Acceptance Criteria
+
+- A single documented source of truth exists for shell commands, shortcuts, and view toggles.
+- Request tabs, flow tabs, welcome, and settings each define visible and enabled primary actions.
+- macOS document actions are menu-backed rather than app-menu-only.
+- Windows title bar ownership, drag regions, and caption-control constraints are explicitly defined.
+
+## Sprint 9B: Platform Navigation And Command Surfaces
+
+### Objective
+
+Simplify navigation and command placement so the workbench feels native and preserves the main editing area.
+
+### Deliverables
+
+- Simplified explorer information architecture.
+- State-aware toolbar behavior.
+- Reduced inspector/details duplication.
+- Platform-specific command-surface adjustments for macOS and Windows.
+
+### Work Items
+
+- Limit explorer content to project structure and related navigation.
+- Move Recent Projects out of the primary project tree and move transient status out of navigation.
+- Make toolbar actions request-specific, flow-specific, or hidden when not applicable.
+- Reduce duplicate summaries between inspector and flow details.
+- Align macOS sidebar behavior with document-app expectations.
+- Align Windows command surfaces with commanding guidance for primary, secondary, and destructive actions.
+
+### Acceptance Criteria
+
+- Explorer no longer mixes project structure, transient status, and recent-project switching in one surface.
+- Flow and request tabs show only relevant primary actions.
+- Inspector content changes meaningfully by editor type instead of duplicating visible context.
+- Frequent commands live on the correct primary surface; secondary commands move to menus, context menus, or overflow surfaces.
+
+## Sprint 10A: Platform Chrome, Layout, And Writing
+
+### Objective
+
+Make the shell behave like a first-class desktop app on macOS and Windows, with production-quality text and platform chrome.
+
+### Deliverables
+
+- Production-quality settings and error copy.
+- Dialog behavior standards.
+- Cross-platform context menu standards.
+- macOS menu-backed workspace toggles.
+- Windows title bar, breakpoint, and appearance support.
+
+### Work Items
+
+- Remove placeholder Settings copy and replace weak desktop text with concise, action-first language.
+- Standardize dialog button ordering, focus trap behavior, Escape handling, and focus return.
+- Finish app-defined context menus across requests, flows, tabs, mappings, recent projects, and flow edges.
+- Add macOS `View` toggles for sidebar, inspector, response dock, and flow details.
+- Implement Windows title bar behavior, breakpoint-safe layout behavior, and light/dark/high-contrast support.
+
+### Acceptance Criteria
+
+- Placeholder Settings text is gone.
+- Error messages are concise, helpful, and non-blaming.
+- Dialog focus, Escape behavior, and action ordering are defined and tested.
+- Windows shell behavior is valid at small, medium, and large breakpoint classes.
+- High contrast and active/inactive title bar states are visually distinguishable on Windows.
+
+## Sprint 10B: Platform Verification And Audit Closure
+
+### Objective
+
+Make platform-guideline work enforceable with repeatable tests, QA scripts, and bounded audits.
+
+### Deliverables
+
+- Automated platform-shell regression coverage.
+- macOS shell QA script.
+- Windows shell QA script.
+- Refreshed macOS audit evidence.
+- Bounded Windows desktop audit.
+
+### Work Items
+
+- Add regression coverage for dialog keyboard behavior, view-toggle state, dirty-state flows, and main context menus.
+- Write macOS QA coverage for menus, settings, save prompts, and view toggles.
+- Write Windows QA coverage for title bar, caption controls, breakpoints, contrast, and keyboard behavior.
+- Re-run the macOS HIG audit against the updated desktop app.
+- Perform a bounded Windows desktop audit against the updated shell.
+
+### Acceptance Criteria
+
+- Platform-shell regressions are covered where the current harness can support them.
+- macOS and Windows shell QA scripts exist and are runnable.
+- June 30, 2026 macOS high-priority findings are either closed or explicitly deferred with rationale.
+- Windows high-priority findings are either closed or converted into tracked backlog items.
+
+## Sprint 11: Role And Error Coverage
 
 ### Objective
 
@@ -492,7 +648,7 @@ Prove enterprise security behavior and negative-path diagnostics against real ro
 - Live REST tests are gated and never require committed passwords.
 - Redaction tests fail on any token, password, API key, client secret, or authorization header leak.
 
-## Sprint 10: Enterprise Hardening
+## Sprint 12: Enterprise Hardening
 
 ### Objective
 
@@ -525,7 +681,7 @@ Raise reliability, recoverability, and operational diagnostics to enterprise exp
 - Diagnostics bundles are useful and redacted by default.
 - Concurrent save attempts are guarded.
 
-## Sprint 11: Coverage And Security Gate
+## Sprint 13: Coverage And Security Gate
 
 ### Objective
 
@@ -559,7 +715,7 @@ Make quality and security gates release-blocking.
 - No unhandled exceptions occur in normal or negative-path tests.
 - Release candidate readiness report lists known risks and approved deferrals.
 
-## Sprint 12: Cross-Platform Packaging And Beta
+## Sprint 14: Cross-Platform Packaging And Beta
 
 ### Objective
 

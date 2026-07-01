@@ -14,6 +14,8 @@ import {
 import "@xyflow/react/dist/style.css";
 import {
   Archive,
+  ArrowLeft,
+  ArrowRight,
   Box,
   Braces,
   ChevronDown,
@@ -27,11 +29,13 @@ import {
   Pencil,
   Play,
   Plus,
+  RotateCcw,
   Save,
   Search,
   Send,
   SlidersHorizontal,
   Trash2,
+  Unlink2,
   X,
   Zap
 } from "lucide-react";
@@ -98,6 +102,7 @@ import {
   nextActiveDragPositions,
   recoverVisibleFlowPositions,
   resetFlowLayoutPositions,
+  scrollWorldSizeForNodes,
   type FlowCanvasSize
 } from "./services/flowCanvasState";
 import { createSavedResponsePersistence, type SavedResponsePersistence } from "./services/savedResponsePersistence";
@@ -172,9 +177,9 @@ interface LayoutSizes {
 }
 
 const defaultLayoutSizes: LayoutSizes = {
-  explorerWidth: 318,
-  inspectorWidth: 306,
-  bottomDockHeight: 292
+  explorerWidth: 292,
+  inspectorWidth: 280,
+  bottomDockHeight: 240
 };
 
 export function App() {
@@ -2402,9 +2407,9 @@ const flowNodeTypes = {
 };
 
 const defaultFlowViewport: Viewport = { x: 0, y: 0, zoom: 1 };
-const flowNodeWidth = 178;
-const flowNodeHeight = 96;
-const flowCanvasPadding = 42;
+const flowNodeWidth = 164;
+const flowNodeHeight = 84;
+const flowCanvasPadding = 36;
 const flowDragThresholdPx = 3;
 
 interface FlowCanvasDragState {
@@ -2438,11 +2443,12 @@ function FlowBuilderEditor(props: {
   const [selectedNodeId, setSelectedNodeId] = useState(flow.nodes[0]?.id ?? "");
   const [serviceId, setServiceId] = useState(props.services[0]?.id ?? "");
   const [branchTargetId, setBranchTargetId] = useState(flow.nodes[1]?.id ?? "");
-  const [flowDetailsWidth, setFlowDetailsWidth] = useState(260);
+  const [flowDetailsWidth, setFlowDetailsWidth] = useState(248);
   const [dragPositions, setDragPositions] = useState<Record<string, { x: number; y: number }>>({});
   const [flowViewport, setFlowViewport] = useState<Viewport>(defaultFlowViewport);
   const [flowCanvasSize, setFlowCanvasSize] = useState<FlowCanvasSize | null>(null);
   const [flowInteractive, setFlowInteractive] = useState(true);
+  const [mappingDialogOpen, setMappingDialogOpen] = useState(false);
   const activeDraggedNodeId = useRef<string | null>(null);
   const dragState = useRef<FlowCanvasDragState | null>(null);
   const flowCanvasRef = useRef<HTMLDivElement | null>(null);
@@ -2501,6 +2507,12 @@ function FlowBuilderEditor(props: {
       fontWeight: 800
     }
   }));
+  const flowCanvasWorldSize = scrollWorldSizeForNodes(nodes, flowCanvasSize, {
+    viewport: flowViewport,
+    nodeWidth: flowNodeWidth,
+    nodeHeight: flowNodeHeight,
+    padding: flowCanvasPadding
+  });
 
   function connect(connection: Connection) {
     if (!connection.source || !connection.target) return;
@@ -2606,6 +2618,10 @@ function FlowBuilderEditor(props: {
 
   useEffect(() => {
     setFlowViewport(defaultFlowViewportForCurrentCanvas());
+    if (flowCanvasRef.current) {
+      flowCanvasRef.current.scrollLeft = 0;
+      flowCanvasRef.current.scrollTop = 0;
+    }
   }, [flow.id]);
 
   useEffect(() => {
@@ -2647,11 +2663,23 @@ function FlowBuilderEditor(props: {
             {props.services.map((service) => <option value={service.id} key={service.id}>{service.name}</option>)}
           </select>
         </label>
-        <button type="button" className="flow-action-button" onClick={() => props.onAddFlowNode(flow.id, serviceId)}>Add Step</button>
-        <button type="button" className="flow-action-button" disabled={!selectedNode || selectedIndex <= 0} onClick={() => selectedNode && props.onReorderFlowNode(flow.id, selectedNode.id, "left")}>Move Left</button>
-        <button type="button" className="flow-action-button" disabled={!selectedNode || selectedIndex >= flow.nodes.length - 1} onClick={() => selectedNode && props.onReorderFlowNode(flow.id, selectedNode.id, "right")}>Move Right</button>
-        <button type="button" className="flow-action-button" onClick={() => props.onResetFlowLayout(flow.id)}>Reset Layout</button>
-        <button type="button" className="flow-action-button danger" disabled={!selectedNode} onClick={() => selectedNode && props.onDeleteFlowNode(flow.id, selectedNode.id)}>Delete Step</button>
+        <div className="flow-toolbar-actions" aria-label="Flow editing actions">
+          <button type="button" className="flow-icon-button" aria-label="Add Step" title="Add Step" onClick={() => props.onAddFlowNode(flow.id, serviceId)}>
+            <Plus size={15} />
+          </button>
+          <button type="button" className="flow-icon-button" aria-label="Move Left" title="Move Left" disabled={!selectedNode || selectedIndex <= 0} onClick={() => selectedNode && props.onReorderFlowNode(flow.id, selectedNode.id, "left")}>
+            <ArrowLeft size={15} />
+          </button>
+          <button type="button" className="flow-icon-button" aria-label="Move Right" title="Move Right" disabled={!selectedNode || selectedIndex >= flow.nodes.length - 1} onClick={() => selectedNode && props.onReorderFlowNode(flow.id, selectedNode.id, "right")}>
+            <ArrowRight size={15} />
+          </button>
+          <button type="button" className="flow-icon-button" aria-label="Reset Layout" title="Reset Layout" onClick={() => props.onResetFlowLayout(flow.id)}>
+            <RotateCcw size={15} />
+          </button>
+          <button type="button" className="flow-icon-button danger" aria-label="Delete Step" title="Delete Step" disabled={!selectedNode} onClick={() => selectedNode && props.onDeleteFlowNode(flow.id, selectedNode.id)}>
+            <Trash2 size={15} />
+          </button>
+        </div>
       </div>
       <div className="flow-main" style={{ "--flow-details-width": `${flowDetailsWidth}px` } as CSSProperties}>
         {!flow.nodes.length ? (
@@ -2679,38 +2707,57 @@ function FlowBuilderEditor(props: {
           </div>
         ) : null}
         <div className="flow-canvas-shell" ref={flowCanvasRef} aria-label="Flow canvas">
-          <ReactFlow
-            key={flowCanvasKey}
-            nodes={nodes}
-            edges={edges}
-            nodeTypes={flowNodeTypes}
-            viewport={flowViewport}
-            width={flowCanvasSize?.width}
-            height={flowCanvasSize?.height}
-            autoPanOnNodeDrag={false}
-            panOnDrag={false}
-            panOnScroll={false}
-            preventScrolling={false}
-            onConnect={connect}
-            onNodesChange={handleNodeChanges}
-            onNodeClick={(_event, node) => setSelectedNodeId(node.id)}
-            onNodeDragStart={(_event, node) => {
-              setFlowViewport(defaultFlowViewportForCurrentCanvas());
-              activeDraggedNodeId.current = node.id;
-              setSelectedNodeId(node.id);
-            }}
-            onNodeDragStop={(_event, node) => {
-              activeDraggedNodeId.current = null;
-              setFlowViewport(defaultFlowViewportForCurrentCanvas());
-              setDragPositions({});
-              const original = flow.nodes.find((currentNode) => currentNode.id === node.id)?.position;
-              if (original && !positionsEqual(original, node.position)) {
-                props.onMoveFlowNode(flow.id, node.id, node.position);
-              }
+          <div
+            className="flow-canvas-scroll-world"
+            style={{
+              width: `${flowCanvasWorldSize.width}px`,
+              height: `${flowCanvasWorldSize.height}px`
             }}
           >
-            <Background />
-          </ReactFlow>
+            <ReactFlow
+              key={flowCanvasKey}
+              nodes={nodes}
+              edges={edges}
+              nodeTypes={flowNodeTypes}
+              viewport={flowViewport}
+              width={flowCanvasWorldSize.width}
+              height={flowCanvasWorldSize.height}
+              autoPanOnNodeDrag={false}
+              panOnDrag={false}
+              panOnScroll={false}
+              preventScrolling={false}
+              onConnect={connect}
+              onNodesChange={handleNodeChanges}
+              onNodeClick={(_event, node) => setSelectedNodeId(node.id)}
+              onNodeDragStart={(_event, node) => {
+                setFlowViewport(defaultFlowViewportForCurrentCanvas());
+                activeDraggedNodeId.current = node.id;
+                setSelectedNodeId(node.id);
+              }}
+              onNodeDragStop={(_event, node) => {
+                activeDraggedNodeId.current = null;
+                setFlowViewport(defaultFlowViewportForCurrentCanvas());
+                setDragPositions({});
+                const original = flow.nodes.find((currentNode) => currentNode.id === node.id)?.position;
+                if (original && !positionsEqual(original, node.position)) {
+                  props.onMoveFlowNode(flow.id, node.id, node.position);
+                }
+              }}
+            >
+              <Background />
+            </ReactFlow>
+            <FlowRenderLayer
+              nodes={nodes}
+              edges={edges}
+              selectedNodeId={selectedNode?.id ?? ""}
+              viewport={flowViewport}
+              interactive={flowInteractive}
+              onNodeSelect={setSelectedNodeId}
+              onNodePointerDown={startCanvasNodeDrag}
+              onNodePointerMove={moveCanvasNode}
+              onNodePointerUp={stopCanvasNodeDrag}
+            />
+          </div>
           <div className="flow-control-panel" aria-label="Control Panel">
             <button type="button" aria-label="Zoom In" title="Zoom In" onClick={() => zoomFlow("in")}><Plus size={17} /></button>
             <button type="button" aria-label="Zoom Out" title="Zoom Out" onClick={() => zoomFlow("out")}>-</button>
@@ -2725,22 +2772,11 @@ function FlowBuilderEditor(props: {
               {flowInteractive ? "Lock" : "Unlock"}
             </button>
           </div>
-          <FlowRenderLayer
-            nodes={nodes}
-            edges={edges}
-            selectedNodeId={selectedNode?.id ?? ""}
-            viewport={flowViewport}
-            interactive={flowInteractive}
-            onNodeSelect={setSelectedNodeId}
-            onNodePointerDown={startCanvasNodeDrag}
-            onNodePointerMove={moveCanvasNode}
-            onNodePointerUp={stopCanvasNodeDrag}
-          />
         </div>
         <ResizeHandle
           ariaLabel="Resize flow details"
           orientation="vertical"
-          onResize={(delta) => setFlowDetailsWidth((current) => clamp(current - delta, 220, 420))}
+          onResize={(delta) => setFlowDetailsWidth((current) => clamp(current - delta, 210, 390))}
         />
         <aside className="flow-side-panel" aria-label="Flow step details">
           <h2>Step Details</h2>
@@ -2783,99 +2819,73 @@ function FlowBuilderEditor(props: {
                   ))}
                 </select>
               </label>
-              <button
-                type="button"
-                className={successPathExists ? "flow-path-button remove" : "flow-path-button success"}
-                disabled={!branchTarget}
-                onClick={() => {
-                  if (!branchTarget) return;
-                  if (successPathExists) {
-                    props.onDisconnectFlowNodes(flow.id, selectedNode.id, branchTarget.id, "success");
-                  } else {
-                    props.onConnectFlowNodes(flow.id, selectedNode.id, branchTarget.id, "success");
-                  }
-                }}
-              >
-                {successPathExists ? "Remove Success Path" : "Add Success Path"}
-              </button>
-              <button
-                type="button"
-                className={failurePathExists ? "flow-path-button remove" : "flow-path-button failure"}
-                disabled={!branchTarget}
-                onClick={() => {
-                  if (!branchTarget) return;
-                  if (failurePathExists) {
-                    props.onDisconnectFlowNodes(flow.id, selectedNode.id, branchTarget.id, "failure");
-                  } else {
-                    props.onConnectFlowNodes(flow.id, selectedNode.id, branchTarget.id, "failure");
-                  }
-                }}
-              >
-                {failurePathExists ? "Remove Failure Path" : "Add Failure Path"}
-              </button>
+              <section className="flow-paths-panel" aria-label="Flow paths">
+                <header><strong>Paths</strong></header>
+                <div className="flow-path-row success">
+                  <span>Success</span>
+                  <em>{successPathExists && branchTarget ? branchTarget.label : "No target"}</em>
+                  <button
+                    type="button"
+                    className={successPathExists ? "flow-path-icon remove" : "flow-path-icon success"}
+                    aria-label={successPathExists ? "Remove Success Path" : "Add Success Path"}
+                    title={successPathExists ? "Remove Success Path" : "Add Success Path"}
+                    disabled={!branchTarget}
+                    onClick={() => {
+                      if (!branchTarget) return;
+                      if (successPathExists) {
+                        props.onDisconnectFlowNodes(flow.id, selectedNode.id, branchTarget.id, "success");
+                      } else {
+                        props.onConnectFlowNodes(flow.id, selectedNode.id, branchTarget.id, "success");
+                      }
+                    }}
+                  >
+                    {successPathExists ? <Unlink2 size={14} /> : <Plus size={14} />}
+                  </button>
+                </div>
+                <div className="flow-path-row failure">
+                  <span>Failure</span>
+                  <em>{failurePathExists && branchTarget ? branchTarget.label : "No target"}</em>
+                  <button
+                    type="button"
+                    className={failurePathExists ? "flow-path-icon remove" : "flow-path-icon failure"}
+                    aria-label={failurePathExists ? "Remove Failure Path" : "Add Failure Path"}
+                    title={failurePathExists ? "Remove Failure Path" : "Add Failure Path"}
+                    disabled={!branchTarget}
+                    onClick={() => {
+                      if (!branchTarget) return;
+                      if (failurePathExists) {
+                        props.onDisconnectFlowNodes(flow.id, selectedNode.id, branchTarget.id, "failure");
+                      } else {
+                        props.onConnectFlowNodes(flow.id, selectedNode.id, branchTarget.id, "failure");
+                      }
+                    }}
+                  >
+                    {failurePathExists ? <Unlink2 size={14} /> : <Plus size={14} />}
+                  </button>
+                </div>
+              </section>
               <section className="flow-mapping-panel" aria-label="Response mappings">
                 <header>
                   <strong>Response Mappings</strong>
-                  <button type="button" className="flow-action-button" onClick={() => props.onAddFlowMapping(flow.id, selectedNode.id)}>
-                    Add Mapping
+                  <button type="button" className="flow-action-button compact" aria-label="Manage Response Mappings" title="Manage Response Mappings" onClick={() => setMappingDialogOpen(true)}>
+                    Manage
                   </button>
                 </header>
-                <div className="flow-mapping-quick-actions" aria-label="Quick capture mappings">
-                  <button
-                    type="button"
-                    className="flow-action-button"
-                    onClick={() => props.onAddFlowMapping(flow.id, selectedNode.id, {
-                      jsonPath: "$.accessToken",
-                      variableName: "accessToken",
-                      secret: true
-                    })}
-                  >
-                    Capture Token
-                  </button>
-                  <button
-                    type="button"
-                    className="flow-action-button"
-                    onClick={() => props.onAddFlowMapping(flow.id, selectedNode.id, {
-                      jsonPath: "$.id",
-                      variableName: selectedService && selectedService.id.includes("order") ? "orderId" : "recordId",
-                      secret: false
-                    })}
-                  >
-                    Capture Id
-                  </button>
-                </div>
-                {selectedMappings.length ? selectedMappings.map((mapping) => (
-                  <div className="flow-mapping-row" key={mapping.id}>
-                    <label>
-                      <span>JSONPath</span>
-                      <input
-                        aria-label="Mapping JSONPath"
-                        value={mapping.jsonPath}
-                        onChange={(event) => props.onUpdateFlowMapping(flow.id, mapping.id, { jsonPath: event.target.value })}
-                      />
-                    </label>
-                    <label>
-                      <span>Variable</span>
-                      <input
-                        aria-label="Mapping variable"
-                        value={mapping.variableName}
-                        onChange={(event) => props.onUpdateFlowMapping(flow.id, mapping.id, { variableName: event.target.value })}
-                      />
-                    </label>
-                    <label className="flow-mapping-secret">
-                      <input
-                        aria-label={`Mark ${mapping.variableName || "mapping"} as secret`}
-                        type="checkbox"
-                        checked={mapping.secret}
-                        onChange={(event) => props.onUpdateFlowMapping(flow.id, mapping.id, { secret: event.target.checked })}
-                      />
-                      <span>Secret</span>
-                    </label>
-                    <button type="button" className="flow-action-button danger" onClick={() => props.onDeleteFlowMapping(flow.id, mapping.id)}>
-                      Remove
-                    </button>
+                <p className="flow-mapping-summary">
+                  {selectedMappings.length
+                    ? `${selectedMappings.length} mapping${selectedMappings.length === 1 ? "" : "s"} configured.`
+                    : "No response mappings configured."}
+                </p>
+                {selectedMappings.length ? (
+                  <div className="flow-chip-list" aria-label="Configured mappings">
+                    {selectedMappings.slice(0, 3).map((mapping) => (
+                      <span className={`flow-chip ${mapping.secret ? "secret" : ""}`} key={mapping.id}>
+                        {mapping.variableName || "Unnamed"} <small>{mapping.jsonPath}</small>
+                      </span>
+                    ))}
+                    {selectedMappings.length > 3 ? <span className="flow-chip">+{selectedMappings.length - 3} more</span> : null}
                   </div>
-                )) : <p className="empty-inline">No response mappings for this step.</p>}
+                ) : null}
               </section>
             </>
           ) : (
@@ -2883,7 +2893,121 @@ function FlowBuilderEditor(props: {
           )}
         </aside>
       </div>
+      {mappingDialogOpen && selectedNode ? (
+        <FlowMappingsDialog
+          flow={flow}
+          node={selectedNode}
+          mappings={selectedMappings}
+          onClose={() => setMappingDialogOpen(false)}
+          onAddMapping={(preset) => props.onAddFlowMapping(flow.id, selectedNode.id, preset)}
+          onUpdateMapping={(mappingId, patch) => props.onUpdateFlowMapping(flow.id, mappingId, patch)}
+          onDeleteMapping={(mappingId) => props.onDeleteFlowMapping(flow.id, mappingId)}
+        />
+      ) : null}
     </section>
+  );
+}
+
+function FlowMappingsDialog({
+  flow,
+  node,
+  mappings,
+  onClose,
+  onAddMapping,
+  onUpdateMapping,
+  onDeleteMapping
+}: {
+  flow: ProjectFlow;
+  node: ProjectFlow["nodes"][number];
+  mappings: FlowMapping[];
+  onClose: () => void;
+  onAddMapping: (preset?: Partial<Omit<FlowMapping, "id" | "sourceNodeId">>) => void;
+  onUpdateMapping: (mappingId: string, patch: Partial<Omit<FlowMapping, "id">>) => void;
+  onDeleteMapping: (mappingId: string) => void;
+}) {
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section className="project-file-dialog flow-mappings-dialog" role="dialog" aria-modal="true" aria-label="Response Mappings">
+        <header>
+          <div>
+            <strong>Response Mappings</strong>
+            <span>{flow.name} / {node.label}</span>
+          </div>
+          <button type="button" aria-label="Close response mappings dialog" onClick={onClose}><X size={17} /></button>
+        </header>
+        <div className="flow-mappings-dialog-body">
+          <div className="flow-mappings-dialog-toolbar" aria-label="Mapping actions">
+            <button type="button" className="flow-action-button compact" onClick={() => onAddMapping()}>
+              <Plus size={14} />
+              <span>Add Mapping</span>
+            </button>
+          </div>
+          <section className="jsonpath-help" aria-label="JSONPath examples">
+            <div>
+              <strong>JSONPath</strong>
+              <p>Use JSONPath to pick a value from this step's JSON response and save it as a variable for later steps.</p>
+            </div>
+            <dl>
+              <dt><code>$.accessToken</code></dt>
+              <dd>Top-level field named accessToken.</dd>
+              <dt><code>$.user.id</code></dt>
+              <dd>Nested field inside user.</dd>
+              <dt><code>$.items[0].id</code></dt>
+              <dd>First item in an array.</dd>
+              <dt><code>$.items[*].sku</code></dt>
+              <dd>All sku values from an array.</dd>
+            </dl>
+          </section>
+          {mappings.length ? (
+            <div className="flow-mappings-table" role="table" aria-label="Response mapping table">
+              <div role="row" className="flow-mappings-table-header">
+                <span role="columnheader">Variable</span>
+                <span role="columnheader">JSONPath</span>
+                <span role="columnheader">Secret</span>
+                <span role="columnheader">Actions</span>
+              </div>
+              {mappings.map((mapping, index) => (
+                <div role="row" className="flow-mappings-table-row" key={mapping.id}>
+                  <label>
+                    <span>Variable</span>
+                    <input
+                      aria-label={`Mapping ${index + 1} variable`}
+                      value={mapping.variableName}
+                      onChange={(event) => onUpdateMapping(mapping.id, { variableName: event.target.value })}
+                    />
+                  </label>
+                  <label>
+                    <span>JSONPath</span>
+                    <input
+                      aria-label={`Mapping ${index + 1} JSONPath`}
+                      value={mapping.jsonPath}
+                      onChange={(event) => onUpdateMapping(mapping.id, { jsonPath: event.target.value })}
+                    />
+                  </label>
+                  <label className="flow-mapping-secret compact">
+                    <input
+                      aria-label={`Mapping ${index + 1} secret`}
+                      type="checkbox"
+                      checked={mapping.secret}
+                      onChange={(event) => onUpdateMapping(mapping.id, { secret: event.target.checked })}
+                    />
+                    <span>Secret</span>
+                  </label>
+                  <button type="button" className="flow-icon-button danger small" aria-label={`Delete mapping ${index + 1}`} onClick={() => onDeleteMapping(mapping.id)}>
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="empty-inline">No response mappings for this step.</p>
+          )}
+        </div>
+        <footer>
+          <button type="button" className="primary-command" onClick={onClose}>Done</button>
+        </footer>
+      </section>
+    </div>
   );
 }
 

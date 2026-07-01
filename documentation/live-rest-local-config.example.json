@@ -1,0 +1,84 @@
+{
+  "baseUrl": "https://api.example.com",
+  "users": {
+    "admin": {
+      "username": "admin.user",
+      "password": "replace-with-local-secret"
+    },
+    "standard": {
+      "username": "standard.user",
+      "password": "replace-with-local-secret"
+    },
+    "restricted": {
+      "username": "restricted.user",
+      "password": "replace-with-local-secret"
+    }
+  },
+  "login": {
+    "method": "POST",
+    "path": "/api/auth/login",
+    "auth": "none",
+    "expectedStatus": 200,
+    "contentType": "application/json",
+    "body": "{\n  \"username\": \"{{username}}\",\n  \"password\": \"{{password}}\"\n}",
+    "tokenJsonPath": "$.accessToken"
+  },
+  "requests": {
+    "health": {
+      "method": "GET",
+      "path": "/api/health",
+      "auth": "none",
+      "expectedStatus": 200
+    },
+    "currentUser": {
+      "method": "GET",
+      "path": "/api/auth/me",
+      "auth": "bearer",
+      "expectedStatus": 200
+    },
+    "standardRead": {
+      "method": "GET",
+      "path": "/api/products",
+      "auth": "bearer",
+      "expectedStatus": 200
+    },
+    "standardAdminDenied": {
+      "method": "GET",
+      "path": "/api/admin/settings",
+      "auth": "bearer",
+      "expectedStatus": 403
+    },
+    "standardSetupWriteDenied": {
+      "method": "POST",
+      "path": "/api/admin/config",
+      "auth": "bearer",
+      "expectedStatus": 403,
+      "contentType": "application/json",
+      "body": "{\n  \"enabled\": true\n}"
+    },
+    "restrictedRead": {
+      "method": "GET",
+      "path": "/api/products",
+      "auth": "bearer",
+      "expectedStatus": 200
+    },
+    "restrictedWriteDenied": {
+      "method": "DELETE",
+      "path": "/api/orders/restricted-check",
+      "auth": "bearer",
+      "expectedStatus": 403
+    },
+    "adminAccess": {
+      "method": "GET",
+      "path": "/api/admin/settings",
+      "auth": "bearer",
+      "expectedStatus": 200
+    },
+    "adminAudit": {
+      "method": "GET",
+      "path": "/api/admin/audit-events",
+      "auth": "bearer",
+      "expectedStatus": 200
+    }
+  }
+}

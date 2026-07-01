@@ -5,6 +5,8 @@
 - Base URL: supplied through local test configuration as `baseUrl`.
 - Purpose: prove Relay Studio works against a real REST service with authentication, payloads, chained flows, role gates, error conditions, and redaction.
 - Target selection: any external service with equivalent coverage is valid. The target is a validation fixture, not product identity.
+- Local suite entry point: `npm run test:live-rest`.
+- Local config path: set `RELAY_LIVE_REST_CONFIG` to a gitignored JSON file such as `.relay/live-rest.local.json`, using `documentation/live-rest-local-config.example.json` as the schema template.
 
 ## Test Users
 

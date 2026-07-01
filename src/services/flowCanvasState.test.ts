@@ -3,7 +3,8 @@ import {
   centerFlowViewportForNodes,
   nextActiveDragPositions,
   recoverVisibleFlowPositions,
-  resetFlowLayoutPositions
+  resetFlowLayoutPositions,
+  scrollWorldSizeForNodes
 } from "./flowCanvasState";
 
 describe("flow canvas state", () => {
@@ -80,5 +81,20 @@ describe("flow canvas state", () => {
 
     expect(viewport.x).toBe(-14);
     expect(80 * viewport.zoom + viewport.x).toBe(42);
+  });
+
+  it("bounds horizontal scroll width to transformed node content plus padding", () => {
+    const size = scrollWorldSizeForNodes([
+      { position: { x: 80, y: 120 } },
+      { position: { x: 980, y: 120 } }
+    ], { width: 760, height: 420 }, {
+      viewport: { x: 42, y: 64, zoom: 1 },
+      nodeWidth: 164,
+      nodeHeight: 84,
+      padding: 36
+    });
+
+    expect(size.width).toBe(1222);
+    expect(size.height).toBe(420);
   });
 });

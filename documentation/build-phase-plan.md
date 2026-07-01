@@ -375,7 +375,114 @@ Implemented. See `sprint-8a-implementation-status.md`.
 - Flow UI avoids duplicate information on the same work screen unless it improves confidence or prevents errors.
 - Coverage remains above 90%.
 
-## Sprint 9: Role And Error Coverage
+## Sprint 8B: Desktop Density Pass
+
+### Status
+
+Implemented. See `sprint-8b-implementation-status.md`.
+
+### Goals
+
+- Increase usable request and flow workspace by reducing excess chrome, oversized text, and oversized controls.
+- Move Relay Studio closer to native desktop workbench density while keeping the current simplified UX direction.
+
+### Build Scope
+
+- Use native-first UI fonts for macOS, Windows, and Linux.
+- Use native monospace fonts for URL, body, response, and console surfaces.
+- Add reusable density tokens for font sizes, control heights, tab heights, tree rows, panel padding, and dock sizes.
+- Tighten top command bar, explorer, tab strip, request composer, service detail form, flow toolbar, flow nodes, inspector, and bottom response dock.
+- Reduce default explorer, inspector, and bottom dock footprint while preserving resize behavior.
+- Preserve accessibility, keyboard navigation, tooltips, and readable code/JSON output.
+
+### Testing Scope
+
+- Visual density regression at 1180x820 and 1440x900.
+- Explorer, inspector, and Recent Projects do not clip or overlap at compact widths.
+- Request composer and flow toolbar controls remain reachable and readable.
+- Flow canvas has measurably more usable space.
+- Response and JSON panels remain readable.
+- Coverage remains above 90%.
+
+## Sprint 9A: Platform Shell Contract
+
+### Goals
+
+- Define the shared shell contract and separate shared workbench content from platform-specific chrome behavior.
+
+### Build Scope
+
+- Shared command IDs, shortcuts, enablement rules, and dirty-state routes.
+- Native macOS menu structure for document actions and view toggles.
+- Windows title bar and command ownership contract.
+
+### Testing Scope
+
+- Command visibility by editor type.
+- Dirty-state routing for save, close, and project switch.
+- Menu and title-bar design review against platform guidance.
+
+## Sprint 9B: Platform Navigation And Command Surfaces
+
+### Goals
+
+- Simplify navigation, reduce duplicated context, and put commands on the right surfaces.
+
+### Build Scope
+
+- Explorer cleanup.
+- State-aware toolbar actions.
+- Inspector/details deduplication.
+- macOS sidebar cleanup.
+- Windows command-surface alignment.
+
+### Testing Scope
+
+- Explorer no longer mixes navigation, status, and recent-project switching.
+- Request and flow tabs show only relevant primary actions.
+- Inspector and flow details no longer compete for the same information.
+
+## Sprint 10A: Platform Chrome, Layout, And Writing
+
+### Goals
+
+- Make the shell feel native on macOS and Windows and replace placeholder desktop text.
+
+### Build Scope
+
+- Production-quality settings and error copy.
+- Dialog behavior standards.
+- App-defined context menus.
+- macOS `View` toggles.
+- Windows title bar, breakpoint, dark-mode, and high-contrast support.
+
+### Testing Scope
+
+- Dialog focus and Escape behavior.
+- Windows breakpoint behavior at small, medium, and large widths.
+- High-contrast and active/inactive window states.
+- Placeholder copy removed from desktop surfaces.
+
+## Sprint 10B: Platform Verification And Audit Closure
+
+### Goals
+
+- Add repeatable platform verification and close or track platform-guideline findings.
+
+### Build Scope
+
+- Platform-shell regression coverage.
+- macOS shell QA script.
+- Windows shell QA script.
+- Refreshed macOS audit.
+- Bounded Windows audit.
+
+### Testing Scope
+
+- Dialog, view-toggle, dirty-state, and context-menu regression coverage.
+- Human QA for native menus, title bar, breakpoints, and platform-specific keyboard flows.
+
+## Sprint 11: Role And Error Coverage
 
 ### Goals
 
@@ -400,7 +507,7 @@ Implemented. See `sprint-8a-implementation-status.md`.
 - TLS/certificate failure.
 - Secrets never appear in console or exported artifacts.
 
-## Sprint 10: Enterprise Hardening
+## Sprint 12: Enterprise Hardening
 
 ### Goals
 
@@ -425,7 +532,7 @@ Implemented. See `sprint-8a-implementation-status.md`.
 - Request retry behavior.
 - Redaction snapshot tests.
 
-## Sprint 11: Coverage And Security Gate
+## Sprint 13: Coverage And Security Gate
 
 ### Goals
 
@@ -451,7 +558,7 @@ Implemented. See `sprint-8a-implementation-status.md`.
 - Configured live REST acceptance suite passes.
 - No unhandled exceptions in normal or negative-path tests.
 
-## Sprint 12: Cross-Platform Packaging And Beta
+## Sprint 14: Cross-Platform Packaging And Beta
 
 ### Goals
 

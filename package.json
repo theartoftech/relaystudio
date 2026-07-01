@@ -13,6 +13,7 @@
     "test:coverage": "vitest run --coverage",
     "test:component": "vitest run src",
     "test:e2e": "playwright test",
+    "test:live-rest": "vitest run src/test/liveRest/liveRestAcceptance.test.ts",
     "verify": "npm run lint && npm run test:coverage && npm run build"
   },
   "dependencies": {

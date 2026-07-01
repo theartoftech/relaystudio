@@ -23,6 +23,10 @@ export interface FlowCanvasViewportOptions {
   padding?: number;
 }
 
+export interface FlowCanvasScrollWorldOptions extends FlowCanvasViewportOptions {
+  viewport: FlowCanvasViewport;
+}
+
 export function nextActiveDragPositions(
   activeNodeId: string | null,
   changes: readonly PositionChangeLike[]
@@ -78,6 +82,31 @@ export function centerFlowViewportForNodes(
     x: (scaledWidth <= availableWidth ? (canvasSize.width - scaledWidth) / 2 : padding) - minX * zoom,
     y: (scaledHeight <= availableHeight ? (canvasSize.height - scaledHeight) / 2 : padding) - minY * zoom,
     zoom
+  };
+}
+
+export function scrollWorldSizeForNodes(
+  nodes: readonly Pick<FlowNode, "position">[],
+  canvasSize: FlowCanvasSize | null,
+  options: FlowCanvasScrollWorldOptions
+): FlowCanvasSize {
+  const visibleSize = canvasSize ?? { width: 0, height: 0 };
+  if (!nodes.length) return visibleSize;
+
+  const nodeWidth = options.nodeWidth ?? 190;
+  const nodeHeight = options.nodeHeight ?? 112;
+  const padding = options.padding ?? 42;
+  const viewport = options.viewport;
+  const maxX = Math.max(...nodes.map((node) => (
+    (node.position.x + nodeWidth) * viewport.zoom + viewport.x
+  )));
+  const maxY = Math.max(...nodes.map((node) => (
+    (node.position.y + nodeHeight) * viewport.zoom + viewport.y
+  )));
+
+  return {
+    width: Math.ceil(Math.max(visibleSize.width, maxX + padding)),
+    height: Math.ceil(Math.max(visibleSize.height, maxY + padding))
   };
 }
 

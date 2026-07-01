@@ -4,9 +4,11 @@ This folder contains the first implementation slice for Relay Studio: reviewable
 
 ## Files
 
-- [build-phase-plan.md](build-phase-plan.md): 2-week sprint breakdown from mockups through cross-platform beta, including OpenAPI/Swagger import.
+- [build-phase-plan.md](build-phase-plan.md): 2-week sprint breakdown from mockups through cross-platform beta, including OpenAPI/Swagger import and Sprint 8B desktop density polish.
 - [current-human-test-script.md](current-human-test-script.md): consolidated human QA script for the current uncommitted app state.
 - [detailed-sprint-plan.md](detailed-sprint-plan.md): review-ready sprint plan with objectives, deliverables, work items, acceptance criteria, dependencies, and quality gates.
+- [live-rest-local-config.example.json](live-rest-local-config.example.json): example local-only config for the gated live REST acceptance suite.
+- [platform-guidelines-compliance-backlog.md](platform-guidelines-compliance-backlog.md): concrete shared, macOS, and Windows backlog for meeting platform design guidelines with phased acceptance criteria.
 - [sprint-0-decision-record.md](sprint-0-decision-record.md): concluded Sprint 0 decision record approving the provided reference screenshots as the product direction.
 - [sprint-1-ux-blueprint.md](sprint-1-ux-blueprint.md): implemented Sprint 1 blueprint with shell anatomy, navigation, command placement, screen inventory, import flow, and test strategy.
 - [product-terminology-glossary.md](product-terminology-glossary.md): stable product terms for UI, docs, code naming, and tests.
@@ -23,6 +25,7 @@ This folder contains the first implementation slice for Relay Studio: reviewable
 - [sprint-8-implementation-status.md](sprint-8-implementation-status.md): delivered Sprint 8 flow variables, JSONPath response mappings, runtime injection, and lifecycle flow coverage.
 - [sprint-8a-implementation-status.md](sprint-8a-implementation-status.md): delivered Sprint 8A flow UX hardening, templates, variable capture/consumption display, and cleanup-step affordances.
 - [sprint-8a-user-test-script.md](sprint-8a-user-test-script.md): human QA script for first-time flow authoring and debugging.
+- [sprint-8b-implementation-status.md](sprint-8b-implementation-status.md): delivered Sprint 8B desktop density pass, compact shell sizing, native fonts, and density regression coverage.
 - [visual-target.md](visual-target.md): selected Concept 3 visual direction and implementation guardrails.
 - [live-rest-acceptance-test-matrix.md](live-rest-acceptance-test-matrix.md): configurable live REST acceptance suite.
 - [mockups/index.html](mockups/index.html): static full-app mockup set.

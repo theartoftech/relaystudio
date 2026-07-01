@@ -71,8 +71,9 @@ describe("Relay Studio shell", () => {
     expect(screen.getByRole("separator", { name: "Resize explorer" })).toBeInTheDocument();
     expect(screen.getByRole("separator", { name: "Resize utility dock" })).toBeInTheDocument();
 
+    const initialExplorerWidth = Number.parseInt(workspace.style.getPropertyValue("--explorer-width"), 10);
     fireEvent.keyDown(screen.getByRole("separator", { name: "Resize explorer" }), { key: "ArrowRight" });
-    expect(workspace.style.getPropertyValue("--explorer-width")).toBe("334px");
+    expect(workspace.style.getPropertyValue("--explorer-width")).toBe(`${initialExplorerWidth + 16}px`);
 
     fireEvent.click(screen.getByRole("button", { name: "Show inspector" }));
     expect(screen.getByRole("separator", { name: "Resize inspector" })).toBeInTheDocument();
@@ -517,21 +518,31 @@ describe("Relay Studio shell", () => {
     const builder = screen.getByLabelText("Flow builder");
     const mappings = within(builder).getByLabelText("Response mappings");
     const variableSummary = within(builder).getByLabelText("Flow variable summary");
-    expect(within(mappings).getByDisplayValue("$.accessToken")).toBeInTheDocument();
+    expect(within(mappings).getByText("1 mapping configured.")).toBeInTheDocument();
+    expect(within(mappings).queryByDisplayValue("$.accessToken")).not.toBeInTheDocument();
     expect(within(variableSummary).getByText("Captures")).toBeInTheDocument();
     expect(within(variableSummary).getByText("accessToken")).toBeInTheDocument();
-    expect(within(mappings).getByRole("button", { name: "Capture Token" })).toBeInTheDocument();
-    expect(within(mappings).getByRole("button", { name: "Capture Id" })).toBeInTheDocument();
+    fireEvent.click(within(mappings).getByRole("button", { name: "Manage Response Mappings" }));
 
-    fireEvent.change(within(mappings).getByLabelText("Mapping variable"), {
+    const dialog = screen.getByRole("dialog", { name: "Response Mappings" });
+    expect(within(dialog).getByRole("table", { name: "Response mapping table" })).toBeInTheDocument();
+    expect(within(dialog).getByDisplayValue("$.accessToken")).toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: "Capture Token" })).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: "Capture Id" })).not.toBeInTheDocument();
+    expect(within(dialog).getByLabelText("JSONPath examples")).toBeInTheDocument();
+    expect(within(dialog).getByText("Top-level field named accessToken.")).toBeInTheDocument();
+    expect(within(dialog).getByText("First item in an array.")).toBeInTheDocument();
+
+    fireEvent.change(within(dialog).getByLabelText("Mapping 1 variable"), {
       target: { value: "sessionToken" }
     });
-    fireEvent.click(within(mappings).getByRole("button", { name: "Add Mapping" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Add Mapping" }));
 
     await waitFor(() => {
       expect(screen.getByText("Flow mapping added.")).toBeInTheDocument();
     });
-    expect(within(mappings).getByDisplayValue("sessionToken")).toBeInTheDocument();
+    expect(within(dialog).getByDisplayValue("sessionToken")).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("Mapping 2 variable")).toBeInTheDocument();
   });
 
   it("shows the final flow step response in the response dock after running a flow", async () => {
