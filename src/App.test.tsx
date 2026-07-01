@@ -9,6 +9,7 @@ describe("Relay Studio shell", () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
 
@@ -89,6 +90,18 @@ describe("Relay Studio shell", () => {
     expect(within(dialog).getByRole("button", { name: /Import API Docs/i })).toBeInTheDocument();
   });
 
+  it("shows flow-specific execution commands in the command palette", () => {
+    render(<App />);
+
+    const explorer = screen.getByLabelText("Project explorer");
+    fireEvent.click(within(explorer).getByRole("button", { name: /Authenticated Read/i }));
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+
+    const dialog = screen.getByRole("dialog", { name: "Command palette" });
+    expect(within(dialog).getByRole("button", { name: /Run Flow/i })).toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: /Send Request/i })).not.toBeInTheDocument();
+  });
+
   it("filters the command palette by typed text", () => {
     render(<App />);
 
@@ -125,6 +138,66 @@ describe("Relay Studio shell", () => {
 
     expect(screen.getByRole("dialog", { name: "Save Project" })).toBeInTheDocument();
     expect(screen.getByLabelText("Project file path")).toHaveValue("/private/tmp/sample-api-regression.restproj");
+  });
+
+  it("routes the save keyboard shortcut to the save project dialog", () => {
+    render(<App />);
+
+    fireEvent.keyDown(window, { key: "s", metaKey: true });
+
+    expect(screen.getByRole("dialog", { name: "Save Project" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Unsaved changes" })).not.toBeInTheDocument();
+  });
+
+  it("routes the save-as keyboard shortcut to the save-as project dialog", () => {
+    render(<App />);
+
+    fireEvent.keyDown(window, { key: "s", metaKey: true, shiftKey: true });
+
+    expect(screen.getByRole("dialog", { name: "Save Project As" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Project file path")).toHaveValue("/private/tmp/sample-api-regression.restproj");
+  });
+
+  it("routes the close-tab keyboard shortcut to the active tab", () => {
+    render(<App />);
+
+    expect(screen.getByRole("tab", { name: /Create Order/i })).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "w", metaKey: true });
+
+    expect(screen.queryByRole("tab", { name: /Create Order/i })).not.toBeInTheDocument();
+  });
+
+  it("routes the execution keyboard shortcut to the active request", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{\"ok\":true}", {
+      status: 200,
+      statusText: "OK",
+      headers: { "content-type": "application/json" }
+    })));
+    render(<App />);
+
+    fireEvent.keyDown(window, { key: "Enter", metaKey: true });
+
+    await waitFor(() => {
+      expect(screen.getByText("Request completed with HTTP 200.")).toBeInTheDocument();
+    });
+  });
+
+  it("completes the close-window dirty-state route after discard", async () => {
+    const closeSpy = vi.spyOn(window, "close").mockImplementation(() => undefined);
+    render(<App />);
+
+    fireEvent.change(screen.getByLabelText("Request URL"), {
+      target: { value: "https://api.test.local/v1/orders?status=open" }
+    });
+    fireEvent.keyDown(window, { key: "w", metaKey: true, shiftKey: true });
+
+    const savePrompt = screen.getByRole("dialog", { name: "Unsaved changes" });
+    fireEvent.click(within(savePrompt).getByRole("button", { name: "Do Not Save" }));
+
+    await waitFor(() => {
+      expect(closeSpy).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("updates the request method from the top HTTP method selector", () => {
@@ -166,13 +239,51 @@ describe("Relay Studio shell", () => {
   it("renders Settings without stale request controls", () => {
     render(<App />);
 
-    const explorer = screen.getByLabelText("Project explorer");
-    fireEvent.click(within(explorer).getByRole("button", { name: "Settings" }));
+    fireEvent.keyDown(window, { key: ",", metaKey: true });
 
     expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Project settings")).toBeInTheDocument();
+    expect(screen.getByLabelText("Default environment")).toBeInTheDocument();
+    expect(screen.getByLabelText("Ask before closing with unsaved changes")).toBeChecked();
+    expect(screen.getByText("Folders")).toBeInTheDocument();
+    expect(screen.getAllByText("Environments").length).toBeGreaterThan(0);
+    expect(screen.getByText("Imports")).toBeInTheDocument();
+    expect(screen.getByText("Updated")).toBeInTheDocument();
     expect(screen.queryByLabelText("Request composer")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Request URL")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Send Request" })).not.toBeInTheDocument();
+  });
+
+  it("changes project settings from the Settings tab", () => {
+    render(<App />);
+
+    fireEvent.keyDown(window, { key: ",", metaKey: true });
+    fireEvent.change(screen.getByLabelText("Default environment"), {
+      target: { value: "staging" }
+    });
+
+    expect(screen.getByText("Default environment set to Staging Environment.")).toBeInTheDocument();
+    expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
+    expect(screen.getByLabelText("Default environment")).toHaveValue("staging");
+    expect(screen.getByText("Active environment")).toBeInTheDocument();
+    expect(screen.getAllByText("Staging Environment").length).toBeGreaterThan(0);
+  });
+
+  it("uses the close prompt setting when closing dirty work", async () => {
+    const closeSpy = vi.spyOn(window, "close").mockImplementation(() => undefined);
+    render(<App />);
+
+    fireEvent.keyDown(window, { key: ",", metaKey: true });
+    fireEvent.click(screen.getByLabelText("Ask before closing with unsaved changes"));
+    fireEvent.change(screen.getByLabelText("Default environment"), {
+      target: { value: "staging" }
+    });
+    fireEvent.keyDown(window, { key: "w", metaKey: true, shiftKey: true });
+
+    expect(screen.queryByRole("dialog", { name: "Unsaved changes" })).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(closeSpy).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("creates a new project with an editable starter request", () => {

@@ -113,6 +113,13 @@ import {
 } from "./services/savedResponses";
 import { formatResponseSize } from "./services/responseFormatting";
 import { runServiceRequest, type ExecutableRequest, type ExecutedResponse, type RunnerConsoleEvent } from "./services/serviceRunner";
+import {
+  createNativeShellMenuState,
+  getCommandPaletteCommands,
+  getPrimaryExecutionCommand,
+  type ShellCommandEventPayload,
+  type ShellCommandId
+} from "./shell/shellCommands";
 
 type TabKind = "welcome" | "request" | "flow" | "response" | "import" | "settings";
 
@@ -156,20 +163,6 @@ const initialTabs: WorkbenchTab[] = [
   { id: "current-user-response", label: "current-user.json", kind: "response" }
 ];
 
-const commandItems = [
-  "New Project",
-  "Import API Docs",
-  "Open Project",
-  "Save Project",
-  "Save Project As",
-  "Send Request",
-  "Run Flow",
-  "New Flow",
-  "Save Response",
-  "Manage Environments",
-  "Settings"
-];
-
 interface LayoutSizes {
   explorerWidth: number;
   inspectorWidth: number;
@@ -207,14 +200,16 @@ export function App() {
   const [activeTabId, setActiveTabId] = useState("create-order");
   const [activeServiceId, setActiveServiceId] = useState("create-order");
   const [activeFlowId, setActiveFlowId] = useState("authenticated-read");
+  const [explorerOpen, setExplorerOpen] = useState(true);
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [layoutSizes, setLayoutSizes] = useState(defaultLayoutSizes);
-  const [environment, setEnvironment] = useState("QA Environment");
+  const [environment, setEnvironment] = useState(() => getDefaultEnvironmentName(createSampleProject()));
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [responseVisible, setResponseVisible] = useState(true);
   const [savePromptOpen, setSavePromptOpen] = useState(false);
   const [pendingProjectOpen, setPendingProjectOpen] = useState<PendingProjectOpen | null>(null);
   const [saveThenOpenProject, setSaveThenOpenProject] = useState<PendingProjectOpen | null>(null);
+  const [pendingWindowClose, setPendingWindowClose] = useState(false);
   const [consoleFilter, setConsoleFilter] = useState("All Events");
   const [runnerResponse, setRunnerResponse] = useState<ExecutedResponse | null>(null);
   const [runnerRequest, setRunnerRequest] = useState<ExecutableRequest | null>(null);
@@ -229,6 +224,7 @@ export function App() {
 
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0];
   const hasDirtyState = projectDirty || tabs.some((tab) => tab.dirty);
+  const canCloseActiveTab = !(tabs.length === 1 && activeTab.kind === "welcome");
   const groupedServices = useMemo(() => groupServices(project), [project]);
   const activeEnvironment = useMemo(() => {
     return project.environments.find((item) => item.name === environment) ?? project.environments[0];
@@ -237,26 +233,71 @@ export function App() {
   const activeFlow = project.flows.find((flow) => flow.id === activeFlowId) ?? project.flows[0];
   const requestPreview = activeService && activeEnvironment ? buildRequestPreview(activeService, activeEnvironment) : null;
   const welcomeTabActive = activeTab.kind === "welcome";
+  const allowWindowCloseRef = useRef(false);
+  const shellCommandHandlerRef = useRef<(payload: ShellCommandEventPayload) => void>(() => {});
+  const shellCommandContext = {
+    activeTabKind: activeTab.kind,
+    hasDirtyState,
+    runnerRunning,
+    canCloseActiveTab,
+    explorerOpen,
+    inspectorOpen,
+    responseDockOpen: responseVisible
+  } as const;
+  const commandPaletteCommands = getCommandPaletteCommands(shellCommandContext);
+  const primaryExecutionCommand = getPrimaryExecutionCommand(shellCommandContext);
+  const showEnvironmentSelector = activeTab.kind === "request" || activeTab.kind === "flow";
+  const nativeShellMenuState = createNativeShellMenuState(shellCommandContext);
+  const workspaceClassName = [
+    "workspace-grid",
+    explorerOpen ? "" : "explorer-hidden",
+    inspectorOpen ? "inspector-open" : ""
+  ].filter(Boolean).join(" ");
+
+  shellCommandHandlerRef.current = (payload) => {
+    void executeShellCommand(payload.id, payload);
+  };
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       const commandKey = event.metaKey || event.ctrlKey;
-      if (commandKey && event.key.toLowerCase() === "k") {
-        event.preventDefault();
-        setCommandPaletteOpen(true);
+      if (!commandKey) {
+        if (event.key === "Escape") {
+          setCommandPaletteOpen(false);
+        }
+        return;
       }
-      if (commandKey && event.key.toLowerCase() === "s") {
+
+      const normalizedKey = event.key.toLowerCase();
+      if (normalizedKey === "k") {
         event.preventDefault();
-        setSavePromptOpen(true);
+        void executeShellCommand("app.search_commands");
+        return;
       }
-      if (event.key === "Escape") {
-        setCommandPaletteOpen(false);
+      if (normalizedKey === "s") {
+        event.preventDefault();
+        void executeShellCommand(event.shiftKey ? "file.save_project_as" : "file.save_project");
+        return;
+      }
+      if (normalizedKey === "w") {
+        event.preventDefault();
+        void executeShellCommand(event.shiftKey ? "window.close_window" : "window.close_active_tab");
+        return;
+      }
+      if (normalizedKey === "," && !event.shiftKey && !event.altKey) {
+        event.preventDefault();
+        void executeShellCommand("app.open_settings");
+        return;
+      }
+      if (normalizedKey === "enter" && !event.shiftKey && !event.altKey && primaryExecutionCommand) {
+        event.preventDefault();
+        void executeShellCommand(primaryExecutionCommand.id);
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [primaryExecutionCommand]);
 
   useEffect(() => {
     function refreshButtonTooltips() {
@@ -306,30 +347,24 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    let unsubscribeOpenProject: undefined | (() => void);
-    let unsubscribeOpenRecent: undefined | (() => void);
+    let unsubscribeShellCommand: undefined | (() => void);
 
     async function registerMenuListeners() {
       try {
         const { listen } = await import("@tauri-apps/api/event");
-        unsubscribeOpenProject = await listen("relay-menu-open-project", () => {
-          setProjectDialog({ mode: "open", title: "Open Project", path: "" });
-        });
-        unsubscribeOpenRecent = await listen<RecentProject>("relay-menu-open-recent", (event) => {
-          requestOpenRecentProject(event.payload);
+        unsubscribeShellCommand = await listen<ShellCommandEventPayload>("relay-shell-command", (event) => {
+          shellCommandHandlerRef.current(event.payload);
         });
       } catch {
-        unsubscribeOpenProject = undefined;
-        unsubscribeOpenRecent = undefined;
+        unsubscribeShellCommand = undefined;
       }
     }
 
     void registerMenuListeners();
     return () => {
-      unsubscribeOpenProject?.();
-      unsubscribeOpenRecent?.();
+      unsubscribeShellCommand?.();
     };
-  }, [hasDirtyState, projectPath, recentProjects, sessionProjects, tabs]);
+  }, []);
 
   useEffect(() => {
     let unsubscribe: undefined | (() => void);
@@ -339,8 +374,14 @@ export function App() {
         const { getCurrentWindow } = await import("@tauri-apps/api/window");
         const currentWindow = getCurrentWindow();
         unsubscribe = await currentWindow.onCloseRequested((event) => {
+          if (allowWindowCloseRef.current) {
+            allowWindowCloseRef.current = false;
+            return;
+          }
           if (hasDirtyState) {
             event.preventDefault();
+            setPendingProjectOpen(null);
+            setPendingWindowClose(true);
             setSavePromptOpen(true);
           }
         });
@@ -356,6 +397,22 @@ export function App() {
     };
   }, [hasDirtyState]);
 
+  useEffect(() => {
+    if (!shellReady) return;
+    void syncNativeMenu(nativeShellMenuState);
+  }, [
+    shellReady,
+    nativeShellMenuState.activeTabKind,
+    nativeShellMenuState.hasDirtyState,
+    nativeShellMenuState.canSaveProject,
+    nativeShellMenuState.canCloseActiveTab,
+    nativeShellMenuState.canSendRequest,
+    nativeShellMenuState.canRunFlow,
+    nativeShellMenuState.explorerOpen,
+    nativeShellMenuState.inspectorOpen,
+    nativeShellMenuState.responseDockOpen
+  ]);
+
   const computedRequestUrl = useMemo(() => {
     if (activeTab.kind === "flow") {
       return "{{baseUrl}}/flow/authenticated-read";
@@ -366,9 +423,9 @@ export function App() {
     return requestPreview?.url ?? "{{baseUrl}}/api/orders";
   }, [activeTab.kind, requestPreview?.url]);
   const requestUrl = editableRequestUrl ?? computedRequestUrl;
-  const activeTabRunsRequest = activeTab.kind === "request";
   const activeTabHasComposer = activeTab.kind === "request" || activeTab.kind === "flow";
   const activeTabHasBottomDock = activeTabHasComposer || activeTab.kind === "response";
+  const activeTabUsesFullWorkbench = !activeTabHasBottomDock;
   const workspaceStyle = {
     "--explorer-width": `${layoutSizes.explorerWidth}px`,
     "--inspector-width": `${layoutSizes.inspectorWidth}px`
@@ -389,6 +446,98 @@ export function App() {
     const id = `${kind}-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
     setTabs((current) => (current.some((tab) => tab.id === id) ? current : [...current, { id, kind, label }]));
     setActiveTabId(id);
+  }
+
+  async function executeShellCommand(id: ShellCommandId, payload?: ShellCommandEventPayload) {
+    switch (id) {
+      case "app.search_commands":
+        setCommandPaletteOpen(true);
+        return;
+      case "app.open_import":
+        openPlaceholderTab("import", "Import API Docs");
+        return;
+      case "app.open_settings":
+        openPlaceholderTab("settings", "Settings");
+        return;
+      case "file.new_project":
+        setNewProjectDialogOpen(true);
+        return;
+      case "file.open_project":
+        setProjectDialog({ mode: "open", title: "Open Project", path: "" });
+        return;
+      case "file.open_recent":
+        if (payload?.recentProject) {
+          requestOpenRecentProject(payload.recentProject);
+        }
+        return;
+      case "file.save_project":
+        setProjectDialog({ mode: "save", title: "Save Project", path: projectPath });
+        return;
+      case "file.save_project_as":
+        setProjectDialog({ mode: "save", title: "Save Project As", path: "" });
+        return;
+      case "window.close_active_tab":
+        if (canCloseActiveTab) {
+          closeTab(activeTabId);
+        }
+        return;
+      case "window.close_window":
+        await requestCloseWindowRequested();
+        return;
+      case "request.send_active":
+        if (activeTab.kind === "request") {
+          await handleSendRequest();
+        }
+        return;
+      case "flow.run_active":
+        if (activeTab.kind === "flow") {
+          await handleRunFlow();
+        }
+        return;
+      case "view.toggle_explorer":
+        setExplorerOpen((current) => !current);
+        return;
+      case "view.toggle_inspector":
+        setInspectorOpen((current) => !current);
+        return;
+      case "view.toggle_response_dock":
+        if (!["welcome", "settings", "import"].includes(activeTab.kind)) {
+          setResponseVisible((current) => !current);
+        }
+        return;
+      default:
+        throw new Error(`Unhandled shell command: ${id satisfies never}`);
+    }
+  }
+
+  async function requestCloseWindowRequested() {
+    if (hasDirtyState && getProjectSettings(project).askToSaveOnClose) {
+      setPendingProjectOpen(null);
+      setPendingWindowClose(true);
+      setSavePromptOpen(true);
+      return;
+    }
+    await closeWindowWithBypass();
+  }
+
+  async function requestCloseWindowNow() {
+    try {
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      await getCurrentWindow().close();
+    } catch {
+      window.close();
+    }
+  }
+
+  async function closeWindowWithBypass() {
+    allowWindowCloseRef.current = true;
+    try {
+      await requestCloseWindowNow();
+    } finally {
+      queueMicrotask(() => {
+        allowWindowCloseRef.current = false;
+      });
+    }
   }
 
   function closeTab(id: string) {
@@ -676,6 +825,36 @@ export function App() {
     setProjectError(null);
   }
 
+  function updateProjectSettings(
+    updater: (settings: RelayProject["settings"]) => RelayProject["settings"],
+    message: string
+  ) {
+    setProject((current) => {
+      const settings = updater(getProjectSettings(current));
+      return touchProject({
+        ...current,
+        settings
+      });
+    });
+    setProjectDirty(true);
+    setTabs((current) => current.map((tab) => (tab.id === activeTabId ? { ...tab, dirty: true } : tab)));
+    setProjectMessage(message);
+    setProjectError(null);
+  }
+
+  function handleDefaultEnvironmentChange(environmentId: string) {
+    const selectedEnvironment = project.environments.find((item) => item.id === environmentId);
+    if (!selectedEnvironment) {
+      setProjectError("Default environment could not be updated because the selected environment no longer exists.");
+      return;
+    }
+    setEnvironment(selectedEnvironment.name);
+    updateProjectSettings((settings) => ({
+      ...settings,
+      defaultEnvironmentId: selectedEnvironment.id
+    }), `Default environment set to ${selectedEnvironment.name}.`);
+  }
+
   function handleAddEnvironmentVariable() {
     updateActiveEnvironment((current) => ({
       ...current,
@@ -860,63 +1039,80 @@ export function App() {
     <main className="app-shell" aria-label="Relay Studio desktop shell">
       <TopCommandBar
         activeTab={activeTab}
-        canSendRequest={activeTabRunsRequest}
+        primaryExecutionCommandLabel={null}
         projectName={project.name}
         projectDirty={hasDirtyState}
         environment={environment}
         onEnvironmentChange={setEnvironment}
-        onOpenCommandPalette={() => setCommandPaletteOpen(true)}
-        onSave={() => setProjectDialog({ mode: "save", title: "Save Project", path: projectPath })}
-        onSendRequest={handleSendRequest}
+        onOpenCommandPalette={() => void executeShellCommand("app.search_commands")}
+        onSave={() => void executeShellCommand("file.save_project")}
+        onRunPrimaryAction={() => {
+          if (primaryExecutionCommand) {
+            void executeShellCommand(primaryExecutionCommand.id);
+          }
+        }}
         inspectorOpen={inspectorOpen}
-        onToggleInspector={() => setInspectorOpen((open) => !open)}
+        onToggleInspector={() => void executeShellCommand("view.toggle_inspector")}
         runnerRunning={runnerRunning}
+        showEnvironmentSelector={showEnvironmentSelector}
       />
 
-      <section className={inspectorOpen ? "workspace-grid inspector-open" : "workspace-grid"} style={workspaceStyle}>
-        <ProjectExplorer
-          groupedServices={groupedServices}
-          project={project}
-          projectPath={projectPath}
-          projectDirty={hasDirtyState}
-          sessionProjects={sessionProjects}
-          recentProjects={recentProjects}
-          projectMessage={projectMessage}
-          projectError={projectError}
-          onCreateProject={() => setNewProjectDialogOpen(true)}
-          onOpenSessionProject={requestOpenSessionProject}
-          onOpenRecent={requestOpenRecentProject}
-          onRenameProject={setRenameProjectDialog}
-          onDeleteProject={setDeleteProjectDialog}
-          onOpenSettings={() => openPlaceholderTab("settings", "Settings")}
-          onOpenImport={() => openPlaceholderTab("import", "Import API Docs")}
-          activeServiceId={activeService?.id ?? ""}
-          onSelectService={handleSelectService}
-          onCreateRequest={handleCreateService}
-          onRenameRequest={(serviceId) => {
-            const service = project.services.find((item) => item.id === serviceId);
-            if (service) setRenameRequestDialog(service);
-          }}
-          activeFlowId={activeFlow?.id ?? ""}
-          onSelectFlow={handleSelectFlow}
-          onCreateFlow={handleCreateFlow}
-          onDeleteFlow={handleDeleteFlow}
-          onRenameFlow={(flowId) => {
-            const flow = project.flows.find((item) => item.id === flowId);
-            if (flow) setRenameFlowDialog(flow);
-          }}
-          onOpenSavedResponse={handleOpenSavedResponse}
-        />
-        <ResizeHandle
-          ariaLabel="Resize explorer"
-          orientation="vertical"
-          onResize={(delta) => setLayoutSizes((current) => ({
-            ...current,
-            explorerWidth: clamp(current.explorerWidth + delta, 240, 520)
-          }))}
-        />
+      <section className={workspaceClassName} style={workspaceStyle}>
+        {explorerOpen ? (
+          <>
+            <ProjectExplorer
+              groupedServices={groupedServices}
+              project={project}
+              projectPath={projectPath}
+              projectDirty={hasDirtyState}
+              sessionProjects={sessionProjects}
+              recentProjects={recentProjects}
+              projectMessage={projectMessage}
+              projectError={projectError}
+              onCreateProject={() => setNewProjectDialogOpen(true)}
+              onOpenSessionProject={requestOpenSessionProject}
+              onOpenRecent={requestOpenRecentProject}
+              onRenameProject={setRenameProjectDialog}
+              onDeleteProject={setDeleteProjectDialog}
+              onOpenSettings={() => void executeShellCommand("app.open_settings")}
+              onOpenImport={() => void executeShellCommand("app.open_import")}
+              activeServiceId={activeService?.id ?? ""}
+              onSelectService={handleSelectService}
+              onCreateRequest={handleCreateService}
+              onRenameRequest={(serviceId) => {
+                const service = project.services.find((item) => item.id === serviceId);
+                if (service) setRenameRequestDialog(service);
+              }}
+              activeFlowId={activeFlow?.id ?? ""}
+              onSelectFlow={handleSelectFlow}
+              onCreateFlow={handleCreateFlow}
+              onDeleteFlow={handleDeleteFlow}
+              onRenameFlow={(flowId) => {
+                const flow = project.flows.find((item) => item.id === flowId);
+                if (flow) setRenameFlowDialog(flow);
+              }}
+              onOpenSavedResponse={handleOpenSavedResponse}
+            />
+            <ResizeHandle
+              ariaLabel="Resize explorer"
+              orientation="vertical"
+              onResize={(delta) => setLayoutSizes((current) => ({
+                ...current,
+                explorerWidth: clamp(current.explorerWidth + delta, 240, 520)
+              }))}
+            />
+          </>
+        ) : null}
 
-        <section className={welcomeTabActive ? "workbench welcome-workbench" : "workbench"} aria-label="Workbench" style={workbenchStyle}>
+        <section
+          className={[
+            "workbench",
+            welcomeTabActive ? "welcome-workbench" : "",
+            activeTabUsesFullWorkbench ? "full-workbench" : ""
+          ].filter(Boolean).join(" ")}
+          aria-label="Workbench"
+          style={workbenchStyle}
+        >
           <TabStrip
             tabs={tabs}
             activeTabId={activeTabId}
@@ -948,6 +1144,15 @@ export function App() {
           ) : null}
           <RequestEditor
             activeTab={activeTab}
+            project={project}
+            projectPath={projectPath}
+            hasDirtyState={hasDirtyState}
+            activeEnvironmentName={activeEnvironment?.name ?? ""}
+            onDefaultEnvironmentChange={handleDefaultEnvironmentChange}
+            onAskToSaveOnCloseChange={(askToSaveOnClose) => updateProjectSettings((settings) => ({
+              ...settings,
+              askToSaveOnClose
+            }), askToSaveOnClose ? "Close prompt enabled." : "Close prompt disabled.")}
             activeService={activeService}
             activeFlow={activeFlow}
             services={project.services}
@@ -1019,31 +1224,33 @@ export function App() {
       </section>
 
       {commandPaletteOpen ? (
-        <CommandPalette onClose={() => setCommandPaletteOpen(false)} onChoose={(label) => {
-          setCommandPaletteOpen(false);
-          if (label === "Import API Docs") openPlaceholderTab("import", label);
-          if (label === "Settings") openPlaceholderTab("settings", label);
-          if (label === "New Project") setNewProjectDialogOpen(true);
-          if (label === "Open Project") setProjectDialog({ mode: "open", title: "Open Project", path: projectPath });
-          if (label === "Save Project") setProjectDialog({ mode: "save", title: "Save Project", path: projectPath });
-          if (label === "Save Project As") setProjectDialog({ mode: "save", title: "Save Project As", path: "" });
-          if (label === "Send Request") void handleSendRequest();
-          if (label === "Run Flow") void handleRunFlow();
-          if (label === "New Flow") handleCreateFlow();
-          if (label === "Save Response") openSaveResponseDialog();
-        }} />
+        <CommandPalette
+          commands={commandPaletteCommands}
+          onClose={() => setCommandPaletteOpen(false)}
+          onChoose={(id) => {
+            setCommandPaletteOpen(false);
+            void executeShellCommand(id);
+          }}
+        />
       ) : null}
 
       {savePromptOpen ? (
         <SavePrompt
           onCancel={() => {
             setPendingProjectOpen(null);
+            setSaveThenOpenProject(null);
+            setPendingWindowClose(false);
             setSavePromptOpen(false);
           }}
           onDiscard={() => {
             setProjectDirty(false);
             setTabs((current) => current.map((tab) => ({ ...tab, dirty: false })));
             setSavePromptOpen(false);
+            if (pendingWindowClose) {
+              setPendingWindowClose(false);
+              void closeWindowWithBypass();
+              return;
+            }
             const pending = pendingProjectOpen;
             setPendingProjectOpen(null);
             if (pending) void openPendingProject(pending, { preserveCurrent: false });
@@ -1065,7 +1272,11 @@ export function App() {
           projectName={project.name}
           recentProjects={recentProjects}
           projectExists={handleProjectExists}
-          onCancel={() => setProjectDialog(null)}
+          onCancel={() => {
+            setSaveThenOpenProject(null);
+            setPendingWindowClose(false);
+            setProjectDialog(null);
+          }}
           onSubmit={async ({ path }) => {
             if (projectDialog.mode === "save") {
               await handleSaveProject(path);
@@ -1157,7 +1368,7 @@ export function App() {
     setSessionProjects((current) => upsertSessionProjectSnapshot(current, snapshot));
     setProject(nextProject);
     setProjectPath("");
-    setEnvironment(nextProject.environments[0]?.name ?? "QA Environment");
+    setEnvironment(getDefaultEnvironmentName(nextProject));
     setActiveServiceId(starterService.id);
     setActiveFlowId(nextProject.flows[0]?.id ?? "");
     setProjectDirty(true);
@@ -1197,6 +1408,7 @@ export function App() {
 
   function requestProjectOpen(pending: PendingProjectOpen) {
     if (hasDirtyState) {
+      setPendingWindowClose(false);
       setPendingProjectOpen(pending);
       setSavePromptOpen(true);
       return;
@@ -1234,7 +1446,7 @@ export function App() {
     setActiveTabId(restoredActiveTabId);
     setActiveServiceId(snapshot.activeServiceId);
     setActiveFlowId(snapshot.activeFlowId);
-    setEnvironment(snapshot.environment);
+    setEnvironment(snapshot.environment || getDefaultEnvironmentName(snapshot.project));
     setProjectDirty(snapshot.projectDirty);
     setEditableRequestUrl(null);
     setProjectMessage(`Restored ${snapshot.name}.`);
@@ -1257,7 +1469,10 @@ export function App() {
       setProjectDialog(null);
       const pending = saveThenOpenProject;
       setSaveThenOpenProject(null);
-      if (pending) {
+      if (pendingWindowClose) {
+        setPendingWindowClose(false);
+        await closeWindowWithBypass();
+      } else if (pending) {
         await openPendingProject(pending, { preserveCurrent: true });
       } else {
         setProjectMessage(`Project saved to ${path}.`);
@@ -1277,7 +1492,7 @@ export function App() {
       await projectPersistence.rememberRecentProject(recent);
       setProject(opened);
       setProjectPath(path);
-      setEnvironment(opened.environments[0]?.name ?? "QA Environment");
+      setEnvironment(getDefaultEnvironmentName(opened));
       setActiveServiceId(opened.services[0]?.id ?? "");
       setActiveFlowId(opened.flows[0]?.id ?? "");
       setProjectDirty(false);
@@ -1360,9 +1575,13 @@ export function App() {
   async function refreshRecentProjects(projectPersistence: ProjectPersistence) {
     const recent = await projectPersistence.listRecentProjects();
     setRecentProjects(recent);
+    await syncNativeMenu();
+  }
+
+  async function syncNativeMenu(state = nativeShellMenuState) {
     try {
       const { invoke } = await import("@tauri-apps/api/core");
-      await invoke("refresh_app_menu");
+      await invoke("refresh_app_menu", { state });
     } catch {
       // Browser fallback does not have a native menu to refresh.
     }
@@ -1385,16 +1604,17 @@ function StartupShell() {
 
 interface TopCommandBarProps {
   activeTab: WorkbenchTab;
-  canSendRequest: boolean;
+  primaryExecutionCommandLabel: string | null;
   projectName: string;
   projectDirty: boolean;
   environment: string;
   inspectorOpen: boolean;
   runnerRunning: boolean;
+  showEnvironmentSelector: boolean;
   onEnvironmentChange: (environment: string) => void;
   onOpenCommandPalette: () => void;
   onSave: () => void;
-  onSendRequest: () => void;
+  onRunPrimaryAction: () => void;
   onToggleInspector: () => void;
 }
 
@@ -1418,27 +1638,29 @@ function TopCommandBar(props: TopCommandBarProps) {
           <Save size={18} />
           <span>{props.projectDirty ? "Save *" : "Save"}</span>
         </button>
-        {props.canSendRequest ? (
+        {props.primaryExecutionCommandLabel ? (
           <button
             type="button"
             className="primary-command"
-            aria-label="Send Request"
-            title="Send Request"
-            onClick={props.onSendRequest}
+            aria-label={props.primaryExecutionCommandLabel}
+            title={props.primaryExecutionCommandLabel}
+            onClick={props.onRunPrimaryAction}
             disabled={props.runnerRunning}
           >
-            <Send size={18} />
-            <span>{props.runnerRunning ? "Running..." : "Send Request"}</span>
+            {props.primaryExecutionCommandLabel === "Run Flow" ? <Play size={18} /> : <Send size={18} />}
+            <span>{props.runnerRunning ? "Running..." : props.primaryExecutionCommandLabel}</span>
           </button>
         ) : null}
-        <label className="environment-select">
-          <span className="status-dot" />
-          <select value={props.environment} onChange={(event) => props.onEnvironmentChange(event.target.value)}>
-            <option>QA Environment</option>
-            <option>Staging Environment</option>
-            <option>Production Environment</option>
-          </select>
-        </label>
+        {props.showEnvironmentSelector ? (
+          <label className="environment-select">
+            <span className="status-dot" />
+            <select value={props.environment} onChange={(event) => props.onEnvironmentChange(event.target.value)}>
+              <option>QA Environment</option>
+              <option>Staging Environment</option>
+              <option>Production Environment</option>
+            </select>
+          </label>
+        ) : null}
         <button
           type="button"
           className={props.inspectorOpen ? "chrome-icon active" : "chrome-icon"}
@@ -1822,10 +2044,6 @@ function ProjectExplorer(props: {
       <div className={props.projectError ? "project-status error" : "project-status"}>
         {props.projectError ?? props.projectMessage}
       </div>
-      <div className="explorer-footer">
-        <span>Project</span>
-        <button type="button" onClick={props.onOpenSettings}>Settings</button>
-      </div>
     </aside>
   );
 }
@@ -2014,6 +2232,12 @@ function RequestComposer({
 
 function RequestEditor({
   activeTab,
+  project,
+  projectPath,
+  hasDirtyState,
+  activeEnvironmentName,
+  onDefaultEnvironmentChange,
+  onAskToSaveOnCloseChange,
   activeService,
   activeFlow,
   services,
@@ -2037,6 +2261,12 @@ function RequestEditor({
   onApplyFlowTemplate
 }: {
   activeTab: WorkbenchTab;
+  project: RelayProject;
+  projectPath: string;
+  hasDirtyState: boolean;
+  activeEnvironmentName: string;
+  onDefaultEnvironmentChange: (environmentId: string) => void;
+  onAskToSaveOnCloseChange: (enabled: boolean) => void;
   activeService: ProjectService | undefined;
   activeFlow: ProjectFlow | undefined;
   services: ProjectService[];
@@ -2091,7 +2321,16 @@ function RequestEditor({
   }
 
   if (activeTab.kind === "settings") {
-    return <PlaceholderView title="Settings" description="Manage defaults, close behavior, redaction, and project settings." />;
+    return (
+      <ProjectSettingsView
+        project={project}
+        projectPath={projectPath}
+        hasDirtyState={hasDirtyState}
+        activeEnvironmentName={activeEnvironmentName}
+        onDefaultEnvironmentChange={onDefaultEnvironmentChange}
+        onAskToSaveOnCloseChange={onAskToSaveOnCloseChange}
+      />
+    );
   }
 
   if (!activeService || !activeEnvironment || !requestPreview) {
@@ -2381,9 +2620,29 @@ function authLabel(mode: AuthMode): string {
   }[mode];
 }
 
+function getProjectSettings(project: RelayProject): RelayProject["settings"] {
+  const savedSettings = project.settings as Partial<RelayProject["settings"]> | undefined;
+  const defaultEnvironmentId = savedSettings?.defaultEnvironmentId && project.environments.some((environment) => environment.id === savedSettings.defaultEnvironmentId)
+    ? savedSettings.defaultEnvironmentId
+    : project.environments[0]?.id ?? "";
+  return {
+    defaultEnvironmentId,
+    askToSaveOnClose: savedSettings?.askToSaveOnClose ?? true,
+    redactSecretsInConsole: savedSettings?.redactSecretsInConsole ?? true
+  };
+}
+
+function getDefaultEnvironmentName(project: RelayProject): string {
+  const settings = getProjectSettings(project);
+  return project.environments.find((environment) => environment.id === settings.defaultEnvironmentId)?.name
+    ?? project.environments[0]?.name
+    ?? "QA Environment";
+}
+
 function normalizeProjectForSave(project: RelayProject): RelayProject {
   return {
     ...project,
+    settings: getProjectSettings(project),
     flows: project.flows.map((flow) => normalizeFlow(flow))
   };
 }
@@ -3192,6 +3451,109 @@ function WelcomeView() {
   );
 }
 
+function ProjectSettingsView({
+  project,
+  projectPath,
+  hasDirtyState,
+  activeEnvironmentName,
+  onDefaultEnvironmentChange,
+  onAskToSaveOnCloseChange
+}: {
+  project: RelayProject;
+  projectPath: string;
+  hasDirtyState: boolean;
+  activeEnvironmentName: string;
+  onDefaultEnvironmentChange: (environmentId: string) => void;
+  onAskToSaveOnCloseChange: (enabled: boolean) => void;
+}) {
+  const settings = getProjectSettings(project);
+  const secretVariableCount = project.environments.reduce((count, environment) => (
+    count + environment.variables.filter((variable) => variable.secret).length
+  ), 0);
+  const savedResponseCount = project.savedResponses.length;
+  const folderCount = new Set(project.services.map((service) => service.folder).filter(Boolean)).size;
+
+  return (
+    <section className="project-settings-view" aria-label="Project settings">
+      <header>
+        <Box size={24} />
+        <div>
+          <h2>Settings</h2>
+          <p>{project.name}</p>
+        </div>
+      </header>
+      <div className="settings-grid">
+        <section className="settings-card settings-card-wide">
+          <h3>Workspace behavior</h3>
+          <label>
+            <span>Default environment</span>
+            <select
+              aria-label="Default environment"
+              value={settings.defaultEnvironmentId}
+              onChange={(event) => onDefaultEnvironmentChange(event.target.value)}
+            >
+              {project.environments.map((environment) => (
+                <option key={environment.id} value={environment.id}>{environment.name}</option>
+              ))}
+            </select>
+          </label>
+          <p className="setting-help">Newly opened projects and this workspace use the selected environment by default.</p>
+          <label className="settings-checkbox">
+            <input
+              aria-label="Ask before closing with unsaved changes"
+              type="checkbox"
+              checked={settings.askToSaveOnClose}
+              onChange={(event) => onAskToSaveOnCloseChange(event.target.checked)}
+            />
+            <span>Ask before closing with unsaved changes</span>
+          </label>
+        </section>
+        <section className="settings-card">
+          <h3>Current workspace</h3>
+          <dl>
+            <dt>Active environment</dt>
+            <dd>{activeEnvironmentName || "No environment"}</dd>
+            <dt>Requests</dt>
+            <dd>{project.services.length}</dd>
+            <dt>Folders</dt>
+            <dd>{folderCount}</dd>
+            <dt>Flows</dt>
+            <dd>{project.flows.length}</dd>
+            <dt>Environments</dt>
+            <dd>{project.environments.length}</dd>
+          </dl>
+        </section>
+        <section className="settings-card">
+          <h3>Safety</h3>
+          <dl>
+            <dt>Secrets</dt>
+            <dd>{secretVariableCount} redacted variable{secretVariableCount === 1 ? "" : "s"}</dd>
+            <dt>Responses</dt>
+            <dd>{savedResponseCount} saved artifact{savedResponseCount === 1 ? "" : "s"}</dd>
+            <dt>Imports</dt>
+            <dd>{project.importSources.length}</dd>
+            <dt>Console</dt>
+            <dd>{settings.redactSecretsInConsole ? "Secret redaction enforced" : "Secret redaction disabled"}</dd>
+          </dl>
+        </section>
+        <section className="settings-card settings-card-wide">
+          <h3>Project metadata</h3>
+          <dl>
+            <dt>File</dt>
+            <dd>{projectPath || "Unsaved project"}</dd>
+            <dt>Status</dt>
+            <dd>{hasDirtyState ? "Unsaved changes" : "Saved"}</dd>
+            <dt>Schema</dt>
+            <dd>{project.format} v{project.schemaVersion}</dd>
+            <dt>Updated</dt>
+            <dd>{project.updatedAt}</dd>
+          </dl>
+        </section>
+      </div>
+    </section>
+  );
+}
+
 function PlaceholderView({ title, description }: { title: string; description: string }) {
   return (
     <section className="placeholder-view">
@@ -3441,9 +3803,17 @@ function VariableRow({
   );
 }
 
-function CommandPalette({ onClose, onChoose }: { onClose: () => void; onChoose: (label: string) => void }) {
+function CommandPalette({
+  commands,
+  onClose,
+  onChoose
+}: {
+  commands: Array<{ id: ShellCommandId; label: string; shortcut?: string }>;
+  onClose: () => void;
+  onChoose: (id: ShellCommandId) => void;
+}) {
   const [query, setQuery] = useState("");
-  const filteredCommands = commandItems.filter((label) => label.toLowerCase().includes(query.trim().toLowerCase()));
+  const filteredCommands = commands.filter((command) => command.label.toLowerCase().includes(query.trim().toLowerCase()));
 
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
@@ -3454,10 +3824,10 @@ function CommandPalette({ onClose, onChoose }: { onClose: () => void; onChoose: 
           <kbd>Esc</kbd>
         </label>
         <div>
-          {filteredCommands.map((label) => (
-            <button type="button" key={label} onClick={() => onChoose(label)}>
-              <span>{label}</span>
-              <em>{label === "Send Request" ? "Cmd Enter" : label === "Settings" ? "Cmd ," : ""}</em>
+          {filteredCommands.map((command) => (
+            <button type="button" key={command.id} onClick={() => onChoose(command.id)}>
+              <span>{command.label}</span>
+              <em>{command.shortcut ?? ""}</em>
             </button>
           ))}
           {!filteredCommands.length ? <p className="empty-inline">No matching commands.</p> : null}

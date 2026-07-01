@@ -134,6 +134,7 @@ export interface RelayProject {
   savedResponses: SavedResponseMetadata[];
   importSources: Array<{ id: string; label: string; source: string }>;
   settings: {
+    defaultEnvironmentId: string;
     askToSaveOnClose: boolean;
     redactSecretsInConsole: boolean;
   };
@@ -394,6 +395,7 @@ export function createSampleProject(now = new Date().toISOString()): RelayProjec
     ],
     importSources: [],
     settings: {
+      defaultEnvironmentId: "qa",
       askToSaveOnClose: true,
       redactSecretsInConsole: true
     }

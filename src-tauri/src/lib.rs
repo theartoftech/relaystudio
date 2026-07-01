@@ -4,16 +4,28 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
-use tauri::menu::{MenuBuilder, SubmenuBuilder};
-use tauri::{Emitter, Manager};
+use tauri::menu::{CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
+use tauri::Emitter;
 
 const PROJECT_FORMAT: &str = "relay-studio-restproj";
 const PROJECT_SCHEMA_VERSION: u16 = 1;
 const SAVED_RESPONSE_FORMAT: &str = "relay-studio-response";
 const SAVED_RESPONSE_SCHEMA_VERSION: u16 = 1;
+const MENU_APP_SEARCH_COMMANDS: &str = "app.search_commands";
+const MENU_APP_OPEN_SETTINGS: &str = "app.open_settings";
+const MENU_FILE_NEW_PROJECT: &str = "file.new_project";
 const MENU_OPEN_PROJECT: &str = "file.open_project";
 const MENU_OPEN_RECENT_PREFIX: &str = "file.open_recent.";
-const MENU_CLOSE_WINDOW: &str = "file.close_window";
+const MENU_FILE_SAVE_PROJECT: &str = "file.save_project";
+const MENU_FILE_SAVE_PROJECT_AS: &str = "file.save_project_as";
+const MENU_WINDOW_CLOSE_ACTIVE_TAB: &str = "window.close_active_tab";
+const MENU_WINDOW_CLOSE_WINDOW: &str = "window.close_window";
+const MENU_REQUEST_SEND_ACTIVE: &str = "request.send_active";
+const MENU_FLOW_RUN_ACTIVE: &str = "flow.run_active";
+const MENU_VIEW_TOGGLE_EXPLORER: &str = "view.toggle_explorer";
+const MENU_VIEW_TOGGLE_INSPECTOR: &str = "view.toggle_inspector";
+const MENU_VIEW_TOGGLE_RESPONSE_DOCK: &str = "view.toggle_response_dock";
+const SHELL_COMMAND_EVENT: &str = "relay-shell-command";
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -41,6 +53,27 @@ struct HttpResponseOutput {
     headers: HashMap<String, String>,
     body: String,
     duration_ms: u128,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct ShellCommandEventPayload {
+    id: String,
+    recent_project: Option<RecentProject>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+struct ShellMenuState {
+    active_tab_kind: String,
+    has_dirty_state: bool,
+    can_save_project: bool,
+    can_close_active_tab: bool,
+    can_send_request: bool,
+    can_run_flow: bool,
+    explorer_open: bool,
+    inspector_open: bool,
+    response_dock_open: bool,
 }
 
 #[tauri::command]
@@ -93,8 +126,8 @@ fn forget_recent_project(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn refresh_app_menu(app: tauri::AppHandle) -> Result<(), String> {
-    set_app_menu(&app)
+fn refresh_app_menu(app: tauri::AppHandle, state: Option<ShellMenuState>) -> Result<(), String> {
+    set_app_menu(&app, &state.unwrap_or_default())
 }
 
 #[tauri::command]
@@ -139,7 +172,7 @@ pub fn run() {
             response_file_exists
         ])
         .setup(|app| {
-            set_app_menu(app.handle())?;
+            set_app_menu(app.handle(), &ShellMenuState::default())?;
             Ok(())
         })
         .on_menu_event(|app, event| {
@@ -149,28 +182,114 @@ pub fn run() {
         .expect("error while running Relay Studio");
 }
 
-fn set_app_menu(app: &tauri::AppHandle) -> Result<(), String> {
+fn set_app_menu(app: &tauri::AppHandle, state: &ShellMenuState) -> Result<(), String> {
     let mut recent_menu_builder = SubmenuBuilder::new(app, "Open Recent");
     let recent_projects = read_recent_projects().unwrap_or_default();
     if recent_projects.is_empty() {
-        recent_menu_builder =
-            recent_menu_builder.text("file.open_recent.empty", "No Recent Projects");
+        let empty_recent = MenuItemBuilder::with_id("file.open_recent.empty", "No Recent Projects")
+            .enabled(false)
+            .build(app)
+            .map_err(|error| format!("Could not build empty recent menu item: {error}"))?;
+        recent_menu_builder = recent_menu_builder.item(&empty_recent);
     } else {
         for (index, project) in recent_projects.iter().take(10).enumerate() {
-            recent_menu_builder = recent_menu_builder.text(
+            let recent_item = MenuItemBuilder::with_id(
                 format!("{MENU_OPEN_RECENT_PREFIX}{index}"),
-                format!("{} — {}", project.name, project.path),
-            );
+                format!("{} - {}", project.name, project.path),
+            )
+            .build(app)
+            .map_err(|error| format!("Could not build recent projects item: {error}"))?;
+            recent_menu_builder = recent_menu_builder.item(&recent_item);
         }
     }
     let recent_menu = recent_menu_builder
         .build()
         .map_err(|error| format!("Could not build recent projects menu: {error}"))?;
-    let file_menu = SubmenuBuilder::new(app, "File")
-        .text(MENU_OPEN_PROJECT, "Open...")
+
+    let search_commands = MenuItemBuilder::with_id(MENU_APP_SEARCH_COMMANDS, "Search Commands")
+        .accelerator("CmdOrCtrl+K")
+        .build(app)
+        .map_err(|error| format!("Could not build search commands menu item: {error}"))?;
+    let settings = MenuItemBuilder::with_id(MENU_APP_OPEN_SETTINGS, "Settings")
+        .accelerator("CmdOrCtrl+,")
+        .build(app)
+        .map_err(|error| format!("Could not build settings menu item: {error}"))?;
+    let new_project = MenuItemBuilder::with_id(MENU_FILE_NEW_PROJECT, "New Project")
+        .accelerator("CmdOrCtrl+N")
+        .build(app)
+        .map_err(|error| format!("Could not build new project menu item: {error}"))?;
+    let open_project = MenuItemBuilder::with_id(MENU_OPEN_PROJECT, "Open Project...")
+        .accelerator("CmdOrCtrl+O")
+        .build(app)
+        .map_err(|error| format!("Could not build open project menu item: {error}"))?;
+    let save_project = MenuItemBuilder::with_id(MENU_FILE_SAVE_PROJECT, "Save Project")
+        .accelerator("CmdOrCtrl+S")
+        .enabled(state.can_save_project)
+        .build(app)
+        .map_err(|error| format!("Could not build save project menu item: {error}"))?;
+    let save_project_as = MenuItemBuilder::with_id(MENU_FILE_SAVE_PROJECT_AS, "Save Project As...")
+        .accelerator("CmdOrCtrl+Shift+S")
+        .enabled(state.can_save_project)
+        .build(app)
+        .map_err(|error| format!("Could not build save-as menu item: {error}"))?;
+    let send_request = MenuItemBuilder::with_id(MENU_REQUEST_SEND_ACTIVE, "Send Request")
+        .accelerator("CmdOrCtrl+Enter")
+        .enabled(state.can_send_request)
+        .build(app)
+        .map_err(|error| format!("Could not build send request menu item: {error}"))?;
+    let run_flow = MenuItemBuilder::with_id(MENU_FLOW_RUN_ACTIVE, "Run Flow")
+        .accelerator("CmdOrCtrl+Enter")
+        .enabled(state.can_run_flow)
+        .build(app)
+        .map_err(|error| format!("Could not build run flow menu item: {error}"))?;
+    let close_active_tab =
+        MenuItemBuilder::with_id(MENU_WINDOW_CLOSE_ACTIVE_TAB, "Close Tab")
+            .accelerator("CmdOrCtrl+W")
+            .enabled(state.can_close_active_tab)
+            .build(app)
+            .map_err(|error| format!("Could not build close tab menu item: {error}"))?;
+    let close_window = MenuItemBuilder::with_id(MENU_WINDOW_CLOSE_WINDOW, "Close Window")
+        .accelerator("CmdOrCtrl+Shift+W")
+        .build(app)
+        .map_err(|error| format!("Could not build close window menu item: {error}"))?;
+    let toggle_explorer =
+        CheckMenuItemBuilder::with_id(MENU_VIEW_TOGGLE_EXPLORER, "Toggle Sidebar")
+            .accelerator("CmdOrCtrl+Alt+1")
+            .checked(state.explorer_open)
+            .build(app)
+            .map_err(|error| format!("Could not build sidebar toggle menu item: {error}"))?;
+    let toggle_inspector =
+        CheckMenuItemBuilder::with_id(MENU_VIEW_TOGGLE_INSPECTOR, "Toggle Inspector")
+            .accelerator("CmdOrCtrl+Alt+2")
+            .checked(state.inspector_open)
+            .build(app)
+            .map_err(|error| format!("Could not build inspector toggle menu item: {error}"))?;
+    let toggle_response_dock = CheckMenuItemBuilder::with_id(
+        MENU_VIEW_TOGGLE_RESPONSE_DOCK,
+        "Toggle Response Dock",
+    )
+    .accelerator("CmdOrCtrl+Alt+3")
+    .enabled(shell_menu_supports_response_dock(state))
+    .checked(state.response_dock_open)
+    .build(app)
+    .map_err(|error| format!("Could not build response dock toggle menu item: {error}"))?;
+
+    let mut file_menu_builder = SubmenuBuilder::new(app, "File")
+        .item(&new_project)
+        .item(&open_project)
         .item(&recent_menu)
         .separator()
-        .text(MENU_CLOSE_WINDOW, "Close Window")
+        .item(&save_project)
+        .item(&save_project_as)
+        .separator()
+        .item(&send_request)
+        .item(&run_flow)
+        .separator()
+        .item(&close_active_tab);
+    if !cfg!(target_os = "macos") {
+        file_menu_builder = file_menu_builder.separator().item(&settings);
+    }
+    let file_menu = file_menu_builder
         .build()
         .map_err(|error| format!("Could not build file menu: {error}"))?;
     let edit_menu = SubmenuBuilder::new(app, "Edit")
@@ -183,9 +302,50 @@ fn set_app_menu(app: &tauri::AppHandle) -> Result<(), String> {
         .select_all()
         .build()
         .map_err(|error| format!("Could not build edit menu: {error}"))?;
-    let app_menu = MenuBuilder::new(app)
+
+    let view_menu = SubmenuBuilder::new(app, "View")
+        .item(&toggle_explorer)
+        .item(&toggle_inspector)
+        .item(&toggle_response_dock)
+        .build()
+        .map_err(|error| format!("Could not build view menu: {error}"))?;
+    let window_menu = SubmenuBuilder::new(app, "Window")
+        .minimize()
+        .maximize()
+        .separator()
+        .fullscreen()
+        .separator()
+        .item(&close_window)
+        .build()
+        .map_err(|error| format!("Could not build window menu: {error}"))?;
+    let help_menu = SubmenuBuilder::new(app, "Help")
+        .item(&search_commands)
+        .build()
+        .map_err(|error| format!("Could not build help menu: {error}"))?;
+
+    let mut app_menu_builder = MenuBuilder::new(app);
+    if cfg!(target_os = "macos") {
+        let app_shell_menu = SubmenuBuilder::new(app, "Relay Studio")
+            .about(None)
+            .separator()
+            .item(&settings)
+            .separator()
+            .services()
+            .separator()
+            .hide()
+            .hide_others()
+            .separator()
+            .quit()
+            .build()
+            .map_err(|error| format!("Could not build app shell menu: {error}"))?;
+        app_menu_builder = app_menu_builder.item(&app_shell_menu);
+    }
+    let app_menu = app_menu_builder
         .item(&file_menu)
         .item(&edit_menu)
+        .item(&view_menu)
+        .item(&window_menu)
+        .item(&help_menu)
         .build()
         .map_err(|error| format!("Could not build application menu: {error}"))?;
     app.set_menu(app_menu)
@@ -194,25 +354,53 @@ fn set_app_menu(app: &tauri::AppHandle) -> Result<(), String> {
 }
 
 fn handle_app_menu_event(app: &tauri::AppHandle, id: &str) {
-    if id == MENU_OPEN_PROJECT {
-        let _ = app.emit("relay-menu-open-project", ());
-        return;
-    }
-    if id == MENU_CLOSE_WINDOW {
-        if let Some(window) = app.get_webview_window("main") {
-            let _ = window.close();
-        }
+    if is_shell_command_menu_id(id) {
+        let payload = ShellCommandEventPayload {
+            id: id.to_string(),
+            recent_project: None,
+        };
+        let _ = app.emit(SHELL_COMMAND_EVENT, payload);
         return;
     }
     if let Some(index_text) = id.strip_prefix(MENU_OPEN_RECENT_PREFIX) {
         if let Ok(index) = index_text.parse::<usize>() {
             if let Ok(recent_projects) = read_recent_projects() {
                 if let Some(project) = recent_projects.get(index) {
-                    let _ = app.emit("relay-menu-open-recent", project.clone());
+                    let payload = ShellCommandEventPayload {
+                        id: "file.open_recent".to_string(),
+                        recent_project: Some(project.clone()),
+                    };
+                    let _ = app.emit(SHELL_COMMAND_EVENT, payload);
                 }
             }
         }
     }
+}
+
+fn is_shell_command_menu_id(id: &str) -> bool {
+    matches!(
+        id,
+        MENU_APP_SEARCH_COMMANDS
+            | MENU_APP_OPEN_SETTINGS
+            | MENU_FILE_NEW_PROJECT
+            | MENU_OPEN_PROJECT
+            | MENU_FILE_SAVE_PROJECT
+            | MENU_FILE_SAVE_PROJECT_AS
+            | MENU_WINDOW_CLOSE_ACTIVE_TAB
+            | MENU_WINDOW_CLOSE_WINDOW
+            | MENU_REQUEST_SEND_ACTIVE
+            | MENU_FLOW_RUN_ACTIVE
+            | MENU_VIEW_TOGGLE_EXPLORER
+            | MENU_VIEW_TOGGLE_INSPECTOR
+            | MENU_VIEW_TOGGLE_RESPONSE_DOCK
+    )
+}
+
+fn shell_menu_supports_response_dock(state: &ShellMenuState) -> bool {
+    !matches!(
+        state.active_tab_kind.as_str(),
+        "welcome" | "settings" | "import"
+    )
 }
 
 async fn execute_http_request_impl(
@@ -760,5 +948,28 @@ mod tests {
             validate_response_artifact(&artifact).expect_err("invalid artifact path"),
             "Saved response file must use the .json or .txt extension."
         );
+    }
+
+    #[test]
+    fn shell_menu_disables_response_dock_for_non_workbench_tabs() {
+        let hidden_state = ShellMenuState {
+            active_tab_kind: "settings".to_string(),
+            ..ShellMenuState::default()
+        };
+        let visible_state = ShellMenuState {
+            active_tab_kind: "response".to_string(),
+            ..ShellMenuState::default()
+        };
+
+        assert!(!shell_menu_supports_response_dock(&hidden_state));
+        assert!(shell_menu_supports_response_dock(&visible_state));
+    }
+
+    #[test]
+    fn shell_menu_recognizes_contract_command_ids() {
+        assert!(is_shell_command_menu_id(MENU_FILE_SAVE_PROJECT));
+        assert!(is_shell_command_menu_id(MENU_VIEW_TOGGLE_INSPECTOR));
+        assert!(!is_shell_command_menu_id("file.open_recent.0"));
+        assert!(!is_shell_command_menu_id("unknown"));
     }
 }

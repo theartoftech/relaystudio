@@ -32,6 +32,14 @@ test("uses compact desktop density at common workbench sizes", async ({ page }) 
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
 
+  await expect(page.locator(".project-explorer")).toBeVisible();
+  await expect(page.locator(".top-command-bar")).toBeVisible();
+  await expect(page.locator(".tab-strip")).toBeVisible();
+  await expect(page.locator(".request-row input")).toBeVisible();
+  await expect(page.locator(".bottom-dock")).toBeVisible();
+  await expect(page.locator(".primary-command")).toBeVisible();
+  await expect(page.locator(".utility-header nav button").first()).toBeVisible();
+
   const measurements = await page.evaluate(() => {
     const shell = document.querySelector<HTMLElement>(".app-shell");
     const explorer = document.querySelector<HTMLElement>(".project-explorer");
@@ -125,6 +133,39 @@ test("renders Welcome as an app overview, not a request editor", async ({ page }
   await expect(page.getByLabel("Request composer")).toHaveCount(0);
   await expect(page.getByLabel("Request URL")).toHaveCount(0);
   await expect(page.getByLabel("Response and console dock")).toHaveCount(0);
+});
+
+test("lets Settings fill the workbench without a response dock", async ({ page }) => {
+  await page.setViewportSize({ width: 1180, height: 820 });
+  await page.goto("/");
+
+  await page.getByRole("button", { name: /Search commands/i }).click();
+  await page.getByRole("dialog", { name: "Command palette" }).getByRole("button", { name: /Settings/i }).click();
+
+  const settings = page.getByLabel("Project settings");
+  await expect(settings).toBeVisible();
+  await expect(page.locator(".explorer-footer")).toHaveCount(0);
+  await expect(page.getByLabel("Response and console dock")).toHaveCount(0);
+
+  const geometry = await page.evaluate(() => {
+    const workbench = document.querySelector<HTMLElement>(".workbench");
+    const settingsView = document.querySelector<HTMLElement>(".project-settings-view");
+    if (!workbench || !settingsView) {
+      throw new Error("Settings geometry elements were not rendered.");
+    }
+    const workbenchBox = workbench.getBoundingClientRect();
+    const settingsBox = settingsView.getBoundingClientRect();
+    return {
+      bottomGap: Math.round(workbenchBox.bottom - settingsBox.bottom),
+      settingsHeight: Math.round(settingsBox.height),
+      workbenchHeight: Math.round(workbenchBox.height),
+      settingsOverflows: settingsView.scrollHeight > settingsView.clientHeight
+    };
+  });
+
+  expect(geometry.bottomGap).toBeLessThanOrEqual(2);
+  expect(geometry.settingsHeight).toBeGreaterThan(geometry.workbenchHeight - 50);
+  expect(geometry.settingsOverflows).toBe(false);
 });
 
 test("tab plus creates a new request", async ({ page }) => {
