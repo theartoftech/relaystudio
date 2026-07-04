@@ -70,14 +70,15 @@ Use this script to manually validate the current uncommitted Relay Studio build 
 
 ## Test 4: Open Recent Project From Dialog
 
-1. Save a project so it appears under `Recent Projects`.
+1. Save a project so it appears in the recent-project history.
 2. Open `Search commands` or press `Cmd+K`.
-3. Select `Open Project`.
+3. Select `Open Recent Projects`.
 4. In the dialog, click a recent project row.
 5. Expected result:
    - The recent project path is used directly.
    - The project opens if the file still exists.
-   - Missing-file errors are shown in the project status area.
+   - Missing-file errors are shown in the status bar.
+   - Recent Projects does not appear inside Explorer.
 
 ## Test 5: Request URL Editing
 

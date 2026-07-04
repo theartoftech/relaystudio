@@ -1,4 +1,11 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+
+async function openRecentProject(page: Page, name: RegExp): Promise<void> {
+  await page.getByRole("button", { name: /Search commands/i }).click();
+  const palette = page.getByRole("dialog", { name: "Command palette" });
+  await palette.getByRole("button", { name: /Open Recent Projects/i }).click();
+  await page.getByRole("dialog", { name: "Open Recent Projects" }).getByRole("button", { name }).click();
+}
 
 test("renders the Relay Studio desktop shell", async ({ page }) => {
   await page.goto("/");
@@ -178,7 +185,7 @@ test("tab plus creates a new request", async ({ page }) => {
   await expect(page.getByLabel("Project explorer").getByLabel("Requests")).toContainText("New Request");
 });
 
-test("hides the active project from Recent Projects", async ({ page }) => {
+test("keeps recent projects in the command surface, not the explorer", async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem("relay-studio:recent-projects", JSON.stringify([
       {
@@ -197,7 +204,12 @@ test("hides the active project from Recent Projects", async ({ page }) => {
   await dialog.getByRole("button", { name: "Create Project" }).click();
 
   await expect(explorer.getByText("Test Project 2 *")).toBeVisible();
-  const recentProjects = explorer.getByLabel("Recent Projects");
+  await expect(explorer.getByLabel("Recent Projects")).toHaveCount(0);
+
+  await page.getByRole("button", { name: /Search commands/i }).click();
+  const palette = page.getByRole("dialog", { name: "Command palette" });
+  await palette.getByRole("button", { name: /Open Recent Projects/i }).click();
+  const recentProjects = page.getByRole("dialog", { name: "Open Recent Projects" });
   await expect(recentProjects.getByRole("button", { name: /Sample API Regression/ })).toBeVisible();
   await expect(recentProjects.getByRole("button", { name: /Test Project 2/ })).toHaveCount(0);
 });
@@ -280,7 +292,7 @@ test("shows visible missing-request flow nodes from saved projects", async ({ pa
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
 
-  await page.getByLabel("Project explorer").getByRole("button", { name: /Test Project 4/ }).click();
+  await openRecentProject(page, /Test Project 4/);
   await expect(page.getByText("Project opened from /private/tmp/test-project-4.restproj.")).toBeVisible();
   await page.getByLabel("Project explorer").getByRole("button", { name: /New Flow 1/ }).click();
 
@@ -350,7 +362,7 @@ test("scrolls the flow workspace to bounded offscreen nodes", async ({ page }) =
   await page.setViewportSize({ width: 960, height: 640 });
   await page.goto("/");
 
-  await page.getByLabel("Project explorer").getByRole("button", { name: /Wide Flow Project/ }).click();
+  await openRecentProject(page, /Wide Flow Project/);
   await page.getByLabel("Project explorer").getByRole("button", { name: /Wide Flow/ }).click();
 
   const canvas = page.getByLabel("Flow canvas");

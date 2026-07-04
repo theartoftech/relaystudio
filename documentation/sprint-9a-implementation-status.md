@@ -82,6 +82,6 @@ Verification results:
 
 ## Known Follow-Ups
 
-- Sprint 9B should simplify explorer responsibilities by moving Recent Projects and transient status off the primary navigation tree.
+- Sprint 9B completed the planned Explorer simplification by moving Recent Projects and transient status off the primary navigation tree.
 - Settings still uses placeholder content and should not be treated as production-ready until Sprint 10A replaces that copy and behavior.
 - Windows title bar drag-region and caption-control implementation remains a dedicated platform-chrome task for later sprint work.

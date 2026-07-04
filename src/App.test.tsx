@@ -13,8 +13,11 @@ describe("Relay Studio shell", () => {
     vi.unstubAllGlobals();
   });
 
-  function recentProjectsIn(explorer: HTMLElement) {
-    return within(within(explorer).getByLabelText("Recent Projects"));
+  async function openRecentProjectsDialog(): Promise<HTMLElement> {
+    fireEvent.click(screen.getByRole("button", { name: /Search commands/i }));
+    const palette = screen.getByRole("dialog", { name: "Command palette" });
+    fireEvent.click(within(palette).getByRole("button", { name: /Open Recent Projects/i }));
+    return screen.findByRole("dialog", { name: "Open Recent Projects" });
   }
 
   it("renders the core Sprint 2 workbench regions", () => {
@@ -24,6 +27,7 @@ describe("Relay Studio shell", () => {
     expect(screen.getByLabelText("Project explorer")).toBeInTheDocument();
     expect(screen.getByLabelText("Workbench")).toBeInTheDocument();
     expect(screen.getByLabelText("Response and console dock")).toBeInTheDocument();
+    expect(screen.getByLabelText("Status bar")).toHaveTextContent("Project loaded from sample data.");
     expect(screen.queryByLabelText("Primary navigation")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Inspector")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Request construction preview")).not.toBeInTheDocument();
@@ -63,6 +67,20 @@ describe("Relay Studio shell", () => {
 
     fireEvent.click(within(inspector).getByRole("button", { name: "Hide inspector" }));
     expect(screen.queryByLabelText("Inspector")).not.toBeInTheDocument();
+  });
+
+  it("changes inspector content by active editor type", () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Show inspector" }));
+    const inspector = screen.getByLabelText("Inspector");
+    expect(within(inspector).getByRole("heading", { name: "Request Summary" })).toBeInTheDocument();
+
+    const explorer = screen.getByLabelText("Project explorer");
+    fireEvent.click(within(explorer).getByRole("button", { name: /Authenticated Read/i }));
+
+    expect(within(inspector).getByRole("heading", { name: "Flow Summary" })).toBeInTheDocument();
+    expect(within(inspector).queryByRole("heading", { name: "Request Summary" })).not.toBeInTheDocument();
   });
 
   it("exposes keyboard-accessible pane resize handles", () => {
@@ -306,7 +324,7 @@ describe("Relay Studio shell", () => {
     expect(requestUrl).toHaveValue("https://api.example.com/api/health");
   });
 
-  it("creates a new project from the explorer plus button", () => {
+  it("creates a new project from the explorer plus button", async () => {
     render(<App />);
 
     const explorer = screen.getByLabelText("Project explorer");
@@ -323,9 +341,11 @@ describe("Relay Studio shell", () => {
     expect(within(explorer).getByText("Orders API Demo *")).toBeInTheDocument();
     expect(screen.queryByText("New request created.")).not.toBeInTheDocument();
 
-    fireEvent.click(within(explorer).getByRole("button", { name: /Sample API Regression/i }));
+    const recentDialog = await openRecentProjectsDialog();
+    fireEvent.click(await within(recentDialog).findByRole("button", { name: /Sample API Regression/i }));
 
     const savePrompt = screen.getByRole("dialog", { name: "Unsaved changes" });
+    expect(within(savePrompt).getByText(/Orders API Demo has unsaved service and flow edits/i)).toBeInTheDocument();
     expect(within(savePrompt).getByText(/unsaved service and flow edits/i)).toBeInTheDocument();
     fireEvent.click(within(savePrompt).getByRole("button", { name: "Do Not Save" }));
 
@@ -340,14 +360,15 @@ describe("Relay Studio shell", () => {
     ]));
     render(<App />);
 
-    const explorer = screen.getByLabelText("Project explorer");
-    const missingProject = await within(explorer).findByRole("button", { name: /Missing Project/ });
+    const missingDialog = await openRecentProjectsDialog();
+    const missingProject = await within(missingDialog).findByRole("button", { name: /Missing Project/ });
     fireEvent.click(missingProject);
 
     await waitFor(() => {
       expect(screen.getByText(`Project file was not found: ${missingPath}`)).toBeInTheDocument();
     });
-    expect(within(explorer).queryByRole("button", { name: /Missing Project/ })).not.toBeInTheDocument();
+    const recentDialog = await openRecentProjectsDialog();
+    expect(within(recentDialog).queryByRole("button", { name: /Missing Project/ })).not.toBeInTheDocument();
     expect(JSON.parse(localStorage.getItem("relay-studio:recent-projects") ?? "[]")).toEqual([]);
   });
 
@@ -373,7 +394,8 @@ describe("Relay Studio shell", () => {
     render(<App />);
 
     const explorer = screen.getByLabelText("Project explorer");
-    fireEvent.click(await within(explorer).findByRole("button", { name: /Test Project 4/ }));
+    const recentDialog = await openRecentProjectsDialog();
+    fireEvent.click(await within(recentDialog).findByRole("button", { name: /Test Project 4/ }));
 
     await waitFor(() => {
       expect(within(explorer).getByRole("button", { name: /New Flow 1/ })).toBeInTheDocument();
@@ -399,7 +421,7 @@ describe("Relay Studio shell", () => {
     expect(screen.queryByRole("tab", { name: /Authenticated Read/i })).not.toBeInTheDocument();
   });
 
-  it("shows only the five most recent inactive projects in the explorer", async () => {
+  it("moves recent projects out of the explorer and into the command surface", async () => {
     localStorage.setItem("relay-studio:recent-projects", JSON.stringify(
       Array.from({ length: 7 }, (_, index) => ({
         name: `Recent Project ${index + 1}`,
@@ -410,13 +432,13 @@ describe("Relay Studio shell", () => {
     render(<App />);
 
     const explorer = screen.getByLabelText("Project explorer");
-    const recentProjects = recentProjectsIn(explorer);
-    await recentProjects.findByRole("button", { name: /Recent Project 1/ });
+    expect(within(explorer).queryByLabelText("Recent Projects")).not.toBeInTheDocument();
 
-    expect(within(explorer).getByLabelText("Recent Projects")).toHaveTextContent("5");
+    const recentDialog = await openRecentProjectsDialog();
+    const recentProjects = within(recentDialog);
+    expect(await recentProjects.findByRole("button", { name: /Recent Project 1/ })).toBeInTheDocument();
     expect(recentProjects.getByRole("button", { name: /Recent Project 5/ })).toBeInTheDocument();
-    expect(recentProjects.queryByRole("button", { name: /Recent Project 6/ })).not.toBeInTheDocument();
-    expect(recentProjects.queryByRole("button", { name: /Recent Project 7/ })).not.toBeInTheDocument();
+    expect(recentProjects.getByRole("button", { name: /Recent Project 7/ })).toBeInTheDocument();
   });
 
   it("hides a saved recent project when the active dirty project has the same name", async () => {
@@ -440,7 +462,10 @@ describe("Relay Studio shell", () => {
     await waitFor(() => {
       expect(within(explorer).getByText("Test Project 2 *")).toBeInTheDocument();
     });
-    expect(recentProjectsIn(explorer).queryByRole("button", { name: /Test Project 2/ })).not.toBeInTheDocument();
+    const recentDialog = await openRecentProjectsDialog();
+    await waitFor(() => {
+      expect(within(recentDialog).queryByRole("button", { name: /Test Project 2/ })).not.toBeInTheDocument();
+    });
   });
 
   it("keeps the project being left available while switching between recent projects", async () => {
@@ -462,24 +487,27 @@ describe("Relay Studio shell", () => {
       expect(screen.getByText("Project saved to /private/tmp/new-test-project.restproj.")).toBeInTheDocument();
     });
 
-    fireEvent.click(within(explorer).getByRole("button", { name: /Sample API Regression/ }));
+    let recentDialog = await openRecentProjectsDialog();
+    fireEvent.click(await within(recentDialog).findByRole("button", { name: /Sample API Regression/ }));
 
     await waitFor(() => {
       expect(screen.getByText("Restored Sample API Regression.")).toBeInTheDocument();
     });
-    expect(recentProjectsIn(explorer).getByRole("button", { name: /New Test Project/ })).toBeInTheDocument();
-    expect(recentProjectsIn(explorer).queryByRole("button", { name: /Sample API Regression/ })).not.toBeInTheDocument();
+    recentDialog = await openRecentProjectsDialog();
+    expect(await within(recentDialog).findByRole("button", { name: /New Test Project/ })).toBeInTheDocument();
+    fireEvent.click(within(recentDialog).getByRole("button", { name: "Close recent projects" }));
 
-    fireEvent.click(within(explorer).getByRole("button", { name: /New Test Project/ }));
+    recentDialog = await openRecentProjectsDialog();
+    fireEvent.click(await within(recentDialog).findByRole("button", { name: /New Test Project/ }));
 
     await waitFor(() => {
       expect(screen.getByText("Restored New Test Project.")).toBeInTheDocument();
     });
-    expect(recentProjectsIn(explorer).getByRole("button", { name: /Sample API Regression/ })).toBeInTheDocument();
-    expect(recentProjectsIn(explorer).queryByRole("button", { name: /New Test Project/ })).not.toBeInTheDocument();
+    recentDialog = await openRecentProjectsDialog();
+    expect(await within(recentDialog).findByRole("button", { name: /Sample API Regression/ })).toBeInTheDocument();
   });
 
-  it("renames and deletes recent projects from the explorer context menu", async () => {
+  it("renames and deletes recent projects from the recent projects command surface", async () => {
     const archivedProject = createSampleProject("2026-06-21T00:00:00.000Z");
     archivedProject.name = "Archived Regression";
     const archivedPath = "/private/tmp/archived-regression.restproj";
@@ -489,11 +517,10 @@ describe("Relay Studio shell", () => {
     ]));
     render(<App />);
 
-    const explorer = screen.getByLabelText("Project explorer");
-    const recentProjects = recentProjectsIn(explorer);
-    await recentProjects.findByRole("button", { name: /Archived Regression/ });
+    let recentDialog = await openRecentProjectsDialog();
+    let recentProjects = within(recentDialog);
 
-    const recentProject = recentProjects.getByRole("button", { name: /Archived Regression/ });
+    const recentProject = await recentProjects.findByRole("button", { name: /Archived Regression/ });
     fireEvent.contextMenu(recentProject);
     const menu = screen.getByRole("menu", { name: "Project context menu" });
     fireEvent.click(within(menu).getByRole("menuitem", { name: "Rename Project" }));
@@ -505,10 +532,12 @@ describe("Relay Studio shell", () => {
     fireEvent.click(within(renameDialog).getByRole("button", { name: "Rename Project" }));
 
     await waitFor(() => {
-      expect(recentProjects.getByRole("button", { name: /Renamed Regression/ })).toBeInTheDocument();
+      expect(screen.getByText("Project renamed to Renamed Regression.")).toBeInTheDocument();
     });
 
-    fireEvent.contextMenu(recentProjects.getByRole("button", { name: /Renamed Regression/ }));
+    recentDialog = await openRecentProjectsDialog();
+    recentProjects = within(recentDialog);
+    fireEvent.contextMenu(await recentProjects.findByRole("button", { name: /Renamed Regression/ }));
     fireEvent.click(within(screen.getByRole("menu", { name: "Project context menu" })).getByRole("menuitem", { name: "Delete Project" }));
 
     const deleteDialog = screen.getByRole("dialog", { name: "Delete Project" });
@@ -516,9 +545,8 @@ describe("Relay Studio shell", () => {
     fireEvent.click(within(deleteDialog).getByRole("button", { name: "Delete Project" }));
 
     await waitFor(() => {
-      expect(recentProjects.queryByRole("button", { name: /Renamed Regression/ })).not.toBeInTheDocument();
+      expect(localStorage.getItem(`relay-studio:project:${archivedPath}`)).toBeNull();
     });
-    expect(localStorage.getItem(`relay-studio:project:${archivedPath}`)).toBeNull();
   });
 
   it("creates a request from the tab strip plus button", () => {
@@ -702,7 +730,8 @@ describe("Relay Studio shell", () => {
     render(<App />);
 
     const explorer = screen.getByLabelText("Project explorer");
-    fireEvent.click(await within(explorer).findByRole("button", { name: /Flow Response Demo/ }));
+    const recentDialog = await openRecentProjectsDialog();
+    fireEvent.click(await within(recentDialog).findByRole("button", { name: /Flow Response Demo/ }));
     await waitFor(() => {
       expect(within(explorer).getByRole("button", { name: /Flow Test/ })).toBeInTheDocument();
     });

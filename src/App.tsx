@@ -19,7 +19,6 @@ import {
   Box,
   Braces,
   ChevronDown,
-  Database,
   FileJson,
   Folder,
   FolderOpen,
@@ -66,6 +65,7 @@ import {
   type SavedResponseMetadata
 } from "./project/projectModel";
 import { createProjectPersistence, type ProjectPersistence } from "./project/projectPersistence";
+import { openNativeProjectFilePicker } from "./project/nativeProjectPicker";
 import {
   AUTH_MODES,
   HTTP_METHODS,
@@ -117,6 +117,8 @@ import {
   createNativeShellMenuState,
   getCommandPaletteCommands,
   getPrimaryExecutionCommand,
+  parseRecentProjectMenuIndex,
+  type NativeShellCommandId,
   type ShellCommandEventPayload,
   type ShellCommandId
 } from "./shell/shellCommands";
@@ -153,7 +155,8 @@ interface ProjectListTarget {
 
 type PendingProjectOpen =
   | { type: "session"; snapshotId: string }
-  | { type: "recent"; recent: RecentProject };
+  | { type: "recent"; recent: RecentProject }
+  | { type: "path"; path: string };
 
 const initialTabs: WorkbenchTab[] = [
   { id: "welcome", label: "Welcome", kind: "welcome" },
@@ -207,6 +210,7 @@ export function App() {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [responseVisible, setResponseVisible] = useState(true);
   const [savePromptOpen, setSavePromptOpen] = useState(false);
+  const [recentProjectsDialogOpen, setRecentProjectsDialogOpen] = useState(false);
   const [pendingProjectOpen, setPendingProjectOpen] = useState<PendingProjectOpen | null>(null);
   const [saveThenOpenProject, setSaveThenOpenProject] = useState<PendingProjectOpen | null>(null);
   const [pendingWindowClose, setPendingWindowClose] = useState(false);
@@ -277,6 +281,11 @@ export function App() {
       if (normalizedKey === "s") {
         event.preventDefault();
         void executeShellCommand(event.shiftKey ? "file.save_project_as" : "file.save_project");
+        return;
+      }
+      if (normalizedKey === "o" && !event.shiftKey && !event.altKey) {
+        event.preventDefault();
+        void executeShellCommand("file.open_project");
         return;
       }
       if (normalizedKey === "w") {
@@ -448,7 +457,22 @@ export function App() {
     setActiveTabId(id);
   }
 
-  async function executeShellCommand(id: ShellCommandId, payload?: ShellCommandEventPayload) {
+  async function executeShellCommand(id: NativeShellCommandId, payload?: ShellCommandEventPayload) {
+    const recentProjectMenuIndex = parseRecentProjectMenuIndex(id);
+    if (recentProjectMenuIndex !== null) {
+      if (payload?.recentProject) {
+        requestOpenRecentProject(payload.recentProject);
+        return;
+      }
+      const projectPersistence = persistence ?? await createProjectPersistence();
+      if (!persistence) setPersistence(projectPersistence);
+      const currentRecentProjects = recentProjects.length ? recentProjects : await projectPersistence.listRecentProjects();
+      const recent = currentRecentProjects[recentProjectMenuIndex];
+      if (recent) {
+        requestOpenRecentProject(recent);
+      }
+      return;
+    }
     switch (id) {
       case "app.search_commands":
         setCommandPaletteOpen(true);
@@ -463,7 +487,10 @@ export function App() {
         setNewProjectDialogOpen(true);
         return;
       case "file.open_project":
-        setProjectDialog({ mode: "open", title: "Open Project", path: "" });
+        await requestOpenProjectFromShell();
+        return;
+      case "file.show_recent_projects":
+        setRecentProjectsDialogOpen(true);
         return;
       case "file.open_recent":
         if (payload?.recentProject) {
@@ -506,7 +533,7 @@ export function App() {
         }
         return;
       default:
-        throw new Error(`Unhandled shell command: ${id satisfies never}`);
+        throw new Error(`Unhandled shell command: ${id}`);
     }
   }
 
@@ -1063,19 +1090,8 @@ export function App() {
             <ProjectExplorer
               groupedServices={groupedServices}
               project={project}
-              projectPath={projectPath}
               projectDirty={hasDirtyState}
-              sessionProjects={sessionProjects}
-              recentProjects={recentProjects}
-              projectMessage={projectMessage}
-              projectError={projectError}
               onCreateProject={() => setNewProjectDialogOpen(true)}
-              onOpenSessionProject={requestOpenSessionProject}
-              onOpenRecent={requestOpenRecentProject}
-              onRenameProject={setRenameProjectDialog}
-              onDeleteProject={setDeleteProjectDialog}
-              onOpenSettings={() => void executeShellCommand("app.open_settings")}
-              onOpenImport={() => void executeShellCommand("app.open_import")}
               activeServiceId={activeService?.id ?? ""}
               onSelectService={handleSelectService}
               onCreateRequest={handleCreateService}
@@ -1214,6 +1230,9 @@ export function App() {
             <Inspector
               environment={activeEnvironment}
               activeTab={activeTab}
+              activeService={activeService}
+              activeFlow={activeFlow}
+              runnerResponse={runnerResponse}
               onAddVariable={handleAddEnvironmentVariable}
               onClose={() => setInspectorOpen(false)}
               onDeleteVariable={handleDeleteEnvironmentVariable}
@@ -1222,6 +1241,15 @@ export function App() {
           </>
         ) : null}
       </section>
+      <StatusBar
+        projectName={project.name}
+        dirty={hasDirtyState}
+        message={projectError ?? projectMessage}
+        error={Boolean(projectError)}
+        explorerOpen={explorerOpen}
+        inspectorOpen={inspectorOpen}
+        responseDockOpen={responseVisible && activeTabHasBottomDock}
+      />
 
       {commandPaletteOpen ? (
         <CommandPalette
@@ -1236,6 +1264,7 @@ export function App() {
 
       {savePromptOpen ? (
         <SavePrompt
+          projectName={project.name}
           onCancel={() => {
             setPendingProjectOpen(null);
             setSaveThenOpenProject(null);
@@ -1262,6 +1291,31 @@ export function App() {
             }
             setSavePromptOpen(false);
             setProjectDialog({ mode: "save", title: "Save Project", path: projectPath });
+          }}
+        />
+      ) : null}
+      {recentProjectsDialogOpen ? (
+        <RecentProjectsDialog
+          sessionProjects={sessionProjects}
+          recentProjects={recentProjects}
+          activeProjectName={project.name}
+          activeProjectPath={projectPath}
+          onClose={() => setRecentProjectsDialogOpen(false)}
+          onOpenSessionProject={(snapshotId) => {
+            setRecentProjectsDialogOpen(false);
+            requestOpenSessionProject(snapshotId);
+          }}
+          onOpenRecent={(recent) => {
+            setRecentProjectsDialogOpen(false);
+            requestOpenRecentProject(recent);
+          }}
+          onRenameProject={(target) => {
+            setRecentProjectsDialogOpen(false);
+            setRenameProjectDialog(target);
+          }}
+          onDeleteProject={(target) => {
+            setRecentProjectsDialogOpen(false);
+            setDeleteProjectDialog(target);
           }}
         />
       ) : null}
@@ -1406,6 +1460,24 @@ export function App() {
     requestProjectOpen({ type: "recent", recent });
   }
 
+  function requestOpenProjectPath(path: string) {
+    requestProjectOpen({ type: "path", path });
+  }
+
+  async function requestOpenProjectFromShell() {
+    if (!hasTauriRuntimeSync()) {
+      setProjectDialog({ mode: "open", title: "Open Project", path: "" });
+      return;
+    }
+    try {
+      const selectedPath = await openNativeProjectFilePicker();
+      if (!selectedPath) return;
+      requestOpenProjectPath(selectedPath);
+    } catch (error) {
+      setProjectError(`Could not open native project picker: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   function requestProjectOpen(pending: PendingProjectOpen) {
     if (hasDirtyState) {
       setPendingWindowClose(false);
@@ -1422,8 +1494,10 @@ export function App() {
     }
     if (pending.type === "session") {
       openSessionProjectNow(pending.snapshotId);
-    } else {
+    } else if (pending.type === "recent") {
       await handleOpenProject(pending.recent.path);
+    } else {
+      await handleOpenProject(pending.path);
     }
   }
 
@@ -1431,6 +1505,7 @@ export function App() {
     const snapshot = createSessionProjectSnapshot();
     if (pending.type === "session" && pending.snapshotId === snapshot.id) return;
     if (pending.type === "recent" && pending.recent.path === projectPath) return;
+    if (pending.type === "path" && pending.path === projectPath) return;
     setSessionProjects((current) => upsertSessionProjectSnapshot(current, snapshot));
   }
 
@@ -1730,12 +1805,7 @@ function ResizeHandle({
 function ProjectExplorer(props: {
   groupedServices: Array<{ folder: string; items: ProjectService[] }>;
   project: RelayProject;
-  projectPath: string;
   projectDirty: boolean;
-  sessionProjects: SessionProjectSnapshot[];
-  recentProjects: RecentProject[];
-  projectMessage: string;
-  projectError: string | null;
   activeServiceId: string;
   onSelectService: (service: ProjectService) => void;
   onCreateRequest: () => void;
@@ -1745,33 +1815,16 @@ function ProjectExplorer(props: {
   onCreateFlow: () => void;
   onDeleteFlow: (flowId: string) => void;
   onRenameFlow: (flowId: string) => void;
-  onOpenSessionProject: (snapshotId: string) => void;
-  onOpenRecent: (recent: RecentProject) => void;
-  onRenameProject: (target: ProjectListTarget) => void;
-  onDeleteProject: (target: ProjectListTarget) => void;
-  onOpenImport: () => void;
-  onOpenSettings: () => void;
   onCreateProject: () => void;
   onOpenSavedResponse: (metadata: SavedResponseMetadata) => void;
 }) {
   const [contextMenu, setContextMenu] = useState<null | {
     x: number;
     y: number;
-    target: "requests" | "request" | "flows" | "flow" | "project";
+    target: "requests" | "request" | "flows" | "flow";
     serviceId?: string;
     flowId?: string;
-    projectTarget?: ProjectListTarget;
   }>(null);
-  const visibleSessionProjects = props.sessionProjects
-    .filter((snapshot) => !isActiveProjectListTarget(props.project.name, props.projectPath, snapshot.name, snapshot.path))
-    .slice(0, 5);
-  const visibleSessionProjectPaths = new Set(visibleSessionProjects.map((snapshot) => snapshot.path).filter(Boolean));
-  const visibleSessionProjectNames = new Set(visibleSessionProjects.map((snapshot) => snapshot.name.toLowerCase()));
-  const visibleRecentProjects = props.recentProjects.filter((recent) => (
-    !isActiveProjectListTarget(props.project.name, props.projectPath, recent.name, recent.path)
-      && !visibleSessionProjectPaths.has(recent.path)
-      && !visibleSessionProjectNames.has(recent.name.toLowerCase())
-  )).slice(0, Math.max(0, 5 - visibleSessionProjects.length));
 
   useEffect(() => {
     if (!contextMenu) return;
@@ -1800,11 +1853,6 @@ function ProjectExplorer(props: {
         <Search size={16} />
         <input placeholder="Search projects and requests" />
       </label>
-      <button type="button" className="import-callout" onClick={props.onOpenImport}>
-        <Database size={18} />
-        <span>No OpenAPI source linked</span>
-        <strong>Import API Docs</strong>
-      </button>
       <div className="tree-scroll">
         <TreeSection
           title="Requests"
@@ -1871,7 +1919,7 @@ function ProjectExplorer(props: {
             </button>
           ))}
         </TreeSection>
-        {contextMenu && contextMenu.target !== "project" ? (
+        {contextMenu ? (
           <div
             className="tree-context-menu"
             role="menu"
@@ -1961,60 +2009,121 @@ function ProjectExplorer(props: {
             </button>
           ))}
         </TreeSection>
-        <TreeSection title="Recent Projects" count={String(visibleSessionProjects.length + visibleRecentProjects.length)}>
-          {visibleSessionProjects.length ? visibleSessionProjects.map((snapshot) => (
-            <button
-              type="button"
-              className="tree-item recent-project"
-              key={snapshot.id}
-              onClick={() => props.onOpenSessionProject(snapshot.id)}
-              onContextMenu={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                setContextMenu({
-                  x: event.clientX,
-                  y: event.clientY,
-                  target: "project",
-                  projectTarget: { source: "session", id: snapshot.id, name: snapshot.name, path: snapshot.path }
-                });
-              }}
-            >
-              <FolderOpen size={15} />
-              <span className="recent-project-label">
-                <span>{snapshot.name}</span>
-                <em>{snapshot.path || "Unsaved session"}</em>
-              </span>
-            </button>
-          )) : null}
-          {visibleRecentProjects.length ? visibleRecentProjects.map((recent) => (
-            <button
-              type="button"
-              className="tree-item recent-project"
-              key={recent.path}
-              onClick={() => props.onOpenRecent(recent)}
-              onContextMenu={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                setContextMenu({
-                  x: event.clientX,
-                  y: event.clientY,
-                  target: "project",
-                  projectTarget: { source: "recent", name: recent.name, path: recent.path }
-                });
-              }}
-            >
-              <FolderOpen size={15} />
-              <span className="recent-project-label">
-                <span>{recent.name}</span>
-                <em>{recent.path}</em>
-              </span>
-            </button>
-          )) : null}
-          {!visibleSessionProjects.length && !visibleRecentProjects.length ? (
-            <span className="tree-empty">No recent projects yet.</span>
+      </div>
+    </aside>
+  );
+}
+
+function RecentProjectsDialog({
+  sessionProjects,
+  recentProjects,
+  activeProjectName,
+  activeProjectPath,
+  onClose,
+  onOpenSessionProject,
+  onOpenRecent,
+  onRenameProject,
+  onDeleteProject
+}: {
+  sessionProjects: SessionProjectSnapshot[];
+  recentProjects: RecentProject[];
+  activeProjectName: string;
+  activeProjectPath: string;
+  onClose: () => void;
+  onOpenSessionProject: (snapshotId: string) => void;
+  onOpenRecent: (recent: RecentProject) => void;
+  onRenameProject: (target: ProjectListTarget) => void;
+  onDeleteProject: (target: ProjectListTarget) => void;
+}) {
+  const [contextMenu, setContextMenu] = useState<null | {
+    x: number;
+    y: number;
+    target: ProjectListTarget;
+  }>(null);
+  const visibleSessionProjects = sessionProjects
+    .filter((snapshot) => !isActiveProjectListTarget(activeProjectName, activeProjectPath, snapshot.name, snapshot.path))
+    .slice(0, 5);
+  const visibleSessionProjectPaths = new Set(visibleSessionProjects.map((snapshot) => snapshot.path).filter(Boolean));
+  const visibleSessionProjectNames = new Set(visibleSessionProjects.map((snapshot) => snapshot.name.toLowerCase()));
+  const visibleRecentProjects = recentProjects.filter((recent) => (
+    !isActiveProjectListTarget(activeProjectName, activeProjectPath, recent.name, recent.path)
+      && !visibleSessionProjectPaths.has(recent.path)
+      && !visibleSessionProjectNames.has(recent.name.toLowerCase())
+  )).slice(0, Math.max(0, 10 - visibleSessionProjects.length));
+  const hasProjects = visibleSessionProjects.length > 0 || visibleRecentProjects.length > 0;
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    function closeContextMenu() {
+      setContextMenu(null);
+    }
+    window.addEventListener("click", closeContextMenu);
+    window.addEventListener("keydown", closeContextMenu);
+    return () => {
+      window.removeEventListener("click", closeContextMenu);
+      window.removeEventListener("keydown", closeContextMenu);
+    };
+  }, [contextMenu]);
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section className="project-file-dialog recent-projects-dialog" role="dialog" aria-modal="true" aria-label="Open Recent Projects" onMouseDown={(event) => event.stopPropagation()}>
+        <header>
+          <h2>Open Recent Projects</h2>
+          <button type="button" aria-label="Close recent projects" onClick={onClose}><X size={18} /></button>
+        </header>
+        <div className="recent-project-picker">
+          {visibleSessionProjects.length ? (
+            <>
+              <strong>Open workspaces</strong>
+              {visibleSessionProjects.map((snapshot) => (
+                <button
+                  type="button"
+                  key={snapshot.id}
+                  onClick={() => onOpenSessionProject(snapshot.id)}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    setContextMenu({
+                      x: event.clientX,
+                      y: event.clientY,
+                      target: { source: "session", id: snapshot.id, name: snapshot.name, path: snapshot.path }
+                    });
+                  }}
+                >
+                  <FolderOpen size={15} />
+                  <span>{snapshot.name}</span>
+                  <em>{snapshot.path || "Unsaved session"}</em>
+                </button>
+              ))}
+            </>
           ) : null}
-        </TreeSection>
-        {contextMenu?.target === "project" && contextMenu.projectTarget ? (
+          {visibleRecentProjects.length ? (
+            <>
+              <strong>Recent files</strong>
+              {visibleRecentProjects.map((recent) => (
+                <button
+                  type="button"
+                  key={recent.path}
+                  onClick={() => onOpenRecent(recent)}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    setContextMenu({
+                      x: event.clientX,
+                      y: event.clientY,
+                      target: { source: "recent", name: recent.name, path: recent.path }
+                    });
+                  }}
+                >
+                  <FolderOpen size={15} />
+                  <span>{recent.name}</span>
+                  <em>{recent.path}</em>
+                </button>
+              ))}
+            </>
+          ) : null}
+          {!hasProjects ? <p className="empty-inline">No recent projects yet.</p> : null}
+        </div>
+        {contextMenu ? (
           <div
             className="tree-context-menu"
             role="menu"
@@ -2023,28 +2132,53 @@ function ProjectExplorer(props: {
             onClick={(event) => event.stopPropagation()}
           >
             <button type="button" role="menuitem" onClick={() => {
-              const target = contextMenu.projectTarget as ProjectListTarget;
+              const target = contextMenu.target;
               setContextMenu(null);
-              props.onRenameProject(target);
+              onRenameProject(target);
             }}>
               <Pencil size={14} />
               <span>Rename Project</span>
             </button>
             <button type="button" role="menuitem" className="danger" onClick={() => {
-              const target = contextMenu.projectTarget as ProjectListTarget;
+              const target = contextMenu.target;
               setContextMenu(null);
-              props.onDeleteProject(target);
+              onDeleteProject(target);
             }}>
               <Trash2 size={14} />
               <span>Delete Project</span>
             </button>
           </div>
         ) : null}
-      </div>
-      <div className={props.projectError ? "project-status error" : "project-status"}>
-        {props.projectError ?? props.projectMessage}
-      </div>
-    </aside>
+      </section>
+    </div>
+  );
+}
+
+function StatusBar({
+  projectName,
+  dirty,
+  message,
+  error,
+  explorerOpen,
+  inspectorOpen,
+  responseDockOpen
+}: {
+  projectName: string;
+  dirty: boolean;
+  message: string;
+  error: boolean;
+  explorerOpen: boolean;
+  inspectorOpen: boolean;
+  responseDockOpen: boolean;
+}) {
+  return (
+    <footer className={error ? "status-bar error" : "status-bar"} aria-label="Status bar">
+      <span>{projectName}{dirty ? " *" : ""}</span>
+      <strong>{message}</strong>
+      <span>Sidebar {explorerOpen ? "shown" : "hidden"}</span>
+      <span>Inspector {inspectorOpen ? "shown" : "hidden"}</span>
+      <span>Dock {responseDockOpen ? "shown" : "hidden"}</span>
+    </footer>
   );
 }
 
@@ -3696,6 +3830,9 @@ function BottomDock(props: {
 function Inspector({
   environment,
   activeTab,
+  activeService,
+  activeFlow,
+  runnerResponse,
   onAddVariable,
   onClose,
   onDeleteVariable,
@@ -3703,6 +3840,9 @@ function Inspector({
 }: {
   environment: ProjectEnvironment | undefined;
   activeTab: WorkbenchTab;
+  activeService: ProjectService | undefined;
+  activeFlow: ProjectFlow | undefined;
+  runnerResponse: ExecutedResponse | null;
   onAddVariable: () => void;
   onClose: () => void;
   onDeleteVariable: (index: number) => void;
@@ -3720,45 +3860,73 @@ function Inspector({
         <button type="button" className="active">Inspector</button>
         <button type="button" aria-label="Hide inspector" onClick={onClose}><X size={16} /></button>
       </div>
-      <section className="inspector-variables-panel">
-        <h2>Variables</h2>
-        <label className="filter-field">
-          <Search size={15} />
-          <input
-            aria-label="Filter variables"
-            placeholder="Filter variables"
-            value={variableFilter}
-            onChange={(event) => setVariableFilter(event.target.value)}
-          />
-        </label>
-        {visibleVariables.length ? visibleVariables.map(({ variable, index }) => (
-          <VariableRow
-            key={`${variable.name}-${index}`}
-            index={index}
-            variable={variable}
-            onDelete={onDeleteVariable}
-            onUpdate={onUpdateVariable}
-          />
-        )) : <p className="empty-inline">No variables match the filter.</p>}
-        <button type="button" className="secondary-full" onClick={onAddVariable}><Plus size={16} /> Add Variable</button>
-      </section>
-      <section>
-        <h2>Auth Snapshot</h2>
-        <div className="snapshot-grid">
-          <span>Type</span><strong>Bearer Token</strong>
-          <span>Token</span><strong>{variables.some((variable) => variable.name === "accessToken") ? "{{accessToken}}" : "Not configured"}</strong>
-          <span>Status</span><strong className="ready-text">Ready</strong>
-        </div>
-      </section>
-      <section>
-        <h2>Request Summary</h2>
-        <div className="snapshot-grid">
-          <span>Editor</span><strong>{activeTab.label}</strong>
-          <span>Method</span><strong>{activeTab.method ?? "N/A"}</strong>
-          <span>Headers</span><strong>2</strong>
-          <span>Body</span><strong>application/json</strong>
-        </div>
-      </section>
+      {activeTab.kind === "request" ? (
+        <>
+          <section className="inspector-variables-panel">
+            <h2>Variables</h2>
+            <label className="filter-field">
+              <Search size={15} />
+              <input
+                aria-label="Filter variables"
+                placeholder="Filter variables"
+                value={variableFilter}
+                onChange={(event) => setVariableFilter(event.target.value)}
+              />
+            </label>
+            {visibleVariables.length ? visibleVariables.map(({ variable, index }) => (
+              <VariableRow
+                key={`${variable.name}-${index}`}
+                index={index}
+                variable={variable}
+                onDelete={onDeleteVariable}
+                onUpdate={onUpdateVariable}
+              />
+            )) : <p className="empty-inline">No variables match the filter.</p>}
+            <button type="button" className="secondary-full" onClick={onAddVariable}><Plus size={16} /> Add Variable</button>
+          </section>
+          <section>
+            <h2>Request Summary</h2>
+            <div className="snapshot-grid">
+              <span>Editor</span><strong>{activeService?.name ?? activeTab.label}</strong>
+              <span>Method</span><strong>{activeService?.method ?? activeTab.method ?? "N/A"}</strong>
+              <span>Auth</span><strong>{activeService ? authLabel(activeService.authProfile.type) : "N/A"}</strong>
+              <span>Environment</span><strong>{environment?.name ?? "No environment"}</strong>
+            </div>
+          </section>
+        </>
+      ) : null}
+      {activeTab.kind === "flow" ? (
+        <section>
+          <h2>Flow Summary</h2>
+          <div className="snapshot-grid">
+            <span>Flow</span><strong>{activeFlow?.name ?? activeTab.label}</strong>
+            <span>Steps</span><strong>{activeFlow?.nodes.length ?? 0}</strong>
+            <span>Routes</span><strong>{activeFlow?.edges.length ?? 0}</strong>
+            <span>Mappings</span><strong>{activeFlow?.mappings.length ?? 0}</strong>
+          </div>
+        </section>
+      ) : null}
+      {activeTab.kind === "response" ? (
+        <section>
+          <h2>Response Summary</h2>
+          <div className="snapshot-grid">
+            <span>Status</span><strong>{runnerResponse ? `${runnerResponse.status} ${runnerResponse.statusText}` : "Not loaded"}</strong>
+            <span>Timing</span><strong>{runnerResponse ? `${runnerResponse.durationMs} ms` : "N/A"}</strong>
+            <span>Size</span><strong>{runnerResponse ? formatResponseSize(runnerResponse.rawBody) : "N/A"}</strong>
+            <span>Body</span><strong>{runnerResponse?.contentType ?? "N/A"}</strong>
+          </div>
+        </section>
+      ) : null}
+      {activeTab.kind === "welcome" || activeTab.kind === "settings" || activeTab.kind === "import" ? (
+        <section>
+          <h2>Shell Context</h2>
+          <div className="snapshot-grid">
+            <span>Tab</span><strong>{activeTab.label}</strong>
+            <span>Editor</span><strong>{activeTab.kind}</strong>
+            <span>Environment</span><strong>{environment?.name ?? "No environment"}</strong>
+          </div>
+        </section>
+      ) : null}
     </aside>
   );
 }
@@ -3856,12 +4024,11 @@ function positionsEqual(first: FlowNodePosition, second: FlowNodePosition): bool
   return Math.abs(first.x - second.x) < 0.5 && Math.abs(first.y - second.y) < 0.5;
 }
 
-function contextMenuLabel(target: "requests" | "request" | "flows" | "flow" | "project"): string {
+function contextMenuLabel(target: "requests" | "request" | "flows" | "flow"): string {
   if (target === "requests") return "Requests context menu";
   if (target === "request") return "Request context menu";
   if (target === "flows") return "Flows context menu";
-  if (target === "flow") return "Flow context menu";
-  return "Project context menu";
+  return "Flow context menu";
 }
 
 function createDefaultTabsForProject(project: RelayProject): WorkbenchTab[] {
@@ -4288,10 +4455,12 @@ function upsertSessionProjectSnapshot(
 }
 
 function SavePrompt({
+  projectName,
   onCancel,
   onDiscard,
   onSave
 }: {
+  projectName: string;
   onCancel: () => void;
   onDiscard: () => void;
   onSave: () => void;
@@ -4303,7 +4472,7 @@ function SavePrompt({
           <strong>Unsaved changes</strong>
           <button type="button" aria-label="Close prompt" onClick={onCancel}><X size={17} /></button>
         </header>
-        <p>Sample API Regression has unsaved service and flow edits.</p>
+        <p>{projectName} has unsaved service and flow edits.</p>
         <div>
           <button type="button" className="primary-command" onClick={onSave}>Save And Continue</button>
           <button type="button" onClick={onDiscard}>Do Not Save</button>

@@ -27,6 +27,7 @@ This folder contains the first implementation slice for Relay Studio: reviewable
 - [sprint-8a-user-test-script.md](sprint-8a-user-test-script.md): human QA script for first-time flow authoring and debugging.
 - [sprint-8b-implementation-status.md](sprint-8b-implementation-status.md): delivered Sprint 8B desktop density pass, compact shell sizing, native fonts, and density regression coverage.
 - [sprint-9a-implementation-status.md](sprint-9a-implementation-status.md): delivered Sprint 9A platform shell contract, shared command model, native menu wiring, and shell verification evidence.
+- [sprint-9b-implementation-status.md](sprint-9b-implementation-status.md): delivered Sprint 9B platform navigation and command surfaces, including simplified Explorer ownership, command-surface Recent Projects, status bar messaging, contextual inspector content, and verification evidence.
 - [visual-target.md](visual-target.md): selected Concept 3 visual direction and implementation guardrails.
 - [live-rest-acceptance-test-matrix.md](live-rest-acceptance-test-matrix.md): configurable live REST acceptance suite.
 - [mockups/index.html](mockups/index.html): static full-app mockup set.

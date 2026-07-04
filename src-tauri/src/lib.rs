@@ -15,6 +15,7 @@ const MENU_APP_SEARCH_COMMANDS: &str = "app.search_commands";
 const MENU_APP_OPEN_SETTINGS: &str = "app.open_settings";
 const MENU_FILE_NEW_PROJECT: &str = "file.new_project";
 const MENU_OPEN_PROJECT: &str = "file.open_project";
+const MENU_SHOW_RECENT_PROJECTS: &str = "file.show_recent_projects";
 const MENU_OPEN_RECENT_PREFIX: &str = "file.open_recent.";
 const MENU_FILE_SAVE_PROJECT: &str = "file.save_project";
 const MENU_FILE_SAVE_PROJECT_AS: &str = "file.save_project_as";
@@ -155,6 +156,7 @@ fn response_file_exists(path: String) -> Result<bool, String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             app_version,
             save_project_file,
@@ -222,6 +224,10 @@ fn set_app_menu(app: &tauri::AppHandle, state: &ShellMenuState) -> Result<(), St
         .accelerator("CmdOrCtrl+O")
         .build(app)
         .map_err(|error| format!("Could not build open project menu item: {error}"))?;
+    let show_recent_projects =
+        MenuItemBuilder::with_id(MENU_SHOW_RECENT_PROJECTS, "Open Recent Projects...")
+            .build(app)
+            .map_err(|error| format!("Could not build open recent projects menu item: {error}"))?;
     let save_project = MenuItemBuilder::with_id(MENU_FILE_SAVE_PROJECT, "Save Project")
         .accelerator("CmdOrCtrl+S")
         .enabled(state.can_save_project)
@@ -277,6 +283,7 @@ fn set_app_menu(app: &tauri::AppHandle, state: &ShellMenuState) -> Result<(), St
     let mut file_menu_builder = SubmenuBuilder::new(app, "File")
         .item(&new_project)
         .item(&open_project)
+        .item(&show_recent_projects)
         .item(&recent_menu)
         .separator()
         .item(&save_project)
@@ -354,27 +361,35 @@ fn set_app_menu(app: &tauri::AppHandle, state: &ShellMenuState) -> Result<(), St
 }
 
 fn handle_app_menu_event(app: &tauri::AppHandle, id: &str) {
+    let recent_projects = if id.starts_with(MENU_OPEN_RECENT_PREFIX) {
+        read_recent_projects().unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    if let Some(payload) = shell_command_payload_for_menu_id(id, &recent_projects) {
+        let _ = app.emit(SHELL_COMMAND_EVENT, payload);
+    }
+}
+
+fn shell_command_payload_for_menu_id(
+    id: &str,
+    recent_projects: &[RecentProject],
+) -> Option<ShellCommandEventPayload> {
     if is_shell_command_menu_id(id) {
-        let payload = ShellCommandEventPayload {
+        return Some(ShellCommandEventPayload {
             id: id.to_string(),
             recent_project: None,
-        };
-        let _ = app.emit(SHELL_COMMAND_EVENT, payload);
-        return;
+        });
     }
-    if let Some(index_text) = id.strip_prefix(MENU_OPEN_RECENT_PREFIX) {
-        if let Ok(index) = index_text.parse::<usize>() {
-            if let Ok(recent_projects) = read_recent_projects() {
-                if let Some(project) = recent_projects.get(index) {
-                    let payload = ShellCommandEventPayload {
-                        id: "file.open_recent".to_string(),
-                        recent_project: Some(project.clone()),
-                    };
-                    let _ = app.emit(SHELL_COMMAND_EVENT, payload);
-                }
-            }
-        }
-    }
+    let index_text = id.strip_prefix(MENU_OPEN_RECENT_PREFIX)?;
+    let index = index_text.parse::<usize>().ok()?;
+    recent_projects
+        .get(index)
+        .cloned()
+        .map(|project| ShellCommandEventPayload {
+            id: format!("{MENU_OPEN_RECENT_PREFIX}{index}"),
+            recent_project: Some(project),
+        })
 }
 
 fn is_shell_command_menu_id(id: &str) -> bool {
@@ -384,6 +399,7 @@ fn is_shell_command_menu_id(id: &str) -> bool {
             | MENU_APP_OPEN_SETTINGS
             | MENU_FILE_NEW_PROJECT
             | MENU_OPEN_PROJECT
+            | MENU_SHOW_RECENT_PROJECTS
             | MENU_FILE_SAVE_PROJECT
             | MENU_FILE_SAVE_PROJECT_AS
             | MENU_WINDOW_CLOSE_ACTIVE_TAB
@@ -971,5 +987,48 @@ mod tests {
         assert!(is_shell_command_menu_id(MENU_VIEW_TOGGLE_INSPECTOR));
         assert!(!is_shell_command_menu_id("file.open_recent.0"));
         assert!(!is_shell_command_menu_id("unknown"));
+    }
+
+    #[test]
+    fn shell_menu_payloads_cover_app_owned_menu_items() {
+        let command_ids = [
+            MENU_APP_SEARCH_COMMANDS,
+            MENU_APP_OPEN_SETTINGS,
+            MENU_FILE_NEW_PROJECT,
+            MENU_OPEN_PROJECT,
+            MENU_SHOW_RECENT_PROJECTS,
+            MENU_FILE_SAVE_PROJECT,
+            MENU_FILE_SAVE_PROJECT_AS,
+            MENU_WINDOW_CLOSE_ACTIVE_TAB,
+            MENU_WINDOW_CLOSE_WINDOW,
+            MENU_REQUEST_SEND_ACTIVE,
+            MENU_FLOW_RUN_ACTIVE,
+            MENU_VIEW_TOGGLE_EXPLORER,
+            MENU_VIEW_TOGGLE_INSPECTOR,
+            MENU_VIEW_TOGGLE_RESPONSE_DOCK,
+        ];
+
+        for id in command_ids {
+            let payload = shell_command_payload_for_menu_id(id, &[])
+                .unwrap_or_else(|| panic!("Missing payload for menu id {id}"));
+            assert_eq!(payload.id, id);
+            assert_eq!(payload.recent_project, None);
+        }
+    }
+
+    #[test]
+    fn shell_menu_payloads_route_recent_project_submenu_items() {
+        let recent_projects = vec![RecentProject {
+            name: "Test Project 4".to_string(),
+            path: "/private/tmp/test-project-4.restproj".to_string(),
+            opened_at: "2026-06-27T22:36:08.277Z".to_string(),
+        }];
+
+        let payload = shell_command_payload_for_menu_id("file.open_recent.0", &recent_projects)
+            .expect("recent project payload");
+        assert_eq!(payload.id, "file.open_recent.0");
+        assert_eq!(payload.recent_project, Some(recent_projects[0].clone()));
+        assert!(shell_command_payload_for_menu_id("file.open_recent.1", &recent_projects).is_none());
+        assert!(shell_command_payload_for_menu_id("file.open_recent.foo", &recent_projects).is_none());
     }
 }

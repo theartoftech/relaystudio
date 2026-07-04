@@ -8,6 +8,7 @@ export type ShellCommandId =
   | "app.open_settings"
   | "file.new_project"
   | "file.open_project"
+  | "file.show_recent_projects"
   | "file.open_recent"
   | "file.save_project"
   | "file.save_project_as"
@@ -18,6 +19,9 @@ export type ShellCommandId =
   | "view.toggle_explorer"
   | "view.toggle_inspector"
   | "view.toggle_response_dock";
+
+export type RecentProjectMenuCommandId = `file.open_recent.${number}`;
+export type NativeShellCommandId = ShellCommandId | RecentProjectMenuCommandId;
 
 export interface ShellCommandContext {
   activeTabKind: ShellCommandTabKind;
@@ -56,7 +60,7 @@ export interface NativeShellMenuState {
 }
 
 export interface ShellCommandEventPayload {
-  id: ShellCommandId;
+  id: NativeShellCommandId;
   recentProject?: RecentProject;
 }
 
@@ -74,6 +78,7 @@ const shellCommandDefinitions: ShellCommandDefinition[] = [
   command("file.open_project", "Open Project", {
     shortcut: "CmdOrCtrl+O"
   }),
+  command("file.show_recent_projects", "Open Recent Projects"),
   command("file.open_recent", "Open Recent", {
     visible: () => false
   }),
@@ -138,6 +143,14 @@ export function createNativeShellMenuState(context: ShellCommandContext): Native
     inspectorOpen: context.inspectorOpen,
     responseDockOpen: context.responseDockOpen
   };
+}
+
+export function parseRecentProjectMenuIndex(id: string): number | null {
+  const match = /^file\.open_recent\.(\d+)$/.exec(id);
+  if (!match) {
+    return null;
+  }
+  return Number.parseInt(match[1], 10);
 }
 
 export function getPrimaryExecutionCommand(context: ShellCommandContext): ShellPaletteCommand | null {

@@ -247,6 +247,7 @@ Exit criteria:
 - Shared backlog items 5, 6, 7
 - macOS backlog item 8
 - Windows backlog item 9
+- Implementation status: see `sprint-9b-implementation-status.md`.
 
 Exit criteria:
 

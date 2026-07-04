@@ -2,6 +2,7 @@ import {
   createNativeShellMenuState,
   getCommandPaletteCommands,
   getPrimaryExecutionCommand,
+  parseRecentProjectMenuIndex,
   type ShellCommandContext
 } from "./shellCommands";
 
@@ -12,6 +13,7 @@ describe("shellCommands", () => {
     const settingsCommands = getCommandPaletteCommands(context({ activeTabKind: "settings" })).map((command) => command.label);
 
     expect(requestCommands).toContain("Send Request");
+    expect(requestCommands).toContain("Open Recent Projects");
     expect(requestCommands).not.toContain("Run Flow");
     expect(flowCommands).toContain("Run Flow");
     expect(flowCommands).not.toContain("Send Request");
@@ -55,6 +57,13 @@ describe("shellCommands", () => {
       inspectorOpen: true,
       responseDockOpen: true
     });
+  });
+
+  it("parses indexed recent-project menu ids", () => {
+    expect(parseRecentProjectMenuIndex("file.open_recent.0")).toBe(0);
+    expect(parseRecentProjectMenuIndex("file.open_recent.9")).toBe(9);
+    expect(parseRecentProjectMenuIndex("file.open_recent")).toBeNull();
+    expect(parseRecentProjectMenuIndex("file.open_recent.foo")).toBeNull();
   });
 });
 
