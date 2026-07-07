@@ -18,7 +18,8 @@ export type ShellCommandId =
   | "flow.run_active"
   | "view.toggle_explorer"
   | "view.toggle_inspector"
-  | "view.toggle_response_dock";
+  | "view.toggle_response_dock"
+  | "view.toggle_flow_details";
 
 export type RecentProjectMenuCommandId = `file.open_recent.${number}`;
 export type NativeShellCommandId = ShellCommandId | RecentProjectMenuCommandId;
@@ -31,6 +32,7 @@ export interface ShellCommandContext {
   explorerOpen: boolean;
   inspectorOpen: boolean;
   responseDockOpen: boolean;
+  flowDetailsOpen: boolean;
 }
 
 export interface ShellCommandDefinition {
@@ -57,6 +59,7 @@ export interface NativeShellMenuState {
   explorerOpen: boolean;
   inspectorOpen: boolean;
   responseDockOpen: boolean;
+  flowDetailsOpen: boolean;
 }
 
 export interface ShellCommandEventPayload {
@@ -109,6 +112,9 @@ const shellCommandDefinitions: ShellCommandDefinition[] = [
   command("view.toggle_inspector", "Toggle Inspector"),
   command("view.toggle_response_dock", "Toggle Response Dock", {
     visible: (context) => !["welcome", "settings", "import"].includes(context.activeTabKind)
+  }),
+  command("view.toggle_flow_details", "Toggle Flow Details", {
+    visible: (context) => context.activeTabKind === "flow"
   })
 ];
 
@@ -141,7 +147,8 @@ export function createNativeShellMenuState(context: ShellCommandContext): Native
     canRunFlow: getCommandDefinition("flow.run_active").visible(context) && getCommandDefinition("flow.run_active").enabled(context),
     explorerOpen: context.explorerOpen,
     inspectorOpen: context.inspectorOpen,
-    responseDockOpen: context.responseDockOpen
+    responseDockOpen: context.responseDockOpen,
+    flowDetailsOpen: context.flowDetailsOpen
   };
 }
 

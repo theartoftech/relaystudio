@@ -133,17 +133,75 @@ export interface RelayProject {
   flows: ProjectFlow[];
   savedResponses: SavedResponseMetadata[];
   importSources: Array<{ id: string; label: string; source: string }>;
-  settings: {
-    defaultEnvironmentId: string;
-    askToSaveOnClose: boolean;
-    redactSecretsInConsole: boolean;
-  };
+  settings: ProjectSettings;
+}
+
+export type HttpVersionPreference = "auto" | "http1" | "http2";
+export type ResponseFormatDetection = "auto" | "json";
+export type ThemePreference = "light" | "dark";
+
+export interface ProxySettings {
+  enabled: boolean;
+  useForHttp: boolean;
+  useForHttps: boolean;
+  serverUrl: string;
+  port: number;
+  basicAuthEnabled: boolean;
+  username: string;
+  password: string;
+  bypassList: string;
+}
+
+export interface ProjectSettings {
+  defaultEnvironmentId: string;
+  askToSaveOnClose: boolean;
+  askBeforeClosingUnsavedTabs: boolean;
+  redactSecretsInConsole: boolean;
+  httpVersion: HttpVersionPreference;
+  requestTimeoutMs: number;
+  maxResponseTimeMs: number;
+  sslCertificateVerification: boolean;
+  sslTlsKeyLog: boolean;
+  disableCookies: boolean;
+  responseFormatDetection: ResponseFormatDetection;
+  workingDirectory: string;
+  theme: ThemePreference;
+  proxy: ProxySettings;
 }
 
 export interface RecentProject {
   name: string;
   path: string;
   openedAt: string;
+}
+
+export function createDefaultProjectSettings(defaultEnvironmentId = "qa"): ProjectSettings {
+  return {
+    defaultEnvironmentId,
+    askToSaveOnClose: true,
+    askBeforeClosingUnsavedTabs: true,
+    redactSecretsInConsole: true,
+    httpVersion: "auto",
+    requestTimeoutMs: 30_000,
+    maxResponseTimeMs: 60_000,
+    sslCertificateVerification: true,
+    sslTlsKeyLog: false,
+    disableCookies: false,
+    responseFormatDetection: "auto",
+    workingDirectory: "/private/tmp",
+    theme: "light",
+    proxy: {
+      enabled: false,
+      useForHttp: true,
+      useForHttps: true,
+      serverUrl: "",
+      port: 8080,
+      basicAuthEnabled: false,
+      username: "",
+      password: "",
+      bypassList: "localhost,127.0.0.1"
+    }
+  };
 }
 
 function service(input: {
@@ -394,11 +452,7 @@ export function createSampleProject(now = new Date().toISOString()): RelayProjec
       }
     ],
     importSources: [],
-    settings: {
-      defaultEnvironmentId: "qa",
-      askToSaveOnClose: true,
-      redactSecretsInConsole: true
-    }
+    settings: createDefaultProjectSettings("qa")
   };
 }
 

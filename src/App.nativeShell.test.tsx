@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { createSampleProject } from "./project/projectModel";
@@ -105,6 +105,22 @@ describe("Relay Studio native shell commands", () => {
 
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Test Project 4" })).toBeInTheDocument();
+    });
+    expect(nativeMocks.invoke).toHaveBeenCalledWith("open_project_file", { path: testProjectPath });
+  });
+
+  it("opens a recent project from the command palette recent-project dialog", async () => {
+    render(<App />);
+
+    await screen.findByRole("button", { name: /Search commands/i });
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Command palette" })).getByRole("button", { name: /Open Recent Projects/i }));
+    const recentDialog = await screen.findByRole("dialog", { name: "Open Recent Projects" });
+    fireEvent.click(await within(recentDialog).findByRole("button", { name: /Test Project 4/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Test Project 4" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Project 4 Health/i })).toBeInTheDocument();
     });
     expect(nativeMocks.invoke).toHaveBeenCalledWith("open_project_file", { path: testProjectPath });
   });

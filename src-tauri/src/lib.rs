@@ -26,6 +26,7 @@ const MENU_FLOW_RUN_ACTIVE: &str = "flow.run_active";
 const MENU_VIEW_TOGGLE_EXPLORER: &str = "view.toggle_explorer";
 const MENU_VIEW_TOGGLE_INSPECTOR: &str = "view.toggle_inspector";
 const MENU_VIEW_TOGGLE_RESPONSE_DOCK: &str = "view.toggle_response_dock";
+const MENU_VIEW_TOGGLE_FLOW_DETAILS: &str = "view.toggle_flow_details";
 const SHELL_COMMAND_EVENT: &str = "relay-shell-command";
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
@@ -44,6 +45,25 @@ struct HttpRequestInput {
     headers: HashMap<String, String>,
     body: Option<String>,
     timeout_ms: u64,
+    http_version: Option<String>,
+    ssl_certificate_verification: Option<bool>,
+    ssl_tls_key_log: Option<bool>,
+    disable_cookies: Option<bool>,
+    proxy: Option<ProxySettingsInput>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProxySettingsInput {
+    enabled: bool,
+    use_for_http: bool,
+    use_for_https: bool,
+    server_url: String,
+    port: u16,
+    basic_auth_enabled: bool,
+    username: String,
+    password: String,
+    bypass_list: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -75,6 +95,7 @@ struct ShellMenuState {
     explorer_open: bool,
     inspector_open: bool,
     response_dock_open: bool,
+    flow_details_open: bool,
 }
 
 #[tauri::command]
@@ -279,6 +300,15 @@ fn set_app_menu(app: &tauri::AppHandle, state: &ShellMenuState) -> Result<(), St
     .checked(state.response_dock_open)
     .build(app)
     .map_err(|error| format!("Could not build response dock toggle menu item: {error}"))?;
+    let toggle_flow_details = CheckMenuItemBuilder::with_id(
+        MENU_VIEW_TOGGLE_FLOW_DETAILS,
+        "Toggle Flow Details",
+    )
+    .accelerator("CmdOrCtrl+Alt+4")
+    .enabled(shell_menu_supports_flow_details(state))
+    .checked(state.flow_details_open)
+    .build(app)
+    .map_err(|error| format!("Could not build flow details toggle menu item: {error}"))?;
 
     let mut file_menu_builder = SubmenuBuilder::new(app, "File")
         .item(&new_project)
@@ -314,6 +344,7 @@ fn set_app_menu(app: &tauri::AppHandle, state: &ShellMenuState) -> Result<(), St
         .item(&toggle_explorer)
         .item(&toggle_inspector)
         .item(&toggle_response_dock)
+        .item(&toggle_flow_details)
         .build()
         .map_err(|error| format!("Could not build view menu: {error}"))?;
     let window_menu = SubmenuBuilder::new(app, "Window")
@@ -409,6 +440,7 @@ fn is_shell_command_menu_id(id: &str) -> bool {
             | MENU_VIEW_TOGGLE_EXPLORER
             | MENU_VIEW_TOGGLE_INSPECTOR
             | MENU_VIEW_TOGGLE_RESPONSE_DOCK
+            | MENU_VIEW_TOGGLE_FLOW_DETAILS
     )
 }
 
@@ -419,6 +451,60 @@ fn shell_menu_supports_response_dock(state: &ShellMenuState) -> bool {
     )
 }
 
+fn shell_menu_supports_flow_details(state: &ShellMenuState) -> bool {
+    state.active_tab_kind == "flow"
+}
+
+fn apply_proxy_settings(
+    mut builder: reqwest::ClientBuilder,
+    proxy: Option<&ProxySettingsInput>,
+) -> Result<reqwest::ClientBuilder, String> {
+    let Some(proxy_settings) = proxy else {
+        return Ok(builder);
+    };
+    if !proxy_settings.enabled || proxy_settings.server_url.trim().is_empty() {
+        return Ok(builder);
+    }
+    let endpoint = proxy_endpoint(proxy_settings);
+    if proxy_settings.use_for_http && proxy_settings.use_for_https {
+        return Ok(builder.proxy(build_proxy(&endpoint, proxy_settings, "all")?));
+    }
+    if proxy_settings.use_for_http {
+        builder = builder.proxy(build_proxy(&endpoint, proxy_settings, "http")?);
+    }
+    if proxy_settings.use_for_https {
+        builder = builder.proxy(build_proxy(&endpoint, proxy_settings, "https")?);
+    }
+    Ok(builder)
+}
+
+fn build_proxy(
+    endpoint: &str,
+    settings: &ProxySettingsInput,
+    scope: &str,
+) -> Result<reqwest::Proxy, String> {
+    let proxy = match scope {
+        "http" => reqwest::Proxy::http(endpoint),
+        "https" => reqwest::Proxy::https(endpoint),
+        _ => reqwest::Proxy::all(endpoint),
+    }
+    .map_err(|error| format!("Invalid proxy configuration: {error}"))?;
+    if settings.basic_auth_enabled {
+        Ok(proxy.basic_auth(&settings.username, &settings.password))
+    } else {
+        Ok(proxy)
+    }
+}
+
+fn proxy_endpoint(settings: &ProxySettingsInput) -> String {
+    let server = settings.server_url.trim();
+    if server.contains("://") {
+        server.to_string()
+    } else {
+        format!("http://{}:{}", server, settings.port)
+    }
+}
+
 async fn execute_http_request_impl(
     request: HttpRequestInput,
 ) -> Result<HttpResponseOutput, String> {
@@ -426,8 +512,16 @@ async fn execute_http_request_impl(
 
     let method = reqwest::Method::from_bytes(request.method.as_bytes())
         .map_err(|_| format!("Unsupported HTTP method: {}", request.method))?;
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_millis(request.timeout_ms))
+    let mut client_builder = reqwest::Client::builder()
+        .timeout(Duration::from_millis(request.timeout_ms));
+    if request.ssl_certificate_verification == Some(false) {
+        client_builder = client_builder.danger_accept_invalid_certs(true);
+    }
+    if request.http_version.as_deref() == Some("http1") {
+        client_builder = client_builder.http1_only();
+    }
+    client_builder = apply_proxy_settings(client_builder, request.proxy.as_ref())?;
+    let client = client_builder
         .build()
         .map_err(|error| format!("Could not create HTTP client: {error}"))?;
 
@@ -827,26 +921,14 @@ mod tests {
 
     #[test]
     fn http_request_validation_accepts_supported_requests() {
-        let request = HttpRequestInput {
-            method: "GET".to_string(),
-            url: "https://api.example.com/api/health".to_string(),
-            headers: HashMap::new(),
-            body: None,
-            timeout_ms: 30_000,
-        };
+        let request = test_http_request("GET", "https://api.example.com/api/health");
 
         assert!(validate_http_request(&request).is_ok());
     }
 
     #[test]
     fn http_request_validation_rejects_unsupported_inputs() {
-        let mut request = HttpRequestInput {
-            method: "PATCH".to_string(),
-            url: "https://api.example.com/api/health".to_string(),
-            headers: HashMap::new(),
-            body: None,
-            timeout_ms: 30_000,
-        };
+        let mut request = test_http_request("PATCH", "https://api.example.com/api/health");
 
         assert_eq!(
             validate_http_request(&request).expect_err("unsupported method"),
@@ -982,9 +1064,25 @@ mod tests {
     }
 
     #[test]
+    fn shell_menu_enables_flow_details_only_for_flow_tabs() {
+        let hidden_state = ShellMenuState {
+            active_tab_kind: "request".to_string(),
+            ..ShellMenuState::default()
+        };
+        let visible_state = ShellMenuState {
+            active_tab_kind: "flow".to_string(),
+            ..ShellMenuState::default()
+        };
+
+        assert!(!shell_menu_supports_flow_details(&hidden_state));
+        assert!(shell_menu_supports_flow_details(&visible_state));
+    }
+
+    #[test]
     fn shell_menu_recognizes_contract_command_ids() {
         assert!(is_shell_command_menu_id(MENU_FILE_SAVE_PROJECT));
         assert!(is_shell_command_menu_id(MENU_VIEW_TOGGLE_INSPECTOR));
+        assert!(is_shell_command_menu_id(MENU_VIEW_TOGGLE_FLOW_DETAILS));
         assert!(!is_shell_command_menu_id("file.open_recent.0"));
         assert!(!is_shell_command_menu_id("unknown"));
     }
@@ -1006,6 +1104,7 @@ mod tests {
             MENU_VIEW_TOGGLE_EXPLORER,
             MENU_VIEW_TOGGLE_INSPECTOR,
             MENU_VIEW_TOGGLE_RESPONSE_DOCK,
+            MENU_VIEW_TOGGLE_FLOW_DETAILS,
         ];
 
         for id in command_ids {
@@ -1030,5 +1129,20 @@ mod tests {
         assert_eq!(payload.recent_project, Some(recent_projects[0].clone()));
         assert!(shell_command_payload_for_menu_id("file.open_recent.1", &recent_projects).is_none());
         assert!(shell_command_payload_for_menu_id("file.open_recent.foo", &recent_projects).is_none());
+    }
+
+    fn test_http_request(method: &str, url: &str) -> HttpRequestInput {
+        HttpRequestInput {
+            method: method.to_string(),
+            url: url.to_string(),
+            headers: HashMap::new(),
+            body: None,
+            timeout_ms: 30_000,
+            http_version: None,
+            ssl_certificate_verification: None,
+            ssl_tls_key_log: None,
+            disable_cookies: None,
+            proxy: None,
+        }
     }
 }

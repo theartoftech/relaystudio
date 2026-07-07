@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { KeyValueRow, ProjectEnvironment, ProjectService, ProjectVariable } from "../project/projectModel";
+import type { HttpVersionPreference, KeyValueRow, ProjectEnvironment, ProjectService, ProjectSettings, ProjectVariable, ResponseFormatDetection } from "../project/projectModel";
 import { redactRecord, redactValue } from "../lib/redaction";
 import { buildUrl, resolveTemplate, validateService, type ValidationIssue } from "./serviceDesigner";
 
@@ -27,6 +27,13 @@ export interface ExecutableRequest {
   redactedHeaders: Record<string, string>;
   body: string | null;
   timeoutMs: number;
+  httpVersion: HttpVersionPreference;
+  sslCertificateVerification: boolean;
+  sslTlsKeyLog: boolean;
+  disableCookies: boolean;
+  responseFormatDetection: ResponseFormatDetection;
+  maxResponseTimeMs: number;
+  proxy: ProjectSettings["proxy"];
 }
 
 export interface TransportResponse {
@@ -59,7 +66,8 @@ export type HttpTransport = (request: ExecutableRequest) => Promise<TransportRes
 export async function runServiceRequest(
   service: ProjectService,
   environment: ProjectEnvironment,
-  transport: HttpTransport = defaultHttpTransport
+  transport: HttpTransport = defaultHttpTransport,
+  settings?: ProjectSettings
 ): Promise<ServiceRunResult> {
   const events = createEventRecorder();
   events.push("prepare", "info", `Preparing request: ${service.method} ${service.path}`);
@@ -74,15 +82,18 @@ export async function runServiceRequest(
 
   try {
     events.push("resolveVariables", "info", "Resolving environment variables and auth.");
-    const request = buildExecutableRequest(service, environment);
+    const request = buildExecutableRequest(service, environment, settings);
     events.push("openConnection", "info", `Opening connection to ${extractOrigin(request.url)}.`);
     events.push("sendRequest", "info", `Sending request (${request.method}) with ${Object.keys(request.headers).length} header(s).`);
 
     const transportResponse = await transport(request);
     events.push("receiveResponse", transportResponse.status >= 400 ? "error" : "info", `Received response (${transportResponse.status} ${transportResponse.statusText}) in ${transportResponse.durationMs} ms.`);
+    if (request.maxResponseTimeMs > 0 && transportResponse.durationMs > request.maxResponseTimeMs) {
+      events.push("error", "error", `Response exceeded the ${request.maxResponseTimeMs} ms maximum response time.`);
+    }
     events.push("parseResponse", "info", "Parsing response body.");
 
-    const response = normalizeResponse(service, transportResponse);
+    const response = normalizeResponse(service, transportResponse, request.responseFormatDetection);
     if (response.parseError) {
       events.push("error", "error", response.parseError);
     } else if (response.ok) {
@@ -99,7 +110,7 @@ export async function runServiceRequest(
   }
 }
 
-export function buildExecutableRequest(service: ProjectService, environment: ProjectEnvironment): ExecutableRequest {
+export function buildExecutableRequest(service: ProjectService, environment: ProjectEnvironment, settings?: ProjectSettings): ExecutableRequest {
   const authHeader = buildRuntimeAuthHeader(service, environment);
   const userHeaders = Object.fromEntries(
     service.headers
@@ -125,13 +136,30 @@ export function buildExecutableRequest(service: ProjectService, environment: Pro
     body: service.body.contentType !== "none" && service.body.raw.trim()
       ? resolveTemplate(service.body.raw, environment, false)
       : null,
-    timeoutMs: service.timeoutMs
+    timeoutMs: settings?.requestTimeoutMs ?? service.timeoutMs,
+    httpVersion: settings?.httpVersion ?? "auto",
+    sslCertificateVerification: settings?.sslCertificateVerification ?? true,
+    sslTlsKeyLog: settings?.sslTlsKeyLog ?? false,
+    disableCookies: settings?.disableCookies ?? false,
+    responseFormatDetection: settings?.responseFormatDetection ?? "auto",
+    maxResponseTimeMs: settings?.maxResponseTimeMs ?? 60_000,
+    proxy: settings?.proxy ?? {
+      enabled: false,
+      useForHttp: true,
+      useForHttps: true,
+      serverUrl: "",
+      port: 8080,
+      basicAuthEnabled: false,
+      username: "",
+      password: "",
+      bypassList: "localhost,127.0.0.1"
+    }
   };
 }
 
-export function normalizeResponse(service: ProjectService, response: TransportResponse): ExecutedResponse {
+export function normalizeResponse(service: ProjectService, response: TransportResponse, responseFormatDetection: ResponseFormatDetection = "auto"): ExecutedResponse {
   const contentType = findHeader(response.headers, "content-type");
-  const parsed = parseResponseBody(response.body, contentType);
+  const parsed = parseResponseBody(response.body, responseFormatDetection === "json" ? "application/json" : contentType);
   return {
     ...response,
     ok: response.status >= 200 && response.status < 300,
@@ -187,8 +215,9 @@ export async function fetchHttpTransport(request: ExecutableRequest): Promise<Tr
     const response = await fetch(request.url, {
       method: request.method,
       headers: request.headers,
-      body: request.body,
-      signal: controller.signal
+    body: request.body,
+      signal: controller.signal,
+      credentials: request.disableCookies ? "omit" : "same-origin"
     });
     const body = await response.text();
     return {

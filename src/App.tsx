@@ -41,7 +41,10 @@ import {
 import {
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
+  type RefObject,
+  type ReactNode,
   useEffect,
   useMemo,
   useRef,
@@ -49,6 +52,7 @@ import {
 } from "react";
 import {
   createEmptyProject,
+  createDefaultProjectSettings,
   createSampleProject,
   touchProject,
   type AuthMode,
@@ -59,6 +63,7 @@ import {
   type ProjectEnvironment,
   type ProjectFlow,
   type ProjectService,
+  type ProjectSettings,
   type ProjectVariable,
   type RecentProject,
   type RelayProject,
@@ -124,6 +129,8 @@ import {
 } from "./shell/shellCommands";
 
 type TabKind = "welcome" | "request" | "flow" | "response" | "import" | "settings";
+type DesktopPlatform = "macos" | "windows" | "linux" | "web";
+type LayoutBreakpoint = "small" | "medium" | "large";
 
 interface WorkbenchTab {
   id: string;
@@ -178,6 +185,116 @@ const defaultLayoutSizes: LayoutSizes = {
   bottomDockHeight: 240
 };
 
+const focusableSelector = [
+  "a[href]",
+  "button:not([disabled])",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  "[tabindex]:not([tabindex='-1'])"
+].join(",");
+
+function getLayoutBreakpoint(width: number): LayoutBreakpoint {
+  if (width < 641) return "small";
+  if (width < 1008) return "medium";
+  return "large";
+}
+
+function getDesktopPlatform(): DesktopPlatform {
+  if (typeof navigator === "undefined") return "web";
+  const platform = `${navigator.platform} ${navigator.userAgent}`.toLowerCase();
+  if (platform.includes("mac")) return "macos";
+  if (platform.includes("win")) return "windows";
+  if (platform.includes("linux")) return "linux";
+  return "web";
+}
+
+function isEditableContextTarget(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement && Boolean(target.closest("input, textarea, [contenteditable='true']"));
+}
+
+function useWindowBreakpoint(): LayoutBreakpoint {
+  const [breakpoint, setBreakpoint] = useState<LayoutBreakpoint>(() => (
+    typeof window === "undefined" ? "large" : getLayoutBreakpoint(window.innerWidth)
+  ));
+
+  useEffect(() => {
+    const updateBreakpoint = () => setBreakpoint(getLayoutBreakpoint(window.innerWidth));
+    window.addEventListener("resize", updateBreakpoint);
+    return () => window.removeEventListener("resize", updateBreakpoint);
+  }, []);
+
+  return breakpoint;
+}
+
+function useWindowActiveState(): boolean {
+  const [windowActive, setWindowActive] = useState(true);
+
+  useEffect(() => {
+    const activate = () => setWindowActive(true);
+    const deactivate = () => setWindowActive(false);
+    window.addEventListener("focus", activate);
+    window.addEventListener("blur", deactivate);
+    return () => {
+      window.removeEventListener("focus", activate);
+      window.removeEventListener("blur", deactivate);
+    };
+  }, []);
+
+  return windowActive;
+}
+
+function useModalBehavior(
+  onClose: () => void,
+  options?: { initialFocusRef?: RefObject<HTMLElement | null> }
+): RefObject<HTMLElement> {
+  const dialogRef = useRef<HTMLElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const firstFocusable = options?.initialFocusRef?.current ?? dialogRef.current?.querySelector<HTMLElement>(focusableSelector);
+    firstFocusable?.focus();
+
+    return () => {
+      const previousFocus = previousFocusRef.current;
+      if (previousFocus?.isConnected) previousFocus.focus();
+    };
+  }, [options?.initialFocusRef]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+      const focusableElements = Array.from(dialog.querySelectorAll<HTMLElement>(focusableSelector))
+        .filter((element) => element.offsetParent !== null || element === document.activeElement);
+      if (!focusableElements.length) return;
+
+      const firstElement = focusableElements[0];
+      const lastElement = focusableElements[focusableElements.length - 1];
+      if (event.shiftKey && document.activeElement === firstElement) {
+        event.preventDefault();
+        lastElement.focus();
+      } else if (!event.shiftKey && document.activeElement === lastElement) {
+        event.preventDefault();
+        firstElement.focus();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  return dialogRef;
+}
+
 export function App() {
   const [project, setProject] = useState<RelayProject>(() => createSampleProject());
   const [projectPath, setProjectPath] = useState("/private/tmp/sample-api-regression.restproj");
@@ -205,12 +322,14 @@ export function App() {
   const [activeFlowId, setActiveFlowId] = useState("authenticated-read");
   const [explorerOpen, setExplorerOpen] = useState(true);
   const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [flowDetailsOpen, setFlowDetailsOpen] = useState(true);
   const [layoutSizes, setLayoutSizes] = useState(defaultLayoutSizes);
   const [environment, setEnvironment] = useState(() => getDefaultEnvironmentName(createSampleProject()));
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [responseVisible, setResponseVisible] = useState(true);
   const [savePromptOpen, setSavePromptOpen] = useState(false);
   const [recentProjectsDialogOpen, setRecentProjectsDialogOpen] = useState(false);
+  const [pendingTabCloseId, setPendingTabCloseId] = useState<string | null>(null);
   const [pendingProjectOpen, setPendingProjectOpen] = useState<PendingProjectOpen | null>(null);
   const [saveThenOpenProject, setSaveThenOpenProject] = useState<PendingProjectOpen | null>(null);
   const [pendingWindowClose, setPendingWindowClose] = useState(false);
@@ -235,8 +354,12 @@ export function App() {
   }, [environment, project.environments]);
   const activeService = project.services.find((service) => service.id === activeServiceId) ?? project.services[0];
   const activeFlow = project.flows.find((flow) => flow.id === activeFlowId) ?? project.flows[0];
+  const projectSettings = getProjectSettings(project);
   const requestPreview = activeService && activeEnvironment ? buildRequestPreview(activeService, activeEnvironment) : null;
   const welcomeTabActive = activeTab.kind === "welcome";
+  const layoutBreakpoint = useWindowBreakpoint();
+  const desktopPlatform = getDesktopPlatform();
+  const windowActive = useWindowActiveState();
   const allowWindowCloseRef = useRef(false);
   const shellCommandHandlerRef = useRef<(payload: ShellCommandEventPayload) => void>(() => {});
   const shellCommandContext = {
@@ -246,7 +369,8 @@ export function App() {
     canCloseActiveTab,
     explorerOpen,
     inspectorOpen,
-    responseDockOpen: responseVisible
+    responseDockOpen: responseVisible,
+    flowDetailsOpen
   } as const;
   const commandPaletteCommands = getCommandPaletteCommands(shellCommandContext);
   const primaryExecutionCommand = getPrimaryExecutionCommand(shellCommandContext);
@@ -419,7 +543,8 @@ export function App() {
     nativeShellMenuState.canRunFlow,
     nativeShellMenuState.explorerOpen,
     nativeShellMenuState.inspectorOpen,
-    nativeShellMenuState.responseDockOpen
+    nativeShellMenuState.responseDockOpen,
+    nativeShellMenuState.flowDetailsOpen
   ]);
 
   const computedRequestUrl = useMemo(() => {
@@ -532,13 +657,18 @@ export function App() {
           setResponseVisible((current) => !current);
         }
         return;
+      case "view.toggle_flow_details":
+        if (activeTab.kind === "flow") {
+          setFlowDetailsOpen((current) => !current);
+        }
+        return;
       default:
         throw new Error(`Unhandled shell command: ${id}`);
     }
   }
 
   async function requestCloseWindowRequested() {
-    if (hasDirtyState && getProjectSettings(project).askToSaveOnClose) {
+    if (hasDirtyState && projectSettings.askToSaveOnClose) {
       setPendingProjectOpen(null);
       setPendingWindowClose(true);
       setSavePromptOpen(true);
@@ -568,6 +698,18 @@ export function App() {
   }
 
   function closeTab(id: string) {
+    const tab = tabs.find((item) => item.id === id);
+    if (tab?.dirty && projectSettings.askBeforeClosingUnsavedTabs) {
+      setPendingTabCloseId(id);
+      setPendingProjectOpen(null);
+      setPendingWindowClose(false);
+      setSavePromptOpen(true);
+      return;
+    }
+    closeTabNow(id);
+  }
+
+  function closeTabNow(id: string) {
     setTabs((current) => {
       const next = current.filter((tab) => tab.id !== id);
       if (activeTabId === id) {
@@ -882,6 +1024,23 @@ export function App() {
     }), `Default environment set to ${selectedEnvironment.name}.`);
   }
 
+  function handleProjectSettingChange<K extends keyof ProjectSettings>(key: K, value: ProjectSettings[K], message: string) {
+    updateProjectSettings((settings) => ({
+      ...settings,
+      [key]: value
+    }), message);
+  }
+
+  function handleProxySettingChange<K extends keyof ProjectSettings["proxy"]>(key: K, value: ProjectSettings["proxy"][K], message: string) {
+    updateProjectSettings((settings) => ({
+      ...settings,
+      proxy: {
+        ...settings.proxy,
+        [key]: value
+      }
+    }), message);
+  }
+
   function handleAddEnvironmentVariable() {
     updateActiveEnvironment((current) => ({
       ...current,
@@ -930,7 +1089,7 @@ export function App() {
     setRunnerError(null);
     setResponseVisible(true);
 
-    const result = await runServiceRequest(serviceForRun, environmentForRun);
+    const result = await runServiceRequest(serviceForRun, environmentForRun, undefined, projectSettings);
     setRunnerRequest(result.request);
     setRunnerEvents(result.events);
     setRunnerResponse(result.response);
@@ -1035,6 +1194,12 @@ export function App() {
     return responsePersistence.responseExists(path);
   }
 
+  function handleAppContextMenu(event: ReactMouseEvent<HTMLElement>) {
+    if (!isEditableContextTarget(event.target)) {
+      event.preventDefault();
+    }
+  }
+
   async function handleOpenSavedResponse(metadata: SavedResponseMetadata) {
     try {
       const responsePersistence = savedResponsePersistence ?? await createSavedResponsePersistence();
@@ -1063,7 +1228,15 @@ export function App() {
   }
 
   return (
-    <main className="app-shell" aria-label="Relay Studio desktop shell">
+    <main
+      className="app-shell"
+      aria-label="Relay Studio desktop shell"
+      data-breakpoint={layoutBreakpoint}
+      data-platform={desktopPlatform}
+      data-theme={projectSettings.theme}
+      data-window-active={windowActive ? "true" : "false"}
+      onContextMenu={handleAppContextMenu}
+    >
       <TopCommandBar
         activeTab={activeTab}
         primaryExecutionCommandLabel={null}
@@ -1169,8 +1342,11 @@ export function App() {
               ...settings,
               askToSaveOnClose
             }), askToSaveOnClose ? "Close prompt enabled." : "Close prompt disabled.")}
+            onSettingChange={handleProjectSettingChange}
+            onProxySettingChange={handleProxySettingChange}
             activeService={activeService}
             activeFlow={activeFlow}
+            flowDetailsOpen={flowDetailsOpen}
             services={project.services}
             activeEnvironment={activeEnvironment}
             requestPreview={requestPreview}
@@ -1266,6 +1442,7 @@ export function App() {
         <SavePrompt
           projectName={project.name}
           onCancel={() => {
+            setPendingTabCloseId(null);
             setPendingProjectOpen(null);
             setSaveThenOpenProject(null);
             setPendingWindowClose(false);
@@ -1275,6 +1452,12 @@ export function App() {
             setProjectDirty(false);
             setTabs((current) => current.map((tab) => ({ ...tab, dirty: false })));
             setSavePromptOpen(false);
+            if (pendingTabCloseId) {
+              const tabId = pendingTabCloseId;
+              setPendingTabCloseId(null);
+              closeTabNow(tabId);
+              return;
+            }
             if (pendingWindowClose) {
               setPendingWindowClose(false);
               void closeWindowWithBypass();
@@ -1289,6 +1472,7 @@ export function App() {
               setSaveThenOpenProject(pendingProjectOpen);
               setPendingProjectOpen(null);
             }
+            setPendingTabCloseId(null);
             setSavePromptOpen(false);
             setProjectDialog({ mode: "save", title: "Save Project", path: projectPath });
           }}
@@ -1571,8 +1755,9 @@ export function App() {
       setActiveServiceId(opened.services[0]?.id ?? "");
       setActiveFlowId(opened.flows[0]?.id ?? "");
       setProjectDirty(false);
-      setTabs(createDefaultTabsForProject(opened));
-      setActiveTabId("welcome");
+      const openedTabs = createDefaultTabsForProject(opened);
+      setTabs(openedTabs);
+      setActiveTabId(opened.services[0]?.id ?? opened.flows[0]?.id ?? openedTabs[0]?.id ?? "welcome");
       await refreshRecentProjects(projectPersistence);
       setProjectDialog(null);
       setProjectMessage(`Project opened from ${path}.`);
@@ -2040,6 +2225,8 @@ function RecentProjectsDialog({
     y: number;
     target: ProjectListTarget;
   }>(null);
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const dialogRef = useModalBehavior(onClose, { initialFocusRef: closeButtonRef });
   const visibleSessionProjects = sessionProjects
     .filter((snapshot) => !isActiveProjectListTarget(activeProjectName, activeProjectPath, snapshot.name, snapshot.path))
     .slice(0, 5);
@@ -2067,10 +2254,10 @@ function RecentProjectsDialog({
 
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="project-file-dialog recent-projects-dialog" role="dialog" aria-modal="true" aria-label="Open Recent Projects" onMouseDown={(event) => event.stopPropagation()}>
+      <section ref={dialogRef} className="project-file-dialog recent-projects-dialog" role="dialog" aria-modal="true" aria-label="Open Recent Projects" onMouseDown={(event) => event.stopPropagation()}>
         <header>
           <h2>Open Recent Projects</h2>
-          <button type="button" aria-label="Close recent projects" onClick={onClose}><X size={18} /></button>
+          <button ref={closeButtonRef} type="button" aria-label="Close recent projects" onClick={onClose}><X size={18} /></button>
         </header>
         <div className="recent-project-picker">
           {visibleSessionProjects.length ? (
@@ -2372,8 +2559,11 @@ function RequestEditor({
   activeEnvironmentName,
   onDefaultEnvironmentChange,
   onAskToSaveOnCloseChange,
+  onSettingChange,
+  onProxySettingChange,
   activeService,
   activeFlow,
+  flowDetailsOpen,
   services,
   activeEnvironment,
   requestPreview,
@@ -2401,8 +2591,11 @@ function RequestEditor({
   activeEnvironmentName: string;
   onDefaultEnvironmentChange: (environmentId: string) => void;
   onAskToSaveOnCloseChange: (enabled: boolean) => void;
+  onSettingChange: <K extends keyof ProjectSettings>(key: K, value: ProjectSettings[K], message: string) => void;
+  onProxySettingChange: <K extends keyof ProjectSettings["proxy"]>(key: K, value: ProjectSettings["proxy"][K], message: string) => void;
   activeService: ProjectService | undefined;
   activeFlow: ProjectFlow | undefined;
+  flowDetailsOpen: boolean;
   services: ProjectService[];
   activeEnvironment: ProjectEnvironment | undefined;
   requestPreview: RequestPreview | null;
@@ -2438,6 +2631,7 @@ function RequestEditor({
     return (
       <FlowBuilderEditor
         flow={activeFlow}
+        flowDetailsOpen={flowDetailsOpen}
         services={services}
         onAddFlowNode={onAddFlowNode}
         onDeleteFlowNode={onDeleteFlowNode}
@@ -2463,6 +2657,8 @@ function RequestEditor({
         activeEnvironmentName={activeEnvironmentName}
         onDefaultEnvironmentChange={onDefaultEnvironmentChange}
         onAskToSaveOnCloseChange={onAskToSaveOnCloseChange}
+        onSettingChange={onSettingChange}
+        onProxySettingChange={onProxySettingChange}
       />
     );
   }
@@ -2754,16 +2950,31 @@ function authLabel(mode: AuthMode): string {
   }[mode];
 }
 
-function getProjectSettings(project: RelayProject): RelayProject["settings"] {
-  const savedSettings = project.settings as Partial<RelayProject["settings"]> | undefined;
+function getProjectSettings(project: RelayProject): ProjectSettings {
+  const savedSettings = project.settings as Partial<ProjectSettings> | undefined;
   const defaultEnvironmentId = savedSettings?.defaultEnvironmentId && project.environments.some((environment) => environment.id === savedSettings.defaultEnvironmentId)
     ? savedSettings.defaultEnvironmentId
     : project.environments[0]?.id ?? "";
+  const defaults = createDefaultProjectSettings(defaultEnvironmentId);
   return {
+    ...defaults,
+    ...savedSettings,
     defaultEnvironmentId,
-    askToSaveOnClose: savedSettings?.askToSaveOnClose ?? true,
-    redactSecretsInConsole: savedSettings?.redactSecretsInConsole ?? true
+    requestTimeoutMs: boundedNumber(savedSettings?.requestTimeoutMs, 1, 300_000, defaults.requestTimeoutMs),
+    maxResponseTimeMs: boundedNumber(savedSettings?.maxResponseTimeMs, 0, 300_000, defaults.maxResponseTimeMs),
+    workingDirectory: savedSettings?.workingDirectory?.trim() || defaults.workingDirectory,
+    proxy: {
+      ...defaults.proxy,
+      ...savedSettings?.proxy,
+      port: boundedNumber(savedSettings?.proxy?.port, 1, 65_535, defaults.proxy.port)
+    }
   };
+}
+
+function boundedNumber(value: unknown, min: number, max: number, fallback: number): number {
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(Math.max(Math.round(parsed), min), max);
 }
 
 function getDefaultEnvironmentName(project: RelayProject): string {
@@ -2813,6 +3024,7 @@ interface FlowCanvasDragState {
 
 function FlowBuilderEditor(props: {
   flow: ProjectFlow;
+  flowDetailsOpen: boolean;
   services: ProjectService[];
   onAddFlowNode: (flowId: string, serviceId: string) => void;
   onDeleteFlowNode: (flowId: string, nodeId: string) => void;
@@ -3074,7 +3286,10 @@ function FlowBuilderEditor(props: {
           </button>
         </div>
       </div>
-      <div className="flow-main" style={{ "--flow-details-width": `${flowDetailsWidth}px` } as CSSProperties}>
+      <div
+        className={props.flowDetailsOpen ? "flow-main" : "flow-main flow-details-hidden"}
+        style={{ "--flow-details-width": `${flowDetailsWidth}px` } as CSSProperties}
+      >
         {!flow.nodes.length ? (
           <div className="flow-template-panel" aria-label="Flow templates">
             <strong>Start with a flow template</strong>
@@ -3166,12 +3381,14 @@ function FlowBuilderEditor(props: {
             </button>
           </div>
         </div>
-        <ResizeHandle
-          ariaLabel="Resize flow details"
-          orientation="vertical"
-          onResize={(delta) => setFlowDetailsWidth((current) => clamp(current - delta, 210, 390))}
-        />
-        <aside className="flow-side-panel" aria-label="Flow step details">
+        {props.flowDetailsOpen ? (
+          <ResizeHandle
+            ariaLabel="Resize flow details"
+            orientation="vertical"
+            onResize={(delta) => setFlowDetailsWidth((current) => clamp(current - delta, 210, 390))}
+          />
+        ) : null}
+        {props.flowDetailsOpen ? <aside className="flow-side-panel" aria-label="Flow step details">
           <h2>Step Details</h2>
           {selectedNode ? (
             <>
@@ -3284,7 +3501,7 @@ function FlowBuilderEditor(props: {
           ) : (
             <p>No step selected.</p>
           )}
-        </aside>
+        </aside> : null}
       </div>
       {mappingDialogOpen && selectedNode ? (
         <FlowMappingsDialog
@@ -3318,15 +3535,18 @@ function FlowMappingsDialog({
   onUpdateMapping: (mappingId: string, patch: Partial<Omit<FlowMapping, "id">>) => void;
   onDeleteMapping: (mappingId: string) => void;
 }) {
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const dialogRef = useModalBehavior(onClose, { initialFocusRef: closeButtonRef });
+
   return (
     <div className="modal-backdrop" role="presentation">
-      <section className="project-file-dialog flow-mappings-dialog" role="dialog" aria-modal="true" aria-label="Response Mappings">
+      <section ref={dialogRef} className="project-file-dialog flow-mappings-dialog" role="dialog" aria-modal="true" aria-label="Response Mappings">
         <header>
           <div>
             <strong>Response Mappings</strong>
             <span>{flow.name} / {node.label}</span>
           </div>
-          <button type="button" aria-label="Close response mappings dialog" onClick={onClose}><X size={17} /></button>
+          <button ref={closeButtonRef} type="button" aria-label="Close response mappings dialog" onClick={onClose}><X size={17} /></button>
         </header>
         <div className="flow-mappings-dialog-body">
           <div className="flow-mappings-dialog-toolbar" aria-label="Mapping actions">
@@ -3591,7 +3811,9 @@ function ProjectSettingsView({
   hasDirtyState,
   activeEnvironmentName,
   onDefaultEnvironmentChange,
-  onAskToSaveOnCloseChange
+  onAskToSaveOnCloseChange,
+  onSettingChange,
+  onProxySettingChange
 }: {
   project: RelayProject;
   projectPath: string;
@@ -3599,92 +3821,219 @@ function ProjectSettingsView({
   activeEnvironmentName: string;
   onDefaultEnvironmentChange: (environmentId: string) => void;
   onAskToSaveOnCloseChange: (enabled: boolean) => void;
+  onSettingChange: <K extends keyof ProjectSettings>(key: K, value: ProjectSettings[K], message: string) => void;
+  onProxySettingChange: <K extends keyof ProjectSettings["proxy"]>(key: K, value: ProjectSettings["proxy"][K], message: string) => void;
 }) {
+  const [activeSection, setActiveSection] = useState<"request" | "display" | "proxy" | "workspace">("request");
   const settings = getProjectSettings(project);
-  const secretVariableCount = project.environments.reduce((count, environment) => (
-    count + environment.variables.filter((variable) => variable.secret).length
-  ), 0);
-  const savedResponseCount = project.savedResponses.length;
-  const folderCount = new Set(project.services.map((service) => service.folder).filter(Boolean)).size;
+  const sections = [
+    { id: "request" as const, label: "Request Policy" },
+    { id: "display" as const, label: "Display" },
+    { id: "proxy" as const, label: "Network Proxy" },
+    { id: "workspace" as const, label: "Workspace" }
+  ];
 
   return (
     <section className="project-settings-view" aria-label="Project settings">
-      <header>
-        <Box size={24} />
-        <div>
-          <h2>Settings</h2>
-          <p>{project.name}</p>
-        </div>
-      </header>
-      <div className="settings-grid">
-        <section className="settings-card settings-card-wide">
-          <h3>Workspace behavior</h3>
-          <label>
-            <span>Default environment</span>
-            <select
-              aria-label="Default environment"
-              value={settings.defaultEnvironmentId}
-              onChange={(event) => onDefaultEnvironmentChange(event.target.value)}
-            >
-              {project.environments.map((environment) => (
-                <option key={environment.id} value={environment.id}>{environment.name}</option>
-              ))}
-            </select>
-          </label>
-          <p className="setting-help">Newly opened projects and this workspace use the selected environment by default.</p>
-          <label className="settings-checkbox">
-            <input
-              aria-label="Ask before closing with unsaved changes"
-              type="checkbox"
-              checked={settings.askToSaveOnClose}
-              onChange={(event) => onAskToSaveOnCloseChange(event.target.checked)}
-            />
-            <span>Ask before closing with unsaved changes</span>
-          </label>
-        </section>
-        <section className="settings-card">
-          <h3>Current workspace</h3>
-          <dl>
-            <dt>Active environment</dt>
-            <dd>{activeEnvironmentName || "No environment"}</dd>
-            <dt>Requests</dt>
-            <dd>{project.services.length}</dd>
-            <dt>Folders</dt>
-            <dd>{folderCount}</dd>
-            <dt>Flows</dt>
-            <dd>{project.flows.length}</dd>
-            <dt>Environments</dt>
-            <dd>{project.environments.length}</dd>
-          </dl>
-        </section>
-        <section className="settings-card">
-          <h3>Safety</h3>
-          <dl>
-            <dt>Secrets</dt>
-            <dd>{secretVariableCount} redacted variable{secretVariableCount === 1 ? "" : "s"}</dd>
-            <dt>Responses</dt>
-            <dd>{savedResponseCount} saved artifact{savedResponseCount === 1 ? "" : "s"}</dd>
-            <dt>Imports</dt>
-            <dd>{project.importSources.length}</dd>
-            <dt>Console</dt>
-            <dd>{settings.redactSecretsInConsole ? "Secret redaction enforced" : "Secret redaction disabled"}</dd>
-          </dl>
-        </section>
-        <section className="settings-card settings-card-wide">
-          <h3>Project metadata</h3>
-          <dl>
-            <dt>File</dt>
-            <dd>{projectPath || "Unsaved project"}</dd>
-            <dt>Status</dt>
-            <dd>{hasDirtyState ? "Unsaved changes" : "Saved"}</dd>
-            <dt>Schema</dt>
-            <dd>{project.format} v{project.schemaVersion}</dd>
-            <dt>Updated</dt>
-            <dd>{project.updatedAt}</dd>
-          </dl>
-        </section>
+      <aside className="settings-nav" aria-label="Settings sections">
+        <strong>Settings</strong>
+        <span>{project.name}</span>
+        {sections.map((section) => (
+          <button
+            type="button"
+            key={section.id}
+            className={activeSection === section.id ? "active" : ""}
+            onClick={() => setActiveSection(section.id)}
+          >
+            {section.label}
+          </button>
+        ))}
+      </aside>
+      <div className="settings-detail">
+        {activeSection === "request" ? (
+          <section className="settings-section" aria-label="Request policy settings">
+            <h2>Request Policy</h2>
+            <p>Control how Relay Studio sends requests, parses responses, and protects local request data.</p>
+            <SettingsRow label="HTTP version" help="Choose the protocol preference used when sending requests.">
+              <select
+                aria-label="HTTP version"
+                value={settings.httpVersion}
+                onChange={(event) => onSettingChange("httpVersion", event.target.value as ProjectSettings["httpVersion"], "HTTP version preference updated.")}
+              >
+                <option value="auto">Auto</option>
+                <option value="http1">HTTP/1.1</option>
+                <option value="http2">HTTP/2</option>
+              </select>
+            </SettingsRow>
+            <SettingsRow label="Request timeout" help="Maximum wait time before Relay Studio cancels a request.">
+              <NumberSetting ariaLabel="Request timeout ms" value={settings.requestTimeoutMs} unit="ms" min={1} max={300000} onChange={(value) => onSettingChange("requestTimeoutMs", value, "Request timeout updated.")} />
+            </SettingsRow>
+            <SettingsRow label="Max response time" help="Flag responses that take longer than this threshold. Set to 0 to disable the warning.">
+              <NumberSetting ariaLabel="Max response time ms" value={settings.maxResponseTimeMs} unit="ms" min={0} max={300000} onChange={(value) => onSettingChange("maxResponseTimeMs", value, "Max response time updated.")} />
+            </SettingsRow>
+            <SettingsToggle label="SSL certificate verification" checked={settings.sslCertificateVerification} onChange={(value) => onSettingChange("sslCertificateVerification", value, value ? "SSL certificate verification enabled." : "SSL certificate verification disabled.")} />
+            <SettingsToggle label="SSL/TLS key log" help="Enable TLS session key logging for transport debugging." checked={settings.sslTlsKeyLog} onChange={(value) => onSettingChange("sslTlsKeyLog", value, value ? "SSL/TLS key logging enabled." : "SSL/TLS key logging disabled.")} />
+            <SettingsToggle label="Disable cookies" help="Prevent browser-mode requests from sending cookies." checked={settings.disableCookies} onChange={(value) => onSettingChange("disableCookies", value, value ? "Cookies disabled for requests." : "Cookies enabled for requests.")} />
+            <SettingsRow label="Response format detection" help="Auto follows response headers. JSON forces JSON parsing.">
+              <div className="settings-radio-group" role="radiogroup" aria-label="Response format detection">
+                <label><input type="radio" name="response-format-detection" checked={settings.responseFormatDetection === "auto"} onChange={() => onSettingChange("responseFormatDetection", "auto", "Response format detection set to Auto.")} /> Auto</label>
+                <label><input type="radio" name="response-format-detection" checked={settings.responseFormatDetection === "json"} onChange={() => onSettingChange("responseFormatDetection", "json", "Response format detection set to JSON.")} /> JSON</label>
+              </div>
+            </SettingsRow>
+          </section>
+        ) : null}
+
+        {activeSection === "display" ? (
+          <section className="settings-section" aria-label="Display settings">
+            <h2>Display</h2>
+            <p>Choose the application theme used by the desktop shell.</p>
+            <div className="theme-choice-grid">
+              <button type="button" className={settings.theme === "light" ? "theme-choice active" : "theme-choice"} onClick={() => onSettingChange("theme", "light", "Light theme enabled.")}>
+                <ThemePreview tone="light" />
+                <strong>Light</strong>
+                <em>Bright surfaces for daytime API work.</em>
+              </button>
+              <button type="button" className={settings.theme === "dark" ? "theme-choice active" : "theme-choice"} onClick={() => onSettingChange("theme", "dark", "Dark theme enabled.")}>
+                <ThemePreview tone="dark" />
+                <strong>Dark</strong>
+                <em>Reduced-glare surfaces for low-light work.</em>
+              </button>
+            </div>
+          </section>
+        ) : null}
+
+        {activeSection === "proxy" ? (
+          <section className="settings-section" aria-label="Network proxy settings">
+            <h2>Network Proxy</h2>
+            <p>Route outbound REST traffic through a proxy when your network requires one.</p>
+            <SettingsToggle label="Use proxy" checked={settings.proxy.enabled} onChange={(value) => onProxySettingChange("enabled", value, value ? "Proxy enabled." : "Proxy disabled.")} />
+            <SettingsToggle label="Use proxy for HTTP" checked={settings.proxy.useForHttp} onChange={(value) => onProxySettingChange("useForHttp", value, "HTTP proxy routing updated.")} />
+            <SettingsToggle label="Use proxy for HTTPS" checked={settings.proxy.useForHttps} onChange={(value) => onProxySettingChange("useForHttps", value, "HTTPS proxy routing updated.")} />
+            <SettingsRow label="Proxy server" help="Enter a hostname or URL without credentials.">
+              <div className="settings-inline-fields">
+                <input aria-label="Proxy server URL" value={settings.proxy.serverUrl} placeholder="proxy.example.com" onChange={(event) => onProxySettingChange("serverUrl", event.target.value, "Proxy server updated.")} />
+                <NumberSetting ariaLabel="Proxy server port" value={settings.proxy.port} unit="port" min={1} max={65535} onChange={(value) => onProxySettingChange("port", value, "Proxy port updated.")} />
+              </div>
+            </SettingsRow>
+            <SettingsToggle label="Proxy basic auth" checked={settings.proxy.basicAuthEnabled} onChange={(value) => onProxySettingChange("basicAuthEnabled", value, value ? "Proxy basic auth enabled." : "Proxy basic auth disabled.")} />
+            {settings.proxy.basicAuthEnabled ? (
+              <SettingsRow label="Proxy credentials" help="Credentials are stored in the project file until app-level secure storage is added.">
+                <div className="settings-inline-fields">
+                  <input aria-label="Proxy username" value={settings.proxy.username} onChange={(event) => onProxySettingChange("username", event.target.value, "Proxy username updated.")} />
+                  <input aria-label="Proxy password" type="password" value={settings.proxy.password} onChange={(event) => onProxySettingChange("password", event.target.value, "Proxy password updated.")} />
+                </div>
+              </SettingsRow>
+            ) : null}
+            <SettingsRow label="Proxy bypass list" help="Comma-separated hostnames that should connect directly.">
+              <input aria-label="Proxy bypass list" value={settings.proxy.bypassList} placeholder="localhost,127.0.0.1" onChange={(event) => onProxySettingChange("bypassList", event.target.value, "Proxy bypass list updated.")} />
+            </SettingsRow>
+          </section>
+        ) : null}
+
+        {activeSection === "workspace" ? (
+          <section className="settings-section" aria-label="Workspace settings">
+            <h2>Workspace</h2>
+            <p>Set project-level workspace behavior and file defaults.</p>
+            <SettingsRow label="Default environment" help={`Current active environment: ${activeEnvironmentName || "None"}.`}>
+              <select
+                aria-label="Default environment"
+                value={settings.defaultEnvironmentId}
+                onChange={(event) => onDefaultEnvironmentChange(event.target.value)}
+              >
+                {project.environments.map((environment) => (
+                  <option key={environment.id} value={environment.id}>{environment.name}</option>
+                ))}
+              </select>
+            </SettingsRow>
+            <SettingsRow label="Working directory" help="Default folder used for local project assets and response artifacts.">
+              <input aria-label="Working directory" value={settings.workingDirectory} onChange={(event) => onSettingChange("workingDirectory", event.target.value, "Working directory updated.")} />
+            </SettingsRow>
+            <SettingsToggle label="Save on close" help="Ask before leaving unsaved project work." checked={settings.askToSaveOnClose} onChange={onAskToSaveOnCloseChange} />
+            <SettingsToggle label="Always ask when closing unsaved tabs" checked={settings.askBeforeClosingUnsavedTabs} onChange={(value) => onSettingChange("askBeforeClosingUnsavedTabs", value, value ? "Unsaved tab close prompt enabled." : "Unsaved tab close prompt disabled.")} />
+            <SettingsRow label="Project file" help="Read-only path for the current project.">
+              <output>{projectPath || "Unsaved project"}</output>
+            </SettingsRow>
+            <SettingsRow label="Project status" help="Read-only save state for this workspace.">
+              <output>{hasDirtyState ? "Unsaved changes" : "Saved"}</output>
+            </SettingsRow>
+          </section>
+        ) : null}
       </div>
     </section>
+  );
+}
+
+function SettingsRow({ label, help, children }: { label: string; help?: string; children: ReactNode }) {
+  return (
+    <div className="settings-row">
+      <div>
+        <strong>{label}</strong>
+        {help ? <p>{help}</p> : null}
+      </div>
+      <div>{children}</div>
+    </div>
+  );
+}
+
+function SettingsToggle({ label, help, checked, onChange }: { label: string; help?: string; checked: boolean; onChange: (checked: boolean) => void }) {
+  return (
+    <SettingsRow label={label} help={help}>
+      <label className="settings-switch">
+        <input aria-label={label} type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />
+        <span />
+      </label>
+    </SettingsRow>
+  );
+}
+
+function NumberSetting({ ariaLabel, value, unit, min, max, onChange }: { ariaLabel: string; value: number; unit: string; min: number; max: number; onChange: (value: number) => void }) {
+  return (
+    <label className="number-setting">
+      <input
+        aria-label={ariaLabel}
+        type="number"
+        min={min}
+        max={max}
+        value={value}
+        onChange={(event) => onChange(boundedNumber(event.target.value, min, max, value))}
+      />
+      <span>{unit}</span>
+    </label>
+  );
+}
+
+function ThemePreview({ tone }: { tone: "light" | "dark" }) {
+  return (
+    <span className={`theme-preview ${tone}-preview`} aria-hidden="true">
+      <span className="theme-preview-titlebar">
+        <span />
+        <span />
+        <span />
+      </span>
+      <span className="theme-preview-body">
+        <span className="theme-preview-sidebar">
+          <span className="theme-preview-icon" />
+          <span />
+          <span />
+          <span />
+        </span>
+        <span className="theme-preview-canvas">
+          <span className="theme-preview-toolbar">
+            <span />
+            <span className="theme-preview-primary-button" />
+            <span className="theme-preview-secondary-button" />
+          </span>
+          <span className="theme-preview-card">
+            <span />
+            <span />
+            <span className="theme-preview-status">
+              <span />
+              <span />
+            </span>
+          </span>
+        </span>
+      </span>
+    </span>
   );
 }
 
@@ -3981,14 +4330,16 @@ function CommandPalette({
   onChoose: (id: ShellCommandId) => void;
 }) {
   const [query, setQuery] = useState("");
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const dialogRef = useModalBehavior(onClose, { initialFocusRef: searchInputRef });
   const filteredCommands = commands.filter((command) => command.label.toLowerCase().includes(query.trim().toLowerCase()));
 
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="command-palette" role="dialog" aria-modal="true" aria-label="Command palette" onMouseDown={(event) => event.stopPropagation()}>
+      <section ref={dialogRef} className="command-palette" role="dialog" aria-modal="true" aria-label="Command palette" onMouseDown={(event) => event.stopPropagation()}>
         <label>
           <Search size={18} />
-          <input autoFocus placeholder="Search commands" value={query} onChange={(event) => setQuery(event.target.value)} />
+          <input ref={searchInputRef} placeholder="Search commands" value={query} onChange={(event) => setQuery(event.target.value)} />
           <kbd>Esc</kbd>
         </label>
         <div>
@@ -4211,11 +4562,13 @@ function ProjectNameDialog({
 }) {
   const [name, setName] = useState(initialName);
   const [submitting, setSubmitting] = useState(false);
+  const nameInputRef = useRef<HTMLInputElement | null>(null);
+  const dialogRef = useModalBehavior(onCancel, { initialFocusRef: nameInputRef });
   const trimmedName = name.trim();
 
   return (
     <div className="modal-backdrop" role="presentation">
-      <section className="project-file-dialog" role="dialog" aria-modal="true" aria-label={title}>
+      <section ref={dialogRef} className="project-file-dialog" role="dialog" aria-modal="true" aria-label={title}>
         <header>
           <strong>{title}</strong>
           <button type="button" aria-label={`Close ${title.toLowerCase()} dialog`} onClick={onCancel}><X size={17} /></button>
@@ -4231,8 +4584,8 @@ function ProjectNameDialog({
           <label>
             <span>{fieldLabel}</span>
             <input
+              ref={nameInputRef}
               aria-label={fieldLabel}
-              autoFocus
               value={name}
               onChange={(event) => setName(event.target.value)}
               onFocus={(event) => event.target.select()}
@@ -4261,9 +4614,11 @@ function DeleteProjectDialog({
   onDelete: () => void | Promise<void>;
 }) {
   const [submitting, setSubmitting] = useState(false);
+  const cancelButtonRef = useRef<HTMLButtonElement | null>(null);
+  const dialogRef = useModalBehavior(onCancel, { initialFocusRef: cancelButtonRef });
   return (
     <div className="modal-backdrop" role="presentation">
-      <section className="project-file-dialog" role="dialog" aria-modal="true" aria-label="Delete Project">
+      <section ref={dialogRef} className="project-file-dialog" role="dialog" aria-modal="true" aria-label="Delete Project">
         <header>
           <strong>Delete Project</strong>
           <button type="button" aria-label="Close delete project dialog" onClick={onCancel}><X size={17} /></button>
@@ -4283,7 +4638,7 @@ function DeleteProjectDialog({
             <button type="submit" className="primary-command danger-command" disabled={submitting}>
               {submitting ? "Deleting..." : "Delete Project"}
             </button>
-            <button type="button" onClick={onCancel}>Cancel</button>
+            <button ref={cancelButtonRef} type="button" onClick={onCancel}>Cancel</button>
           </div>
         </form>
       </section>
@@ -4309,6 +4664,8 @@ function ProjectFileDialog({
   const [path, setPath] = useState(dialog.path || `/private/tmp/${projectName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.restproj`);
   const [submitting, setSubmitting] = useState(false);
   const [overwritePending, setOverwritePending] = useState(false);
+  const pathInputRef = useRef<HTMLInputElement | null>(null);
+  const dialogRef = useModalBehavior(onCancel, { initialFocusRef: pathInputRef });
 
   useEffect(() => {
     setOverwritePending(false);
@@ -4334,7 +4691,7 @@ function ProjectFileDialog({
 
   return (
     <div className="modal-backdrop" role="presentation">
-      <section className="project-file-dialog" role="dialog" aria-modal="true" aria-label={dialog.title}>
+      <section ref={dialogRef} className="project-file-dialog" role="dialog" aria-modal="true" aria-label={dialog.title}>
         <header>
           <strong>{dialog.title}</strong>
           <button type="button" aria-label="Close project dialog" onClick={onCancel}><X size={17} /></button>
@@ -4348,7 +4705,7 @@ function ProjectFileDialog({
         >
           <label>
             <span>Project file path</span>
-            <input value={path} onChange={(event) => setPath(event.target.value)} placeholder="/path/to/project.restproj" />
+            <input ref={pathInputRef} value={path} onChange={(event) => setPath(event.target.value)} placeholder="/path/to/project.restproj" />
           </label>
           {dialog.mode === "open" && recentProjects.length ? (
             <section className="recent-project-picker" aria-label="Recent projects">
@@ -4391,6 +4748,8 @@ function SaveResponseDialog({
   const [submitting, setSubmitting] = useState(false);
   const [overwritePending, setOverwritePending] = useState(false);
   const [fieldError, setFieldError] = useState<string | null>(null);
+  const pathInputRef = useRef<HTMLInputElement | null>(null);
+  const dialogRef = useModalBehavior(onCancel, { initialFocusRef: pathInputRef });
 
   useEffect(() => {
     setOverwritePending(false);
@@ -4412,7 +4771,7 @@ function SaveResponseDialog({
 
   return (
     <div className="modal-backdrop" role="presentation">
-      <section className="project-file-dialog save-response-dialog" role="dialog" aria-modal="true" aria-label="Save Response">
+      <section ref={dialogRef} className="project-file-dialog save-response-dialog" role="dialog" aria-modal="true" aria-label="Save Response">
         <header>
           <strong>Save Response</strong>
           <button type="button" aria-label="Close response dialog" onClick={onCancel}><X size={17} /></button>
@@ -4426,7 +4785,7 @@ function SaveResponseDialog({
         >
           <label>
             <span>Response file path</span>
-            <input value={path} onChange={(event) => setPath(event.target.value)} placeholder="/path/to/response.json" />
+            <input ref={pathInputRef} value={path} onChange={(event) => setPath(event.target.value)} placeholder="/path/to/response.json" />
           </label>
           <p>Use `.json` for structured response artifacts or `.txt` for redacted raw response bodies. Project metadata keeps status, timing, and source service details.</p>
           {dialog.warning ? <p className="response-warning">{dialog.warning}</p> : null}
@@ -4465,9 +4824,12 @@ function SavePrompt({
   onDiscard: () => void;
   onSave: () => void;
 }) {
+  const cancelButtonRef = useRef<HTMLButtonElement | null>(null);
+  const dialogRef = useModalBehavior(onCancel, { initialFocusRef: cancelButtonRef });
+
   return (
     <div className="modal-backdrop" role="presentation">
-      <section className="save-prompt" role="dialog" aria-modal="true" aria-label="Unsaved changes">
+      <section ref={dialogRef} className="save-prompt" role="dialog" aria-modal="true" aria-label="Unsaved changes">
         <header>
           <strong>Unsaved changes</strong>
           <button type="button" aria-label="Close prompt" onClick={onCancel}><X size={17} /></button>
@@ -4476,7 +4838,7 @@ function SavePrompt({
         <div>
           <button type="button" className="primary-command" onClick={onSave}>Save And Continue</button>
           <button type="button" onClick={onDiscard}>Do Not Save</button>
-          <button type="button" onClick={onCancel}>Cancel</button>
+          <button ref={cancelButtonRef} type="button" onClick={onCancel}>Cancel</button>
         </div>
       </section>
     </div>

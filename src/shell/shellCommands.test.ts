@@ -24,9 +24,12 @@ describe("shellCommands", () => {
   it("keeps response-dock toggle out of non-workbench tabs", () => {
     const welcomeCommands = getCommandPaletteCommands(context({ activeTabKind: "welcome" })).map((command) => command.label);
     const responseCommands = getCommandPaletteCommands(context({ activeTabKind: "response" })).map((command) => command.label);
+    const flowCommands = getCommandPaletteCommands(context({ activeTabKind: "flow" })).map((command) => command.label);
 
     expect(welcomeCommands).not.toContain("Toggle Response Dock");
     expect(responseCommands).toContain("Toggle Response Dock");
+    expect(responseCommands).not.toContain("Toggle Flow Details");
+    expect(flowCommands).toContain("Toggle Flow Details");
   });
 
   it("derives the correct primary execution command for the active tab", () => {
@@ -43,7 +46,8 @@ describe("shellCommands", () => {
       canCloseActiveTab: true,
       explorerOpen: false,
       inspectorOpen: true,
-      responseDockOpen: true
+      responseDockOpen: true,
+      flowDetailsOpen: false
     }));
 
     expect(menuState).toEqual({
@@ -55,7 +59,8 @@ describe("shellCommands", () => {
       canRunFlow: true,
       explorerOpen: false,
       inspectorOpen: true,
-      responseDockOpen: true
+      responseDockOpen: true,
+      flowDetailsOpen: false
     });
   });
 
@@ -76,6 +81,7 @@ function context(overrides?: Partial<ShellCommandContext>): ShellCommandContext 
     explorerOpen: true,
     inspectorOpen: false,
     responseDockOpen: true,
+    flowDetailsOpen: true,
     ...overrides
   };
 }

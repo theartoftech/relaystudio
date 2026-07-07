@@ -43,6 +43,32 @@ describe("service runner", () => {
     expect(request.body).not.toContain("{{productId}}");
   });
 
+  it("applies project request settings to executable requests and response parsing", async () => {
+    const settings = {
+      ...project.settings,
+      requestTimeoutMs: 45_000,
+      maxResponseTimeMs: 10,
+      responseFormatDetection: "json" as const,
+      disableCookies: true
+    };
+    const request = buildExecutableRequest(createOrder, qa, settings);
+
+    expect(request.timeoutMs).toBe(45_000);
+    expect(request.disableCookies).toBe(true);
+    expect(request.responseFormatDetection).toBe("json");
+
+    const result = await runServiceRequest(createOrder, qa, async () => ({
+      status: 200,
+      statusText: "OK",
+      headers: { "content-type": "text/plain" },
+      body: `{"ok":true}`,
+      durationMs: 42
+    }), settings);
+
+    expect(result.response?.prettyBody).toContain('"ok": true');
+    expect(result.events.map((event) => event.message)).toContain("Response exceeded the 10 ms maximum response time.");
+  });
+
   it("runs a successful request with deterministic console event order", async () => {
     const transport = vi.fn().mockResolvedValue({
       status: 200,

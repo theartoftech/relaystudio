@@ -108,6 +108,22 @@ describe("Relay Studio shell", () => {
     expect(within(dialog).getByRole("button", { name: /Import API Docs/i })).toBeInTheDocument();
   });
 
+  it("closes the command palette with Escape and restores focus to the command search", async () => {
+    render(<App />);
+
+    const searchCommands = screen.getByRole("button", { name: /Search commands/i });
+    searchCommands.focus();
+    fireEvent.click(searchCommands);
+    expect(screen.getByRole("dialog", { name: "Command palette" })).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Command palette" })).not.toBeInTheDocument();
+    });
+    expect(searchCommands).toHaveFocus();
+  });
+
   it("shows flow-specific execution commands in the command palette", () => {
     render(<App />);
 
@@ -147,6 +163,38 @@ describe("Relay Studio shell", () => {
 
       expect(event.defaultPrevented).toBe(false);
     }
+  });
+
+  it("suppresses browser context menus outside editable text fields", () => {
+    render(<App />);
+
+    const shell = screen.getByLabelText("Relay Studio desktop shell");
+    const shellContextMenu = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+    shell.dispatchEvent(shellContextMenu);
+    expect(shellContextMenu.defaultPrevented).toBe(true);
+
+    const requestUrl = screen.getByLabelText("Request URL");
+    const textContextMenu = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+    requestUrl.dispatchEvent(textContextMenu);
+    expect(textContextMenu.defaultPrevented).toBe(false);
+  });
+
+  it("marks platform chrome breakpoint and active window state", async () => {
+    const innerWidthSpy = vi.spyOn(window, "innerWidth", "get").mockReturnValue(620);
+    render(<App />);
+
+    const shell = screen.getByLabelText("Relay Studio desktop shell");
+    expect(shell).toHaveAttribute("data-breakpoint", "small");
+    expect(shell).toHaveAttribute("data-window-active", "true");
+
+    innerWidthSpy.mockReturnValue(840);
+    fireEvent(window, new Event("resize"));
+    expect(shell).toHaveAttribute("data-breakpoint", "medium");
+
+    fireEvent.blur(window);
+    await waitFor(() => {
+      expect(shell).toHaveAttribute("data-window-active", "false");
+    });
   });
 
   it("opens the project save dialog from the toolbar", () => {
@@ -259,14 +307,19 @@ describe("Relay Studio shell", () => {
 
     fireEvent.keyDown(window, { key: ",", metaKey: true });
 
-    expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Request Policy" })).toBeInTheDocument();
     expect(screen.getByLabelText("Project settings")).toBeInTheDocument();
+    expect(screen.getByLabelText("HTTP version")).toBeInTheDocument();
+    expect(screen.getByLabelText("Request timeout ms")).toHaveValue(30000);
+    expect(screen.getByLabelText("SSL certificate verification")).toBeChecked();
+    expect(screen.getByRole("radiogroup", { name: "Response format detection" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Auto" })).toBeChecked();
+    expect(screen.getByRole("radio", { name: "JSON" })).not.toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Workspace" }));
     expect(screen.getByLabelText("Default environment")).toBeInTheDocument();
-    expect(screen.getByLabelText("Ask before closing with unsaved changes")).toBeChecked();
-    expect(screen.getByText("Folders")).toBeInTheDocument();
-    expect(screen.getAllByText("Environments").length).toBeGreaterThan(0);
-    expect(screen.getByText("Imports")).toBeInTheDocument();
-    expect(screen.getByText("Updated")).toBeInTheDocument();
+    expect(screen.getByLabelText("Save on close")).toBeChecked();
+    expect(screen.getByLabelText("Always ask when closing unsaved tabs")).toBeChecked();
+    expect(screen.getByLabelText("Working directory")).toHaveValue("/private/tmp");
     expect(screen.queryByLabelText("Request composer")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Request URL")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Send Request" })).not.toBeInTheDocument();
@@ -276,6 +329,14 @@ describe("Relay Studio shell", () => {
     render(<App />);
 
     fireEvent.keyDown(window, { key: ",", metaKey: true });
+    fireEvent.change(screen.getByLabelText("Request timeout ms"), {
+      target: { value: "45000" }
+    });
+    expect(screen.getByText("Request timeout updated.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("radio", { name: "JSON" }));
+    expect(screen.getByRole("radio", { name: "JSON" })).toBeChecked();
+    expect(screen.getByText("Response format detection set to JSON.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Workspace" }));
     fireEvent.change(screen.getByLabelText("Default environment"), {
       target: { value: "staging" }
     });
@@ -283,8 +344,32 @@ describe("Relay Studio shell", () => {
     expect(screen.getByText("Default environment set to Staging Environment.")).toBeInTheDocument();
     expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
     expect(screen.getByLabelText("Default environment")).toHaveValue("staging");
-    expect(screen.getByText("Active environment")).toBeInTheDocument();
     expect(screen.getAllByText("Staging Environment").length).toBeGreaterThan(0);
+  });
+
+  it("updates theme and proxy settings from the Settings tab", () => {
+    render(<App />);
+
+    fireEvent.keyDown(window, { key: ",", metaKey: true });
+    fireEvent.click(screen.getByRole("button", { name: "Display" }));
+    fireEvent.click(screen.getByRole("button", { name: /Dark/ }));
+
+    expect(screen.getByLabelText("Relay Studio desktop shell")).toHaveAttribute("data-theme", "dark");
+    expect(screen.getByText("Dark theme enabled.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Network Proxy" }));
+    fireEvent.click(screen.getByLabelText("Use proxy"));
+    fireEvent.change(screen.getByLabelText("Proxy server URL"), {
+      target: { value: "proxy.internal.test" }
+    });
+    fireEvent.change(screen.getByLabelText("Proxy server port"), {
+      target: { value: "8088" }
+    });
+
+    expect(screen.getByLabelText("Use proxy")).toBeChecked();
+    expect(screen.getByLabelText("Proxy server URL")).toHaveValue("proxy.internal.test");
+    expect(screen.getByLabelText("Proxy server port")).toHaveValue(8088);
+    expect(screen.getByText("Proxy port updated.")).toBeInTheDocument();
   });
 
   it("uses the close prompt setting when closing dirty work", async () => {
@@ -292,7 +377,8 @@ describe("Relay Studio shell", () => {
     render(<App />);
 
     fireEvent.keyDown(window, { key: ",", metaKey: true });
-    fireEvent.click(screen.getByLabelText("Ask before closing with unsaved changes"));
+    fireEvent.click(screen.getByRole("button", { name: "Workspace" }));
+    fireEvent.click(screen.getByLabelText("Save on close"));
     fireEvent.change(screen.getByLabelText("Default environment"), {
       target: { value: "staging" }
     });
@@ -615,6 +701,20 @@ describe("Relay Studio shell", () => {
     expect(screen.getAllByRole("button", { name: /Run Flow/i })).toHaveLength(1);
     expect(screen.queryByRole("button", { name: "Request actions" })).not.toBeInTheDocument();
     expect(within(builder).getByRole("separator", { name: "Resize flow details" })).toBeInTheDocument();
+  });
+
+  it("toggles flow details from the command surface", () => {
+    render(<App />);
+
+    const explorer = screen.getByLabelText("Project explorer");
+    fireEvent.click(within(explorer).getByRole("button", { name: /Authenticated Read/i }));
+    expect(screen.getByLabelText("Flow step details")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Search commands/i }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Command palette" })).getByRole("button", { name: /Toggle Flow Details/i }));
+
+    expect(screen.queryByLabelText("Flow step details")).not.toBeInTheDocument();
+    expect(screen.queryByRole("separator", { name: "Resize flow details" })).not.toBeInTheDocument();
   });
 
   it("selects flow steps without dirtying layout or losing detail synchronization", () => {
