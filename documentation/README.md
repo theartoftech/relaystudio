@@ -29,6 +29,7 @@ This folder contains the first implementation slice for Relay Studio: reviewable
 - [sprint-9a-implementation-status.md](sprint-9a-implementation-status.md): delivered Sprint 9A platform shell contract, shared command model, native menu wiring, and shell verification evidence.
 - [sprint-9b-implementation-status.md](sprint-9b-implementation-status.md): delivered Sprint 9B platform navigation and command surfaces, including simplified Explorer ownership, command-surface Recent Projects, status bar messaging, contextual inspector content, and verification evidence.
 - [sprint-10b-1-user-test-script.md](sprint-10b-1-user-test-script.md): human QA script for Sprint 10B-1 platform regression coverage, including command palette focus, native view toggles, dirty close flows, and context-menu dismissal.
+- [sprint-10b-2-macos-qa-script.md](sprint-10b-2-macos-qa-script.md): human QA script for Sprint 10B-2 macOS menu, Settings, dirty close, command parity, and audit evidence validation.
 - [visual-target.md](visual-target.md): selected Concept 3 visual direction and implementation guardrails.
 - [live-rest-acceptance-test-matrix.md](live-rest-acceptance-test-matrix.md): configurable live REST acceptance suite.
 - [mockups/index.html](mockups/index.html): static full-app mockup set.
