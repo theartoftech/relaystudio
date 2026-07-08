@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { createSampleProject } from "./project/projectModel";
@@ -7,7 +7,14 @@ const nativeMocks = vi.hoisted(() => ({
   listeners: new Map<string, (event: { payload: unknown }) => void>(),
   invoke: vi.fn(),
   open: vi.fn(),
-  onCloseRequested: vi.fn(async () => undefined)
+  closeHandler: null as null | ((event: { preventDefault: () => void }) => void),
+  closeWindow: vi.fn(async () => undefined),
+  onCloseRequested: vi.fn(async (callback: (event: { preventDefault: () => void }) => void) => {
+    nativeMocks.closeHandler = callback;
+    return () => {
+      nativeMocks.closeHandler = null;
+    };
+  })
 }));
 
 vi.mock("@tauri-apps/api/event", () => ({
@@ -19,7 +26,7 @@ vi.mock("@tauri-apps/api/event", () => ({
 
 vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: vi.fn(() => ({
-    close: vi.fn(async () => undefined),
+    close: nativeMocks.closeWindow,
     onCloseRequested: nativeMocks.onCloseRequested
   }))
 }));
@@ -58,6 +65,9 @@ describe("Relay Studio native shell commands", () => {
       value: {}
     });
     nativeMocks.listeners.clear();
+    nativeMocks.closeHandler = null;
+    nativeMocks.closeWindow.mockClear();
+    nativeMocks.onCloseRequested.mockClear();
     nativeMocks.open.mockReset();
     nativeMocks.invoke.mockReset();
     nativeMocks.invoke.mockImplementation(async (command: string, args?: { path?: string }) => {
@@ -143,6 +153,166 @@ describe("Relay Studio native shell commands", () => {
       }));
       expect(screen.getByRole("heading", { name: "Test Project 4" })).toBeInTheDocument();
     });
+  });
+
+  it("handles native View menu toggles and refreshes checked menu state", async () => {
+    render(<App />);
+
+    await waitFor(() => {
+      expect(nativeMocks.listeners.has("relay-shell-command")).toBe(true);
+    });
+
+    act(() => {
+      nativeMocks.listeners.get("relay-shell-command")?.({
+        payload: { id: "view.toggle_explorer", checked: false }
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Project explorer")).not.toBeInTheDocument();
+      expect(nativeMocks.invoke).toHaveBeenCalledWith("refresh_app_menu", {
+        state: expect.objectContaining({ explorerOpen: false })
+      });
+    });
+
+    fireEvent.click(screen.getByRole("tab", { name: /Authenticated Read/i }));
+    await waitFor(() => {
+      expect(screen.getByLabelText("Flow builder")).toBeInTheDocument();
+      expect(nativeMocks.invoke).toHaveBeenCalledWith("refresh_app_menu", {
+        state: expect.objectContaining({
+          activeTabKind: "flow",
+          flowDetailsOpen: true
+        })
+      });
+    });
+    act(() => {
+      nativeMocks.listeners.get("relay-shell-command")?.({
+        payload: { id: "view.toggle_flow_details", checked: false }
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Flow step details")).not.toBeInTheDocument();
+      expect(nativeMocks.invoke).toHaveBeenCalledWith("refresh_app_menu", {
+        state: expect.objectContaining({
+          activeTabKind: "flow",
+          flowDetailsOpen: false
+        })
+      });
+    });
+  });
+
+  it("refreshes native View menu availability immediately when selecting a flow from Explorer", async () => {
+    render(<App />);
+
+    await waitFor(() => {
+      expect(nativeMocks.listeners.has("relay-shell-command")).toBe(true);
+    });
+
+    fireEvent.click(within(screen.getByLabelText("Project explorer")).getByRole("button", { name: /Authenticated Read/i }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Flow builder")).toBeInTheDocument();
+      expect(nativeMocks.invoke).toHaveBeenCalledWith("refresh_app_menu", {
+        state: expect.objectContaining({
+          activeTabKind: "flow",
+          flowDetailsOpen: true
+        })
+      });
+    });
+  });
+
+  it("applies a native flow-details toggle even if the menu event reaches React before flow tab state settles", async () => {
+    render(<App />);
+
+    await waitFor(() => {
+      expect(nativeMocks.listeners.has("relay-shell-command")).toBe(true);
+    });
+
+    act(() => {
+      nativeMocks.listeners.get("relay-shell-command")?.({
+        payload: { id: "view.toggle_flow_details", checked: false }
+      });
+    });
+    fireEvent.click(screen.getByRole("tab", { name: /Authenticated Read/i }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Flow builder")).toBeInTheDocument();
+      expect(screen.queryByLabelText("Flow step details")).not.toBeInTheDocument();
+    });
+  });
+
+  it("sets native check-menu state explicitly instead of inferring the next toggle", async () => {
+    render(<App />);
+
+    await waitFor(() => {
+      expect(nativeMocks.listeners.has("relay-shell-command")).toBe(true);
+    });
+
+    act(() => {
+      nativeMocks.listeners.get("relay-shell-command")?.({
+        payload: { id: "view.toggle_flow_details", checked: false }
+      });
+      nativeMocks.listeners.get("relay-shell-command")?.({
+        payload: { id: "view.toggle_flow_details", checked: false }
+      });
+    });
+    fireEvent.click(screen.getByRole("tab", { name: /Authenticated Read/i }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Flow builder")).toBeInTheDocument();
+      expect(screen.queryByLabelText("Flow step details")).not.toBeInTheDocument();
+    });
+  });
+
+  it("opens the dirty-work prompt from the native close-request hook", async () => {
+    render(<App />);
+
+    await waitFor(() => {
+      expect(nativeMocks.onCloseRequested).toHaveBeenCalled();
+      expect(nativeMocks.closeHandler).not.toBeNull();
+    });
+
+    fireEvent.change(screen.getByLabelText("Request URL"), {
+      target: { value: "https://api.test.local/v1/orders?status=open" }
+    });
+    await waitFor(() => {
+      expect(nativeMocks.onCloseRequested).toHaveBeenCalledTimes(2);
+    });
+
+    const preventDefault = vi.fn();
+    act(() => {
+      nativeMocks.closeHandler?.({ preventDefault });
+    });
+
+    await waitFor(() => {
+      expect(preventDefault).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole("dialog", { name: "Unsaved changes" })).toBeInTheDocument();
+    });
+
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Unsaved changes" })).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Unsaved changes" })).not.toBeInTheDocument();
+    });
+    expect(nativeMocks.closeWindow).not.toHaveBeenCalled();
+  });
+
+  it("allows the native close-request hook to close a clean window", async () => {
+    render(<App />);
+
+    await waitFor(() => {
+      expect(nativeMocks.onCloseRequested).toHaveBeenCalled();
+      expect(nativeMocks.closeHandler).not.toBeNull();
+    });
+
+    const preventDefault = vi.fn();
+    act(() => {
+      nativeMocks.closeHandler?.({ preventDefault });
+    });
+
+    expect(preventDefault).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog", { name: "Unsaved changes" })).not.toBeInTheDocument();
+    expect(nativeMocks.closeWindow).not.toHaveBeenCalled();
   });
 
   it("keeps browser mode on the in-app path dialog for non-Tauri tests", async () => {

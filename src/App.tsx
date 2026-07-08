@@ -125,7 +125,8 @@ import {
   parseRecentProjectMenuIndex,
   type NativeShellCommandId,
   type ShellCommandEventPayload,
-  type ShellCommandId
+  type ShellCommandId,
+  type ShellCommandTabKind
 } from "./shell/shellCommands";
 
 type TabKind = "welcome" | "request" | "flow" | "response" | "import" | "settings";
@@ -246,7 +247,10 @@ function useWindowActiveState(): boolean {
 
 function useModalBehavior(
   onClose: () => void,
-  options?: { initialFocusRef?: RefObject<HTMLElement | null> }
+  options?: {
+    initialFocusRef?: RefObject<HTMLElement | null>;
+    returnFocusRef?: RefObject<HTMLElement | null>;
+  }
 ): RefObject<HTMLElement> {
   const dialogRef = useRef<HTMLElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
@@ -258,9 +262,12 @@ function useModalBehavior(
 
     return () => {
       const previousFocus = previousFocusRef.current;
-      if (previousFocus?.isConnected) previousFocus.focus();
+      const returnFocus = previousFocus && previousFocus !== document.body
+        ? previousFocus
+        : options?.returnFocusRef?.current;
+      if (returnFocus?.isConnected) returnFocus.focus();
     };
-  }, [options?.initialFocusRef]);
+  }, [options?.initialFocusRef, options?.returnFocusRef]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -274,7 +281,7 @@ function useModalBehavior(
       const dialog = dialogRef.current;
       if (!dialog) return;
       const focusableElements = Array.from(dialog.querySelectorAll<HTMLElement>(focusableSelector))
-        .filter((element) => element.offsetParent !== null || element === document.activeElement);
+        .filter((element) => element.getAttribute("aria-hidden") !== "true");
       if (!focusableElements.length) return;
 
       const firstElement = focusableElements[0];
@@ -362,6 +369,7 @@ export function App() {
   const windowActive = useWindowActiveState();
   const allowWindowCloseRef = useRef(false);
   const shellCommandHandlerRef = useRef<(payload: ShellCommandEventPayload) => void>(() => {});
+  const commandSearchButtonRef = useRef<HTMLButtonElement>(null);
   const shellCommandContext = {
     activeTabKind: activeTab.kind,
     hasDirtyState,
@@ -647,20 +655,18 @@ export function App() {
         }
         return;
       case "view.toggle_explorer":
-        setExplorerOpen((current) => !current);
+        setExplorerOpen((current) => typeof payload?.checked === "boolean" ? payload.checked : !current);
         return;
       case "view.toggle_inspector":
-        setInspectorOpen((current) => !current);
+        setInspectorOpen((current) => typeof payload?.checked === "boolean" ? payload.checked : !current);
         return;
       case "view.toggle_response_dock":
         if (!["welcome", "settings", "import"].includes(activeTab.kind)) {
-          setResponseVisible((current) => !current);
+          setResponseVisible((current) => typeof payload?.checked === "boolean" ? payload.checked : !current);
         }
         return;
       case "view.toggle_flow_details":
-        if (activeTab.kind === "flow") {
-          setFlowDetailsOpen((current) => !current);
-        }
+        setFlowDetailsOpen((current) => typeof payload?.checked === "boolean" ? payload.checked : !current);
         return;
       default:
         throw new Error(`Unhandled shell command: ${id}`);
@@ -727,6 +733,7 @@ export function App() {
         : [...current, { id: service.id, label: service.name, kind: "request", method: service.method }]
     ));
     setActiveTabId(service.id);
+    syncNativeMenuForTabKind("request");
   }
 
   function handleSelectFlow(flow: ProjectFlow) {
@@ -737,6 +744,7 @@ export function App() {
         : [...current, { id: flow.id, label: flow.name, kind: "flow" }]
     ));
     setActiveTabId(flow.id);
+    syncNativeMenuForTabKind("flow");
   }
 
   function handleSelectTab(tabId: string) {
@@ -747,6 +755,9 @@ export function App() {
     }
     if (tab?.kind === "flow" && project.flows.some((flow) => flow.id === tab.id)) {
       setActiveFlowId(tab.id);
+    }
+    if (tab) {
+      syncNativeMenuForTabKind(tab.kind);
     }
   }
 
@@ -1244,6 +1255,7 @@ export function App() {
         projectDirty={hasDirtyState}
         environment={environment}
         onEnvironmentChange={setEnvironment}
+        commandSearchButtonRef={commandSearchButtonRef}
         onOpenCommandPalette={() => void executeShellCommand("app.search_commands")}
         onSave={() => void executeShellCommand("file.save_project")}
         onRunPrimaryAction={() => {
@@ -1367,7 +1379,7 @@ export function App() {
             onDeleteFlowMapping={handleDeleteFlowMapping}
             onApplyFlowTemplate={handleApplyFlowTemplate}
           />
-          {activeTabHasBottomDock ? (
+          {activeTabHasBottomDock && responseVisible ? (
             <>
               <ResizeHandle
                 ariaLabel="Resize utility dock"
@@ -1430,6 +1442,7 @@ export function App() {
       {commandPaletteOpen ? (
         <CommandPalette
           commands={commandPaletteCommands}
+          returnFocusRef={commandSearchButtonRef}
           onClose={() => setCommandPaletteOpen(false)}
           onChoose={(id) => {
             setCommandPaletteOpen(false);
@@ -1846,6 +1859,14 @@ export function App() {
       // Browser fallback does not have a native menu to refresh.
     }
   }
+
+  function syncNativeMenuForTabKind(activeTabKind: TabKind) {
+    if (!shellReady) return;
+    void syncNativeMenu(createNativeShellMenuState({
+      ...shellCommandContext,
+      activeTabKind: activeTabKind as ShellCommandTabKind
+    }));
+  }
 }
 
 function StartupShell() {
@@ -1871,6 +1892,7 @@ interface TopCommandBarProps {
   inspectorOpen: boolean;
   runnerRunning: boolean;
   showEnvironmentSelector: boolean;
+  commandSearchButtonRef: RefObject<HTMLButtonElement>;
   onEnvironmentChange: (environment: string) => void;
   onOpenCommandPalette: () => void;
   onSave: () => void;
@@ -1888,7 +1910,13 @@ function TopCommandBar(props: TopCommandBarProps) {
           <span>{props.projectName}</span>
         </div>
       </div>
-      <button className="command-search" type="button" onClick={props.onOpenCommandPalette}>
+      <button
+        className="command-search"
+        ref={props.commandSearchButtonRef}
+        type="button"
+        onMouseDown={(event) => event.currentTarget.focus()}
+        onClick={props.onOpenCommandPalette}
+      >
         <Search size={17} />
         <span>Search commands</span>
         <kbd>Cmd K</kbd>
@@ -4322,16 +4350,18 @@ function VariableRow({
 
 function CommandPalette({
   commands,
+  returnFocusRef,
   onClose,
   onChoose
 }: {
   commands: Array<{ id: ShellCommandId; label: string; shortcut?: string }>;
+  returnFocusRef: RefObject<HTMLButtonElement>;
   onClose: () => void;
   onChoose: (id: ShellCommandId) => void;
 }) {
   const [query, setQuery] = useState("");
   const searchInputRef = useRef<HTMLInputElement | null>(null);
-  const dialogRef = useModalBehavior(onClose, { initialFocusRef: searchInputRef });
+  const dialogRef = useModalBehavior(onClose, { initialFocusRef: searchInputRef, returnFocusRef });
   const filteredCommands = commands.filter((command) => command.label.toLowerCase().includes(query.trim().toLowerCase()));
 
   return (

@@ -131,6 +131,34 @@ test("opens command palette and import placeholder", async ({ page }) => {
   await expect(page.getByRole("tab", { name: /Import API Docs/i })).toBeVisible();
 });
 
+test("keeps command palette focus trapped and toggles the response dock", async ({ page }) => {
+  await page.goto("/");
+
+  const searchCommands = page.getByRole("button", { name: /Search commands/i });
+  await searchCommands.click();
+  const dialog = page.getByRole("dialog", { name: "Command palette" });
+  const searchInput = dialog.getByPlaceholder("Search commands");
+  const responseDockToggle = dialog.getByRole("button", { name: /Toggle Response Dock/i });
+
+  await expect(searchInput).toBeFocused();
+  await responseDockToggle.focus();
+  await page.keyboard.press("Tab");
+  await expect(searchInput).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(responseDockToggle).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(searchCommands).toBeFocused();
+
+  await searchCommands.click();
+  await page.getByRole("dialog", { name: "Command palette" }).getByRole("button", { name: /Toggle Response Dock/i }).click();
+  await expect(page.getByLabel("Response and console dock")).toHaveCount(0);
+
+  await searchCommands.click();
+  await page.getByRole("dialog", { name: "Command palette" }).getByRole("button", { name: /Toggle Response Dock/i }).click();
+  await expect(page.getByLabel("Response and console dock")).toBeVisible();
+});
+
 test("renders Welcome as an app overview, not a request editor", async ({ page }) => {
   await page.goto("/");
 

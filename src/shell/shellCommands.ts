@@ -65,6 +65,7 @@ export interface NativeShellMenuState {
 export interface ShellCommandEventPayload {
   id: NativeShellCommandId;
   recentProject?: RecentProject;
+  checked?: boolean;
 }
 
 const shellCommandDefinitions: ShellCommandDefinition[] = [

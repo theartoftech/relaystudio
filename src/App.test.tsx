@@ -124,6 +124,26 @@ describe("Relay Studio shell", () => {
     expect(searchCommands).toHaveFocus();
   });
 
+  it("traps keyboard focus inside the command palette", () => {
+    render(<App />);
+
+    const searchCommands = screen.getByRole("button", { name: /Search commands/i });
+    fireEvent.click(searchCommands);
+
+    const dialog = screen.getByRole("dialog", { name: "Command palette" });
+    const searchInput = within(dialog).getByPlaceholderText("Search commands");
+    const lastCommand = within(dialog).getByRole("button", { name: /Toggle Response Dock/i });
+
+    expect(searchInput).toHaveFocus();
+
+    lastCommand.focus();
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(searchInput).toHaveFocus();
+
+    fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+    expect(lastCommand).toHaveFocus();
+  });
+
   it("shows flow-specific execution commands in the command palette", () => {
     render(<App />);
 
@@ -264,6 +284,45 @@ describe("Relay Studio shell", () => {
     await waitFor(() => {
       expect(closeSpy).toHaveBeenCalledTimes(1);
     });
+  });
+
+  it("cancels dirty close-window flow without closing or clearing dirty state", async () => {
+    const closeSpy = vi.spyOn(window, "close").mockImplementation(() => undefined);
+    render(<App />);
+
+    fireEvent.change(screen.getByLabelText("Request URL"), {
+      target: { value: "https://api.test.local/v1/orders?status=open" }
+    });
+    fireEvent.keyDown(window, { key: "w", metaKey: true, shiftKey: true });
+
+    const savePrompt = screen.getByRole("dialog", { name: "Unsaved changes" });
+    expect(within(savePrompt).getByRole("button", { name: "Cancel" })).toHaveFocus();
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Unsaved changes" })).not.toBeInTheDocument();
+    });
+    expect(closeSpy).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: /^Save \*$/i })).toBeInTheDocument();
+  });
+
+  it("keeps dirty close-tab cancellation scoped to the active tab", async () => {
+    render(<App />);
+
+    fireEvent.change(screen.getByLabelText("Request URL"), {
+      target: { value: "https://api.test.local/v1/orders?status=open" }
+    });
+    fireEvent.keyDown(window, { key: "w", metaKey: true });
+
+    const savePrompt = screen.getByRole("dialog", { name: "Unsaved changes" });
+    fireEvent.click(within(savePrompt).getByRole("button", { name: "Cancel" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Unsaved changes" })).not.toBeInTheDocument();
+    });
+    expect(screen.getByRole("tab", { name: /Create Order/i })).toBeInTheDocument();
+    expect(screen.getByLabelText("Request URL")).toHaveValue("https://api.test.local/v1/orders?status=open");
+    expect(screen.getByRole("button", { name: /^Save \*$/i })).toBeInTheDocument();
   });
 
   it("updates the request method from the top HTTP method selector", () => {
@@ -717,6 +776,35 @@ describe("Relay Studio shell", () => {
     expect(screen.queryByRole("separator", { name: "Resize flow details" })).not.toBeInTheDocument();
   });
 
+  it("regresses view toggle state from the command palette across tab types", () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Search commands/i }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Command palette" })).getByRole("button", { name: /Toggle Sidebar/i }));
+
+    expect(screen.queryByLabelText("Project explorer")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Status bar")).toHaveTextContent("Sidebar hidden");
+
+    fireEvent.click(screen.getByRole("button", { name: /Search commands/i }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Command palette" })).getByRole("button", { name: /Toggle Inspector/i }));
+
+    expect(screen.getByLabelText("Inspector")).toBeInTheDocument();
+    expect(screen.getByLabelText("Status bar")).toHaveTextContent("Inspector shown");
+
+    fireEvent.click(screen.getByRole("tab", { name: "Welcome" }));
+    fireEvent.click(screen.getByRole("button", { name: /Search commands/i }));
+    expect(within(screen.getByRole("dialog", { name: "Command palette" })).queryByRole("button", { name: /Toggle Response Dock/i })).not.toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    fireEvent.click(screen.getByRole("tab", { name: /Login/i }));
+    expect(screen.getByLabelText("Response and console dock")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Search commands/i }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Command palette" })).getByRole("button", { name: /Toggle Response Dock/i }));
+
+    expect(screen.queryByLabelText("Response and console dock")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Status bar")).toHaveTextContent("Dock hidden");
+  });
+
   it("selects flow steps without dirtying layout or losing detail synchronization", () => {
     render(<App />);
 
@@ -929,6 +1017,36 @@ describe("Relay Studio shell", () => {
 
     const builder = screen.getByLabelText("Flow builder");
     expect(within(builder).getByText("New Flow 4")).toBeInTheDocument();
+  });
+
+  it("dismisses explorer context menus with Escape without taking an action", () => {
+    render(<App />);
+
+    const explorer = screen.getByLabelText("Project explorer");
+    fireEvent.contextMenu(within(explorer).getByRole("button", { name: /Health Check/i }), {
+      clientX: 96,
+      clientY: 340
+    });
+
+    expect(screen.getByRole("menu", { name: "Request context menu" })).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    expect(screen.queryByRole("menu", { name: "Request context menu" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Rename Request" })).not.toBeInTheDocument();
+    expect(within(explorer).getByRole("button", { name: /Health Check/i })).toBeInTheDocument();
+  });
+
+  it("dismisses tab context menus on outside click without taking an action", () => {
+    render(<App />);
+
+    fireEvent.contextMenu(screen.getByRole("tab", { name: /Login/i }), { clientX: 420, clientY: 96 });
+
+    expect(screen.getByRole("menu", { name: "Request tab context menu" })).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Workbench"));
+
+    expect(screen.queryByRole("menu", { name: "Request tab context menu" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Rename Request" })).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /Login/i })).toBeInTheDocument();
   });
 
   it("shows a flow row context menu before deleting a flow", () => {

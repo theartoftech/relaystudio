@@ -81,6 +81,7 @@ struct HttpResponseOutput {
 struct ShellCommandEventPayload {
     id: String,
     recent_project: Option<RecentProject>,
+    checked: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
@@ -397,9 +398,18 @@ fn handle_app_menu_event(app: &tauri::AppHandle, id: &str) {
     } else {
         Vec::new()
     };
-    if let Some(payload) = shell_command_payload_for_menu_id(id, &recent_projects) {
+    if let Some(mut payload) = shell_command_payload_for_menu_id(id, &recent_projects) {
+        payload.checked = checked_state_for_menu_id(app, id);
         let _ = app.emit(SHELL_COMMAND_EVENT, payload);
     }
+}
+
+fn checked_state_for_menu_id(app: &tauri::AppHandle, id: &str) -> Option<bool> {
+    app.menu()?
+        .get(id)?
+        .as_check_menuitem()?
+        .is_checked()
+        .ok()
 }
 
 fn shell_command_payload_for_menu_id(
@@ -410,6 +420,7 @@ fn shell_command_payload_for_menu_id(
         return Some(ShellCommandEventPayload {
             id: id.to_string(),
             recent_project: None,
+            checked: None,
         });
     }
     let index_text = id.strip_prefix(MENU_OPEN_RECENT_PREFIX)?;
@@ -420,6 +431,7 @@ fn shell_command_payload_for_menu_id(
         .map(|project| ShellCommandEventPayload {
             id: format!("{MENU_OPEN_RECENT_PREFIX}{index}"),
             recent_project: Some(project),
+            checked: None,
         })
 }
 
@@ -866,6 +878,22 @@ mod tests {
     #[test]
     fn exposes_package_version() {
         assert_eq!(app_version(), env!("CARGO_PKG_VERSION"));
+    }
+
+    #[test]
+    fn default_capabilities_allow_window_close_lifecycle() {
+        let capabilities: Value = serde_json::from_str(include_str!("../capabilities/default.json"))
+            .expect("default capabilities should be valid json");
+        let permissions = capabilities["permissions"]
+            .as_array()
+            .expect("default capabilities should include permissions");
+
+        assert!(permissions.iter().any(|permission| {
+            permission.as_str() == Some("core:window:allow-close")
+        }));
+        assert!(permissions.iter().any(|permission| {
+            permission.as_str() == Some("core:window:allow-destroy")
+        }));
     }
 
     #[test]
