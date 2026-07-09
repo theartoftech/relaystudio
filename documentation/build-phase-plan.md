@@ -474,12 +474,14 @@ Implemented. See `sprint-8b-implementation-status.md`.
 - Platform-shell regression coverage.
 - macOS shell QA script.
 - Windows shell QA script.
+- Windows installer build handoff script for pulling this branch onto a Windows machine and producing testable `.exe` or `.msi` artifacts.
 - Refreshed macOS audit.
 - Bounded Windows audit.
 
 ### Testing Scope
 
 - Dialog, view-toggle, dirty-state, and context-menu regression coverage.
+- Windows machine validation starts from `tools/windows-build-installer.ps1`, which runs dependency install, shared verification, Rust tests, and Tauri packaging before manual QA.
 - Human QA for native menus, title bar, breakpoints, and platform-specific keyboard flows.
 
 ## Sprint 11: Role And Error Coverage

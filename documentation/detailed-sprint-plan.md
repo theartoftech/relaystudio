@@ -601,6 +601,7 @@ Make platform-guideline work enforceable with repeatable tests, QA scripts, and 
 - Automated platform-shell regression coverage.
 - macOS shell QA script.
 - Windows shell QA script.
+- Windows installer build handoff script for generating test artifacts on a Windows machine.
 - Refreshed macOS audit evidence.
 - Bounded Windows desktop audit.
 
@@ -609,6 +610,7 @@ Make platform-guideline work enforceable with repeatable tests, QA scripts, and 
 - Add regression coverage for dialog keyboard behavior, view-toggle state, dirty-state flows, and main context menus.
 - Write macOS QA coverage for menus, settings, save prompts, and view toggles.
 - Write Windows QA coverage for title bar, caption controls, breakpoints, contrast, and keyboard behavior.
+- Add and run `tools/windows-build-installer.ps1` after pulling the 10B-3 branch on Windows; it must complete `npm ci`, `npm run verify`, `cargo test --manifest-path src-tauri/Cargo.toml`, and `npm run tauri build` before manual QA begins.
 - Re-run the macOS HIG audit against the updated desktop app.
 - Perform a bounded Windows desktop audit against the updated shell.
 
@@ -616,6 +618,7 @@ Make platform-guideline work enforceable with repeatable tests, QA scripts, and 
 
 - Platform-shell regressions are covered where the current harness can support them.
 - macOS and Windows shell QA scripts exist and are runnable.
+- A Windows tester can pull the branch and run one documented PowerShell script to produce installable Relay Studio artifacts.
 - June 30, 2026 macOS high-priority findings are either closed or explicitly deferred with rationale.
 - Windows high-priority findings are either closed or converted into tracked backlog items.
 
