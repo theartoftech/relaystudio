@@ -86,7 +86,7 @@ describe("Relay Studio native shell commands", () => {
       if (command === "open_project_file" && args?.path === testProjectPath) {
         return testProject;
       }
-      if (command === "remember_recent_project" || command === "refresh_app_menu") {
+      if (command === "save_project_file" || command === "remember_recent_project" || command === "refresh_app_menu") {
         return null;
       }
       throw new Error(`Unexpected Tauri command: ${command}`);
@@ -164,7 +164,7 @@ describe("Relay Studio native shell commands", () => {
     await screen.findByRole("button", { name: /^Save$/i });
     fireEvent.click(screen.getByRole("button", { name: /^Save$/i }));
 
-    expect(screen.getByRole("dialog", { name: "Save Project" })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "Save Project" })).toBeInTheDocument();
     await waitFor(() => {
       expect(screen.getByLabelText("Project file path")).toHaveValue("C:\\Users\\JeffHaynes\\Documents\\relaystudio\\sample-api-regression.restproj");
     });
@@ -177,8 +177,44 @@ describe("Relay Studio native shell commands", () => {
     await screen.findByRole("button", { name: /^Save$/i });
     fireEvent.keyDown(window, { key: "s", metaKey: true, shiftKey: true });
 
-    expect(screen.getByRole("dialog", { name: "Save Project As" })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "Save Project As" })).toBeInTheDocument();
     expect(screen.getByLabelText("Project file path")).toHaveValue("C:\\Users\\JeffHaynes\\Documents\\relaystudio\\sample-api-regression.restproj");
+  });
+
+  it("saves through native persistence and closes the dialog", async () => {
+    render(<App />);
+
+    await screen.findByRole("button", { name: /^Save$/i });
+    fireEvent.click(screen.getByRole("button", { name: /^Save$/i }));
+    const dialog = await screen.findByRole("dialog", { name: "Save Project" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save Project" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Save Project" })).not.toBeInTheDocument();
+    });
+    expect(nativeMocks.invoke).toHaveBeenCalledWith("save_project_file", expect.objectContaining({
+      path: "C:\\Users\\JeffHaynes\\Documents\\relaystudio\\sample-api-regression.restproj"
+    }));
+    expect(nativeMocks.invoke).toHaveBeenCalledWith("remember_recent_project", expect.any(Object));
+  });
+
+  it("shows native save failures inside the dialog", async () => {
+    nativeMocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "default_project_directory") return "C:\\Users\\JeffHaynes\\Documents\\relaystudio";
+      if (command === "list_recent_projects") return [];
+      if (command === "save_project_file") throw new Error("Could not write temporary project file: access denied");
+      if (command === "refresh_app_menu") return null;
+      throw new Error(`Unexpected Tauri command: ${command}`);
+    });
+    render(<App />);
+
+    await screen.findByRole("button", { name: /^Save$/i });
+    fireEvent.click(screen.getByRole("button", { name: /^Save$/i }));
+    const dialog = await screen.findByRole("dialog", { name: "Save Project" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save Project" }));
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("access denied");
+    expect(dialog).toBeInTheDocument();
   });
 
   it("handles native View menu toggles and refreshes checked menu state", async () => {

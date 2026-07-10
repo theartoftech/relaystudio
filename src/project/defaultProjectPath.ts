@@ -14,11 +14,15 @@ export function buildDefaultProjectPath(projectName: string, directory = BROWSER
   return joinProjectPath(directory, slugProjectFileName(projectName));
 }
 
+export function isBrowserFallbackProjectPath(path: string): boolean {
+  return path.replace(/\\/g, "/").startsWith(`${BROWSER_FALLBACK_PROJECT_DIRECTORY}/`);
+}
+
 export async function resolveDefaultProjectDirectory(): Promise<string> {
-  if (!("__TAURI_INTERNALS__" in window)) {
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return await invoke<string>("default_project_directory");
+  } catch {
     return BROWSER_FALLBACK_PROJECT_DIRECTORY;
   }
-
-  const { invoke } = await import("@tauri-apps/api/core");
-  return invoke<string>("default_project_directory");
 }

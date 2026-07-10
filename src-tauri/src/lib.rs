@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -821,10 +822,28 @@ fn response_temp_path_for(path: &Path) -> PathBuf {
 }
 
 fn recent_projects_path() -> Result<PathBuf, String> {
-    let home = std::env::var_os("HOME").ok_or_else(|| "HOME is not available.".to_string())?;
-    Ok(PathBuf::from(home)
+    let home = home_directory_from(|name| std::env::var_os(name))
+        .ok_or_else(|| "The user home directory is not available.".to_string())?;
+    Ok(home
         .join(".relaystudio")
         .join("recent-projects.json"))
+}
+
+fn home_directory_from(get_env: impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
+    if let Some(home) = get_env("HOME").filter(|value| !value.is_empty()) {
+        return Some(PathBuf::from(home));
+    }
+    if let Some(profile) = get_env("USERPROFILE").filter(|value| !value.is_empty()) {
+        return Some(PathBuf::from(profile));
+    }
+
+    let drive = get_env("HOMEDRIVE").filter(|value| !value.is_empty())?;
+    let path = get_env("HOMEPATH").filter(|value| !value.is_empty())?;
+    Some(PathBuf::from(format!(
+        "{}{}",
+        drive.to_string_lossy(),
+        path.to_string_lossy()
+    )))
 }
 
 fn read_recent_projects() -> Result<Vec<RecentProject>, String> {
@@ -892,6 +911,27 @@ mod tests {
     #[test]
     fn exposes_package_version() {
         assert_eq!(app_version(), env!("CARGO_PKG_VERSION"));
+    }
+
+    #[test]
+    fn resolves_windows_home_without_home_environment_variable() {
+        let home = home_directory_from(|name| match name {
+            "USERPROFILE" => Some(OsString::from(r"C:\Users\JeffHaynes")),
+            _ => None,
+        });
+
+        assert_eq!(home, Some(PathBuf::from(r"C:\Users\JeffHaynes")));
+    }
+
+    #[test]
+    fn resolves_windows_home_from_drive_and_path() {
+        let home = home_directory_from(|name| match name {
+            "HOMEDRIVE" => Some(OsString::from("G:")),
+            "HOMEPATH" => Some(OsString::from(r"\Jeff OneDrive")),
+            _ => None,
+        });
+
+        assert_eq!(home, Some(PathBuf::from(r"G:\Jeff OneDrive")));
     }
 
     #[test]

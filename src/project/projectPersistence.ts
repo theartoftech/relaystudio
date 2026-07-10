@@ -34,7 +34,15 @@ async function invokeTauri<T>(command: string, args?: Record<string, unknown>): 
 }
 
 async function hasTauriRuntime(): Promise<boolean> {
-  return "__TAURI_INTERNALS__" in window;
+  if ("__TAURI_INTERNALS__" in window) {
+    return true;
+  }
+  try {
+    await invokeTauri("app_version");
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function fallbackProjectKey(path: string): string {

@@ -69,7 +69,7 @@ import {
   type RelayProject,
   type SavedResponseMetadata
 } from "./project/projectModel";
-import { buildDefaultProjectPath, resolveDefaultProjectDirectory } from "./project/defaultProjectPath";
+import { buildDefaultProjectPath, isBrowserFallbackProjectPath, resolveDefaultProjectDirectory } from "./project/defaultProjectPath";
 import { createProjectPersistence, type ProjectPersistence } from "./project/projectPersistence";
 import { openNativeProjectFilePicker } from "./project/nativeProjectPicker";
 import {
@@ -640,10 +640,10 @@ export function App() {
         }
         return;
       case "file.save_project":
-        setProjectDialog({ mode: "save", title: "Save Project", path: projectPath });
+        await openSaveProjectDialog("Save Project", projectPath);
         return;
       case "file.save_project_as":
-        setProjectDialog({ mode: "save", title: "Save Project As", path: buildDefaultProjectPath(project.name, defaultProjectDirectory) });
+        await openSaveProjectDialog("Save Project As", "");
         return;
       case "window.close_active_tab":
         if (canCloseActiveTab) {
@@ -1496,7 +1496,7 @@ export function App() {
             }
             setPendingTabCloseId(null);
             setSavePromptOpen(false);
-            setProjectDialog({ mode: "save", title: "Save Project", path: projectPath });
+            void openSaveProjectDialog("Save Project", projectPath);
           }}
         />
       ) : null}
@@ -1529,6 +1529,7 @@ export function App() {
       {projectDialog ? (
         <ProjectFileDialog
           dialog={projectDialog}
+          error={projectError}
           projectName={project.name}
           defaultDirectory={defaultProjectDirectory}
           recentProjects={recentProjects}
@@ -1683,6 +1684,29 @@ export function App() {
     } catch (error) {
       setProjectError(`Could not open native project picker: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  async function openSaveProjectDialog(title: "Save Project" | "Save Project As", currentPath: string) {
+    setProjectError(null);
+    const path = await resolveSaveProjectPath(currentPath);
+    setProjectDialog({ mode: "save", title, path });
+  }
+
+  async function resolveSaveProjectPath(currentPath: string): Promise<string> {
+    if (currentPath && !isBrowserFallbackProjectPath(currentPath)) {
+      return currentPath;
+    }
+    const directory = await resolveNativeProjectDirectoryForSave();
+    return buildDefaultProjectPath(project.name, directory);
+  }
+
+  async function resolveNativeProjectDirectoryForSave(): Promise<string> {
+    if (!isBrowserFallbackProjectPath(buildDefaultProjectPath(project.name, defaultProjectDirectory))) {
+      return defaultProjectDirectory;
+    }
+    const resolvedProjectDirectory = await resolveDefaultProjectDirectory();
+    setDefaultProjectDirectory(resolvedProjectDirectory);
+    return resolvedProjectDirectory;
   }
 
   function requestProjectOpen(pending: PendingProjectOpen) {
@@ -4688,6 +4712,7 @@ function DeleteProjectDialog({
 
 function ProjectFileDialog({
   dialog,
+  error,
   projectName,
   defaultDirectory,
   recentProjects,
@@ -4696,6 +4721,7 @@ function ProjectFileDialog({
   onSubmit
 }: {
   dialog: { mode: "open" | "save"; title: string; path: string };
+  error: string | null;
   projectName: string;
   defaultDirectory: string;
   recentProjects: RecentProject[];
@@ -4762,6 +4788,7 @@ function ProjectFileDialog({
             </section>
           ) : null}
           <p>Project files use the `.restproj` extension. Secret values remain redacted in the workspace and console output.</p>
+          {error ? <p className="dialog-error" role="alert">{error}</p> : null}
           {overwritePending ? <p className="overwrite-warning">A project already exists at this path. Confirm overwrite to continue.</p> : null}
           <div>
             <button type="submit" className="primary-command" disabled={submitting}>

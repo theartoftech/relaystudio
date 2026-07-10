@@ -2767,6 +2767,12 @@ kbd {
   font-weight: 800;
 }
 
+.project-file-dialog .dialog-error {
+  color: var(--danger);
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
 .project-file-dialog .delete-warning {
   color: var(--gray-700);
 }

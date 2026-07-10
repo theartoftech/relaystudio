@@ -217,30 +217,30 @@ describe("Relay Studio shell", () => {
     });
   });
 
-  it("opens the project save dialog from the toolbar", () => {
+  it("opens the project save dialog from the toolbar", async () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole("button", { name: /^Save$/i }));
 
-    expect(screen.getByRole("dialog", { name: "Save Project" })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "Save Project" })).toBeInTheDocument();
     expect(screen.getByLabelText("Project file path")).toHaveValue("/private/tmp/sample-api-regression.restproj");
   });
 
-  it("routes the save keyboard shortcut to the save project dialog", () => {
+  it("routes the save keyboard shortcut to the save project dialog", async () => {
     render(<App />);
 
     fireEvent.keyDown(window, { key: "s", metaKey: true });
 
-    expect(screen.getByRole("dialog", { name: "Save Project" })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "Save Project" })).toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "Unsaved changes" })).not.toBeInTheDocument();
   });
 
-  it("routes the save-as keyboard shortcut to the save-as project dialog", () => {
+  it("routes the save-as keyboard shortcut to the save-as project dialog", async () => {
     render(<App />);
 
     fireEvent.keyDown(window, { key: "s", metaKey: true, shiftKey: true });
 
-    expect(screen.getByRole("dialog", { name: "Save Project As" })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "Save Project As" })).toBeInTheDocument();
     expect(screen.getByLabelText("Project file path")).toHaveValue("/private/tmp/sample-api-regression.restproj");
   });
 
@@ -625,7 +625,7 @@ describe("Relay Studio shell", () => {
     fireEvent.click(within(nameDialog).getByRole("button", { name: "Create Project" }));
 
     fireEvent.click(within(screen.getByLabelText("Primary commands")).getByRole("button", { name: /^Save/i }));
-    const saveDialog = screen.getByRole("dialog", { name: "Save Project" });
+    const saveDialog = await screen.findByRole("dialog", { name: "Save Project" });
     fireEvent.click(within(saveDialog).getByRole("button", { name: "Save Project" }));
 
     await waitFor(() => {
@@ -1215,7 +1215,7 @@ describe("Relay Studio shell", () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole("button", { name: /^Save$/i }));
-    const dialog = screen.getByRole("dialog", { name: "Save Project" });
+    const dialog = await screen.findByRole("dialog", { name: "Save Project" });
     fireEvent.change(within(dialog).getByLabelText("Project file path"), {
       target: { value: "/tmp/ui-save.restproj" }
     });
@@ -1237,7 +1237,7 @@ describe("Relay Studio shell", () => {
     expect(within(builder).getAllByText("Current User").length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole("button", { name: /^Save$/i }));
-    const dialog = screen.getByRole("dialog", { name: "Save Project" });
+    const dialog = await screen.findByRole("dialog", { name: "Save Project" });
     fireEvent.change(within(dialog).getByLabelText("Project file path"), {
       target: { value: "/tmp/flow-save.restproj" }
     });
@@ -1256,7 +1256,7 @@ describe("Relay Studio shell", () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole("button", { name: /^Save$/i }));
-    let dialog = screen.getByRole("dialog", { name: "Save Project" });
+    let dialog = await screen.findByRole("dialog", { name: "Save Project" });
     fireEvent.change(within(dialog).getByLabelText("Project file path"), {
       target: { value: "/tmp/existing.restproj" }
     });
@@ -1270,7 +1270,7 @@ describe("Relay Studio shell", () => {
     const palette = screen.getByRole("dialog", { name: "Command palette" });
     fireEvent.click(within(palette).getByRole("button", { name: /Save Project As/i }));
 
-    dialog = screen.getByRole("dialog", { name: "Save Project As" });
+    dialog = await screen.findByRole("dialog", { name: "Save Project As" });
     fireEvent.change(within(dialog).getByLabelText("Project file path"), {
       target: { value: "/tmp/existing.restproj" }
     });

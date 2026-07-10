@@ -12,6 +12,7 @@ describe("browser fallback project persistence", () => {
     localStorage.clear();
     delete window.__TAURI_INTERNALS__;
     vi.mocked(invoke).mockReset();
+    vi.mocked(invoke).mockRejectedValue(new Error("Tauri runtime is not available"));
   });
 
   it("round trips a project through .restproj storage", async () => {
@@ -157,5 +158,18 @@ describe("Tauri project persistence adapter", () => {
     await expect(persistence.renameProject({ path: "/tmp/project.restproj", name: "" })).rejects.toThrow("Project name is required.");
     await expect(persistence.projectExists("/tmp/project.json")).rejects.toThrow("Project file must use the .restproj extension.");
     expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("detects Tauri through app_version when the internal marker is missing", async () => {
+    delete window.__TAURI_INTERNALS__;
+    vi.mocked(invoke)
+      .mockResolvedValueOnce("0.1.0")
+      .mockResolvedValueOnce([]);
+
+    const persistence = await createProjectPersistence();
+    await expect(persistence.listRecentProjects()).resolves.toEqual([]);
+
+    expect(invoke).toHaveBeenNthCalledWith(1, "app_version", undefined);
+    expect(invoke).toHaveBeenNthCalledWith(2, "list_recent_projects", undefined);
   });
 });

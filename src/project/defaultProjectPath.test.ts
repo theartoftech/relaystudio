@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildDefaultProjectPath, joinProjectPath, slugProjectFileName } from "./defaultProjectPath";
+import { buildDefaultProjectPath, isBrowserFallbackProjectPath, joinProjectPath, slugProjectFileName } from "./defaultProjectPath";
 
 describe("default project paths", () => {
   it("builds browser fallback paths with restproj file names", () => {
@@ -20,5 +20,10 @@ describe("default project paths", () => {
 
   it("uses an explicit fallback name for blank project names", () => {
     expect(slugProjectFileName("  ")).toBe("relay-studio-project.restproj");
+  });
+
+  it("identifies browser fallback paths", () => {
+    expect(isBrowserFallbackProjectPath("/private/tmp/sample.restproj")).toBe(true);
+    expect(isBrowserFallbackProjectPath("C:\\Users\\JeffHaynes\\Documents\\relaystudio\\sample.restproj")).toBe(false);
   });
 });
