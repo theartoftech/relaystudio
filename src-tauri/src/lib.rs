@@ -5,7 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use tauri::menu::{CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 
 const PROJECT_FORMAT: &str = "relay-studio-restproj";
 const PROJECT_SCHEMA_VERSION: u16 = 1;
@@ -105,6 +105,15 @@ fn app_version() -> String {
 }
 
 #[tauri::command]
+fn default_project_directory(app: tauri::AppHandle) -> Result<String, String> {
+    let document_dir = app
+        .path()
+        .document_dir()
+        .map_err(|error| format!("Could not resolve the documents directory: {error}"))?;
+    Ok(default_project_directory_for(&document_dir))
+}
+
+#[tauri::command]
 fn save_project_file(path: String, project: Value) -> Result<(), String> {
     save_project_file_impl(Path::new(&path), &project)
 }
@@ -181,6 +190,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             app_version,
+            default_project_directory,
             save_project_file,
             open_project_file,
             project_file_exists,
@@ -676,6 +686,10 @@ fn validate_project_path(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn default_project_directory_for(document_dir: &Path) -> String {
+    document_dir.join("relaystudio").display().to_string()
+}
+
 fn validate_project_name(name: &str) -> Result<(), String> {
     if name.trim().is_empty() {
         return Err("Project name is required.".to_string());
@@ -1157,6 +1171,13 @@ mod tests {
         assert_eq!(payload.recent_project, Some(recent_projects[0].clone()));
         assert!(shell_command_payload_for_menu_id("file.open_recent.1", &recent_projects).is_none());
         assert!(shell_command_payload_for_menu_id("file.open_recent.foo", &recent_projects).is_none());
+    }
+
+    #[test]
+    fn default_project_directory_uses_relaystudio_under_documents() {
+        let directory = default_project_directory_for(Path::new("C:\\Users\\JeffHaynes\\Documents"));
+        assert!(directory.ends_with("relaystudio"));
+        assert!(directory.contains("Documents"));
     }
 
     fn test_http_request(method: &str, url: &str) -> HttpRequestInput {

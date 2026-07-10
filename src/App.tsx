@@ -69,6 +69,7 @@ import {
   type RelayProject,
   type SavedResponseMetadata
 } from "./project/projectModel";
+import { buildDefaultProjectPath, resolveDefaultProjectDirectory } from "./project/defaultProjectPath";
 import { createProjectPersistence, type ProjectPersistence } from "./project/projectPersistence";
 import { openNativeProjectFilePicker } from "./project/nativeProjectPicker";
 import {
@@ -304,7 +305,8 @@ function useModalBehavior(
 
 export function App() {
   const [project, setProject] = useState<RelayProject>(() => createSampleProject());
-  const [projectPath, setProjectPath] = useState("/private/tmp/sample-api-regression.restproj");
+  const [defaultProjectDirectory, setDefaultProjectDirectory] = useState("/private/tmp");
+  const [projectPath, setProjectPath] = useState(() => buildDefaultProjectPath("Sample API Regression"));
   const [projectDirty, setProjectDirty] = useState(false);
   const [shellReady, setShellReady] = useState(() => !hasTauriRuntimeSync());
   const [sessionProjects, setSessionProjects] = useState<SessionProjectSnapshot[]>([]);
@@ -463,14 +465,21 @@ export function App() {
 
     async function initializeShell() {
       try {
-        const [createdPersistence, createdSavedResponsePersistence] = await Promise.all([
+        const [createdPersistence, createdSavedResponsePersistence, resolvedProjectDirectory] = await Promise.all([
           createProjectPersistence(),
-          createSavedResponsePersistence()
+          createSavedResponsePersistence(),
+          resolveDefaultProjectDirectory()
         ]);
         const recent = await createdPersistence.listRecentProjects();
         if (cancelled) return;
         setPersistence(createdPersistence);
         setSavedResponsePersistence(createdSavedResponsePersistence);
+        setDefaultProjectDirectory(resolvedProjectDirectory);
+        setProjectPath((currentPath) => (
+          currentPath === buildDefaultProjectPath("Sample API Regression")
+            ? buildDefaultProjectPath(project.name, resolvedProjectDirectory)
+            : currentPath
+        ));
         setRecentProjects(recent);
       } catch (error) {
         if (!cancelled) {
@@ -634,7 +643,7 @@ export function App() {
         setProjectDialog({ mode: "save", title: "Save Project", path: projectPath });
         return;
       case "file.save_project_as":
-        setProjectDialog({ mode: "save", title: "Save Project As", path: "" });
+        setProjectDialog({ mode: "save", title: "Save Project As", path: buildDefaultProjectPath(project.name, defaultProjectDirectory) });
         return;
       case "window.close_active_tab":
         if (canCloseActiveTab) {
@@ -1521,6 +1530,7 @@ export function App() {
         <ProjectFileDialog
           dialog={projectDialog}
           projectName={project.name}
+          defaultDirectory={defaultProjectDirectory}
           recentProjects={recentProjects}
           projectExists={handleProjectExists}
           onCancel={() => {
@@ -4679,6 +4689,7 @@ function DeleteProjectDialog({
 function ProjectFileDialog({
   dialog,
   projectName,
+  defaultDirectory,
   recentProjects,
   projectExists,
   onCancel,
@@ -4686,12 +4697,13 @@ function ProjectFileDialog({
 }: {
   dialog: { mode: "open" | "save"; title: string; path: string };
   projectName: string;
+  defaultDirectory: string;
   recentProjects: RecentProject[];
   projectExists: (path: string) => Promise<boolean>;
   onCancel: () => void;
   onSubmit: (input: { path: string }) => Promise<void>;
 }) {
-  const [path, setPath] = useState(dialog.path || `/private/tmp/${projectName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.restproj`);
+  const [path, setPath] = useState(dialog.path || buildDefaultProjectPath(projectName, defaultDirectory));
   const [submitting, setSubmitting] = useState(false);
   const [overwritePending, setOverwritePending] = useState(false);
   const pathInputRef = useRef<HTMLInputElement | null>(null);

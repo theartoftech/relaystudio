@@ -80,6 +80,9 @@ describe("Relay Studio native shell commands", () => {
           }
         ];
       }
+      if (command === "default_project_directory") {
+        return "C:\\Users\\JeffHaynes\\Documents\\relaystudio";
+      }
       if (command === "open_project_file" && args?.path === testProjectPath) {
         return testProject;
       }
@@ -153,6 +156,29 @@ describe("Relay Studio native shell commands", () => {
       }));
       expect(screen.getByRole("heading", { name: "Test Project 4" })).toBeInTheDocument();
     });
+  });
+
+  it("defaults native Save Project paths to the platform project directory", async () => {
+    render(<App />);
+
+    await screen.findByRole("button", { name: /^Save$/i });
+    fireEvent.click(screen.getByRole("button", { name: /^Save$/i }));
+
+    expect(screen.getByRole("dialog", { name: "Save Project" })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByLabelText("Project file path")).toHaveValue("C:\\Users\\JeffHaynes\\Documents\\relaystudio\\sample-api-regression.restproj");
+    });
+    expect(nativeMocks.invoke).toHaveBeenCalledWith("default_project_directory");
+  });
+
+  it("uses the native default project directory for Save Project As fallback paths", async () => {
+    render(<App />);
+
+    await screen.findByRole("button", { name: /^Save$/i });
+    fireEvent.keyDown(window, { key: "s", metaKey: true, shiftKey: true });
+
+    expect(screen.getByRole("dialog", { name: "Save Project As" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Project file path")).toHaveValue("C:\\Users\\JeffHaynes\\Documents\\relaystudio\\sample-api-regression.restproj");
   });
 
   it("handles native View menu toggles and refreshes checked menu state", async () => {
