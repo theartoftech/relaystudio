@@ -162,6 +162,23 @@ export function connectFlowNodes(
   };
 }
 
+export function connectFlowNodeToService(
+  flow: ProjectFlow,
+  source: string,
+  service: ProjectService,
+  condition: FlowEdgeCondition
+): ProjectFlow {
+  const normalized = normalizeFlow(flow);
+  const existingTarget = normalized.nodes.find((node) => node.id !== source && node.serviceId === service.id);
+  if (existingTarget) {
+    return connectFlowNodes(normalized, source, existingTarget.id, condition);
+  }
+
+  const withTarget = addFlowNode(normalized, service);
+  const target = withTarget.nodes[withTarget.nodes.length - 1];
+  return connectFlowNodes(withTarget, source, target.id, condition);
+}
+
 export function disconnectFlowNodes(
   flow: ProjectFlow,
   source: string,

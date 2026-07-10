@@ -5,6 +5,7 @@ import {
   addFlowMapping,
   applyFlowTemplate,
   connectFlowNodes,
+  connectFlowNodeToService,
   disconnectFlowNodes,
   deleteFlowMapping,
   deleteFlowNode,
@@ -25,6 +26,36 @@ const flow = project.flows.find((item) => item.id === "authenticated-read") as P
 const services = project.services;
 
 describe("flow builder", () => {
+  it("adds and connects a request that is not yet a flow step", () => {
+    const singleStepFlow = {
+      ...flow,
+      steps: ["login"],
+      nodes: [flow.nodes[0]],
+      edges: []
+    };
+
+    const connected = connectFlowNodeToService(singleStepFlow, flow.nodes[0].id, services[1], "success");
+
+    expect(connected.nodes).toHaveLength(2);
+    expect(connected.nodes[1]).toMatchObject({ serviceId: services[1].id, label: services[1].name });
+    expect(connected.edges).toContainEqual(expect.objectContaining({
+      source: flow.nodes[0].id,
+      target: connected.nodes[1].id,
+      condition: "success"
+    }));
+  });
+
+  it("connects an existing request step without adding a duplicate", () => {
+    const existingService = services.find((service) => service.id === flow.nodes[1].serviceId)!;
+    const connected = connectFlowNodeToService(flow, flow.nodes[0].id, existingService, "failure");
+
+    expect(connected.nodes).toHaveLength(flow.nodes.length);
+    expect(connected.edges).toContainEqual(expect.objectContaining({
+      source: flow.nodes[0].id,
+      target: flow.nodes[1].id,
+      condition: "failure"
+    }));
+  });
   it("normalizes legacy step lists into positioned nodes and success edges", () => {
     const legacy = { id: "legacy", name: "Legacy", steps: ["login", "current-user"], nodes: [], edges: [], mappings: [] };
     const normalized = normalizeFlow(legacy);

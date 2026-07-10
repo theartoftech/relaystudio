@@ -91,6 +91,7 @@ import {
   addFlowNode,
   addFlowMapping,
   applyFlowTemplate,
+  connectFlowNodeToService,
   connectFlowNodes,
   disconnectFlowNodes,
   deleteFlowMapping,
@@ -896,6 +897,15 @@ export function App() {
     updateFlow(flowId, (flow) => connectFlowNodes(flow, source, target, condition), `${condition === "success" ? "Success" : "Failure"} path added.`);
   }
 
+  function handleConnectFlowNodeToService(flowId: string, source: string, serviceId: string, condition: "success" | "failure") {
+    const service = project.services.find((item) => item.id === serviceId);
+    if (!service) {
+      setProjectError("Path target request no longer exists.");
+      return;
+    }
+    updateFlow(flowId, (flow) => connectFlowNodeToService(flow, source, service, condition), `${condition === "success" ? "Success" : "Failure"} path added.`);
+  }
+
   function handleDisconnectFlowNodes(flowId: string, source: string, target: string, condition: "success" | "failure") {
     updateFlow(flowId, (flow) => disconnectFlowNodes(flow, source, target, condition), `${condition === "success" ? "Success" : "Failure"} path removed.`);
   }
@@ -1379,6 +1389,7 @@ export function App() {
             onAddFlowNode={handleAddFlowNode}
             onDeleteFlowNode={handleDeleteFlowNode}
             onConnectFlowNodes={handleConnectFlowNodes}
+            onConnectFlowNodeToService={handleConnectFlowNodeToService}
             onDisconnectFlowNodes={handleDisconnectFlowNodes}
             onReorderFlowNode={handleReorderFlowNode}
             onMoveFlowNode={handleMoveFlowNode}
@@ -2637,6 +2648,7 @@ function RequestEditor({
   onAddFlowNode,
   onDeleteFlowNode,
   onConnectFlowNodes,
+  onConnectFlowNodeToService,
   onDisconnectFlowNodes,
   onReorderFlowNode,
   onMoveFlowNode,
@@ -2669,6 +2681,7 @@ function RequestEditor({
   onAddFlowNode: (flowId: string, serviceId: string) => void;
   onDeleteFlowNode: (flowId: string, nodeId: string) => void;
   onConnectFlowNodes: (flowId: string, source: string, target: string, condition: "success" | "failure") => void;
+  onConnectFlowNodeToService: (flowId: string, source: string, serviceId: string, condition: "success" | "failure") => void;
   onDisconnectFlowNodes: (flowId: string, source: string, target: string, condition: "success" | "failure") => void;
   onReorderFlowNode: (flowId: string, nodeId: string, direction: "left" | "right") => void;
   onMoveFlowNode: (flowId: string, nodeId: string, position: { x: number; y: number }) => void;
@@ -2698,6 +2711,7 @@ function RequestEditor({
         onAddFlowNode={onAddFlowNode}
         onDeleteFlowNode={onDeleteFlowNode}
         onConnectFlowNodes={onConnectFlowNodes}
+        onConnectFlowNodeToService={onConnectFlowNodeToService}
         onDisconnectFlowNodes={onDisconnectFlowNodes}
         onReorderFlowNode={onReorderFlowNode}
         onMoveFlowNode={onMoveFlowNode}
@@ -3091,6 +3105,7 @@ function FlowBuilderEditor(props: {
   onAddFlowNode: (flowId: string, serviceId: string) => void;
   onDeleteFlowNode: (flowId: string, nodeId: string) => void;
   onConnectFlowNodes: (flowId: string, source: string, target: string, condition: "success" | "failure") => void;
+  onConnectFlowNodeToService: (flowId: string, source: string, serviceId: string, condition: "success" | "failure") => void;
   onDisconnectFlowNodes: (flowId: string, source: string, target: string, condition: "success" | "failure") => void;
   onReorderFlowNode: (flowId: string, nodeId: string, direction: "left" | "right") => void;
   onMoveFlowNode: (flowId: string, nodeId: string, position: { x: number; y: number }) => void;
@@ -3117,6 +3132,7 @@ function FlowBuilderEditor(props: {
   const [flowInteractive, setFlowInteractive] = useState(true);
   const [mappingDialogOpen, setMappingDialogOpen] = useState(false);
   const activeDraggedNodeId = useRef<string | null>(null);
+  const previousSelectedNodeId = useRef(selectedNodeId);
   const dragState = useRef<FlowCanvasDragState | null>(null);
   const flowCanvasRef = useRef<HTMLDivElement | null>(null);
   const recoveredPositions = recoverVisibleFlowPositions(flow.nodes, flowCanvasSize);
@@ -3128,7 +3144,14 @@ function FlowBuilderEditor(props: {
   const selectedConsumedVariables = flowConsumedVariables(selectedService);
   const selectedIsCleanupStep = isCleanupService(selectedService);
   const branchTargets = selectedNode ? flow.nodes.filter((node) => node.id !== selectedNode.id) : [];
-  const branchTarget = branchTargets.find((node) => node.id === branchTargetId) ?? branchTargets[0];
+  const unrepresentedTargetServices = useMemo(() => selectedNode ? props.services.filter((service) => (
+    service.id !== selectedNode.serviceId && !flow.nodes.some((node) => node.serviceId === service.id)
+  )) : [], [flow.nodes, props.services, selectedNode]);
+  const branchTargetServiceId = branchTargetId.startsWith("service:") ? branchTargetId.slice("service:".length) : "";
+  const branchTarget = branchTargetServiceId ? undefined : branchTargets.find((node) => node.id === branchTargetId) ?? branchTargets[0];
+  const branchTargetService = branchTargetServiceId
+    ? unrepresentedTargetServices.find((service) => service.id === branchTargetServiceId)
+    : undefined;
   const selectedIndex = selectedNode ? flow.nodes.findIndex((node) => node.id === selectedNode.id) : -1;
   const successPathExists = Boolean(selectedNode && branchTarget && flow.edges.some((edge) => (
     edge.source === selectedNode.id && edge.target === branchTarget.id && edge.condition === "success"
@@ -3310,11 +3333,19 @@ function FlowBuilderEditor(props: {
 
   useEffect(() => {
     if (!selectedNode) return;
-    const nextTarget = flow.nodes.find((node) => node.id !== selectedNode.id && node.id === branchTargetId)
+    const selectionChanged = previousSelectedNodeId.current !== selectedNode.id;
+    previousSelectedNodeId.current = selectedNode.id;
+    const currentServiceTarget = branchTargetId.startsWith("service:")
+      ? unrepresentedTargetServices.find((service) => service.id === branchTargetId.slice("service:".length))
+      : undefined;
+    const connectedTargetId = flow.edges.find((edge) => edge.source === selectedNode.id && edge.condition === "success")?.target
+      ?? flow.edges.find((edge) => edge.source === selectedNode.id)?.target;
+    const nextTarget = (selectionChanged ? flow.nodes.find((node) => node.id === connectedTargetId) : undefined)
+      ?? flow.nodes.find((node) => node.id !== selectedNode.id && node.id === branchTargetId)
       ?? flow.nodes[selectedIndex + 1]
       ?? flow.nodes.find((node) => node.id !== selectedNode.id);
-    setBranchTargetId(nextTarget?.id ?? "");
-  }, [branchTargetId, flow.nodes, selectedIndex, selectedNode]);
+    setBranchTargetId(!selectionChanged && currentServiceTarget ? branchTargetId : nextTarget?.id ?? (unrepresentedTargetServices[0] ? `service:${unrepresentedTargetServices[0].id}` : ""));
+  }, [branchTargetId, flow.edges, flow.nodes, selectedIndex, selectedNode, unrepresentedTargetServices]);
 
   return (
     <section className="editor-surface flow-builder" aria-label="Flow builder">
@@ -3485,9 +3516,12 @@ function FlowBuilderEditor(props: {
               </section>
               <label className="flow-branch-target">
                 <span>Path target</span>
-                <select value={branchTarget?.id ?? ""} onChange={(event) => setBranchTargetId(event.target.value)} disabled={!branchTargets.length}>
+                <select value={branchTargetService ? `service:${branchTargetService.id}` : branchTarget?.id ?? ""} onChange={(event) => setBranchTargetId(event.target.value)} disabled={!branchTargets.length && !unrepresentedTargetServices.length}>
                   {branchTargets.map((node) => (
                     <option value={node.id} key={node.id}>{node.label}</option>
+                  ))}
+                  {unrepresentedTargetServices.map((service) => (
+                    <option value={`service:${service.id}`} key={`service:${service.id}`}>{service.name} (add step)</option>
                   ))}
                 </select>
               </label>
@@ -3501,8 +3535,12 @@ function FlowBuilderEditor(props: {
                     className={successPathExists ? "flow-path-icon remove" : "flow-path-icon success"}
                     aria-label={successPathExists ? "Remove Success Path" : "Add Success Path"}
                     title={successPathExists ? "Remove Success Path" : "Add Success Path"}
-                    disabled={!branchTarget}
+                    disabled={!branchTarget && !branchTargetService}
                     onClick={() => {
+                      if (branchTargetService) {
+                        props.onConnectFlowNodeToService(flow.id, selectedNode.id, branchTargetService.id, "success");
+                        return;
+                      }
                       if (!branchTarget) return;
                       if (successPathExists) {
                         props.onDisconnectFlowNodes(flow.id, selectedNode.id, branchTarget.id, "success");
@@ -3522,8 +3560,12 @@ function FlowBuilderEditor(props: {
                     className={failurePathExists ? "flow-path-icon remove" : "flow-path-icon failure"}
                     aria-label={failurePathExists ? "Remove Failure Path" : "Add Failure Path"}
                     title={failurePathExists ? "Remove Failure Path" : "Add Failure Path"}
-                    disabled={!branchTarget}
+                    disabled={!branchTarget && !branchTargetService}
                     onClick={() => {
+                      if (branchTargetService) {
+                        props.onConnectFlowNodeToService(flow.id, selectedNode.id, branchTargetService.id, "failure");
+                        return;
+                      }
                       if (!branchTarget) return;
                       if (failurePathExists) {
                         props.onDisconnectFlowNodes(flow.id, selectedNode.id, branchTarget.id, "failure");

@@ -815,6 +815,7 @@ describe("Relay Studio shell", () => {
     fireEvent.click(within(builder).getByRole("button", { name: "Flow step List Products" }));
 
     expect(within(screen.getByLabelText("Flow step details")).getByLabelText("Step order")).toHaveTextContent("3");
+    expect(within(builder).getByLabelText("Path target")).toHaveDisplayValue("Get Product");
     expect(screen.queryByText("Flow layout updated.")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Save$/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Save \*$/i })).not.toBeInTheDocument();
@@ -964,6 +965,30 @@ describe("Relay Studio shell", () => {
     expect(within(builder).getByLabelText("Flow templates")).toBeInTheDocument();
     expect(within(builder).getByRole("button", { name: /Authenticated Read/i })).toBeInTheDocument();
     expect(screen.getByText("New flow created.")).toBeInTheDocument();
+  });
+
+  it("adds a missing request directly from the path target", async () => {
+    render(<App />);
+
+    const explorer = screen.getByLabelText("Project explorer");
+    fireEvent.click(within(explorer).getByRole("button", { name: "New flow" }));
+    const builder = screen.getByLabelText("Flow builder");
+    fireEvent.change(within(builder).getByLabelText("Add request step"), {
+      target: { value: "login" }
+    });
+    fireEvent.click(within(builder).getByRole("button", { name: "Add Step" }));
+
+    const pathTarget = within(builder).getByLabelText("Path target");
+    expect(pathTarget).toBeEnabled();
+    expect(within(pathTarget).getByRole("option", { name: "Current User (add step)" })).toBeInTheDocument();
+    fireEvent.change(pathTarget, { target: { value: "service:current-user" } });
+    fireEvent.click(within(builder).getByRole("button", { name: "Add Success Path" }));
+
+    await waitFor(() => {
+      expect(within(builder).getByText("2 steps - 1 links")).toBeInTheDocument();
+    });
+    expect(within(builder).getAllByText("Current User").length).toBeGreaterThan(0);
+    expect(screen.getByText("Success path added.")).toBeInTheDocument();
   });
 
   it("applies a flow template and marks cleanup work clearly", async () => {
