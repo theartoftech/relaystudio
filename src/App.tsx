@@ -119,6 +119,7 @@ import {
   defaultSavedResponsePath
 } from "./services/savedResponses";
 import { formatResponseSize } from "./services/responseFormatting";
+import { createDiagnosticsBundle } from "./services/diagnostics";
 import { runServiceRequest, type ExecutableRequest, type ExecutedResponse, type RunnerConsoleEvent } from "./services/serviceRunner";
 import {
   createNativeShellMenuState,
@@ -349,6 +350,7 @@ export function App() {
   const [runnerEvents, setRunnerEvents] = useState<RunnerConsoleEvent[]>([]);
   const [runnerError, setRunnerError] = useState<string | null>(null);
   const [runnerRunning, setRunnerRunning] = useState(false);
+  const runnerAbortControllerRef = useRef<AbortController | null>(null);
   const [editableRequestUrl, setEditableRequestUrl] = useState<string | null>(null);
   const [saveResponseDialog, setSaveResponseDialog] = useState<null | {
     path: string;
@@ -1140,11 +1142,13 @@ export function App() {
       environmentForRun = parsed.environment;
     }
 
+    const controller = new AbortController();
+    runnerAbortControllerRef.current = controller;
     setRunnerRunning(true);
     setRunnerError(null);
     setResponseVisible(true);
 
-    const result = await runServiceRequest(serviceForRun, environmentForRun, undefined, projectSettings);
+    const result = await runServiceRequest(serviceForRun, environmentForRun, undefined, projectSettings, { signal: controller.signal });
     setRunnerRequest(result.request);
     setRunnerEvents(result.events);
     setRunnerResponse(result.response);
@@ -1167,16 +1171,19 @@ export function App() {
       setProjectError(result.error);
     }
 
+    if (runnerAbortControllerRef.current === controller) runnerAbortControllerRef.current = null;
     setRunnerRunning(false);
   }
 
   async function handleRunFlow() {
     if (!activeFlow || !activeEnvironment) return;
+    const controller = new AbortController();
+    runnerAbortControllerRef.current = controller;
     setRunnerRunning(true);
     setRunnerError(null);
     setResponseVisible(true);
 
-    const result = await runFlow(activeFlow, project.services, activeEnvironment);
+    const result = await runFlow(activeFlow, project.services, activeEnvironment, undefined, { signal: controller.signal });
     setProject((current) => touchProject({
       ...current,
       flows: current.flows.map((flow) => (
@@ -1188,13 +1195,41 @@ export function App() {
     }));
     setProjectDirty(true);
     setTabs((current) => current.map((tab) => (tab.id === activeTabId ? { ...tab, dirty: true } : tab)));
-    setProjectMessage(result.issues.some((issue) => issue.severity === "error") ? "Flow blocked or failed during mapping." : "Flow run completed.");
+    setProjectMessage(result.error === "Flow cancelled."
+      ? "Flow cancelled."
+      : result.issues.some((issue) => issue.severity === "error")
+        ? "Flow blocked or failed during mapping."
+        : "Flow run completed.");
     setProjectError(null);
     setRunnerEvents(result.events);
     setRunnerResponse(result.response);
     setRunnerRequest(result.request);
     setRunnerError(result.issues.length ? result.issues.map((issue) => issue.message).join(" ") : result.error);
+    if (runnerAbortControllerRef.current === controller) runnerAbortControllerRef.current = null;
     setRunnerRunning(false);
+  }
+
+  function handleCancelRun() {
+    runnerAbortControllerRef.current?.abort();
+    setProjectMessage(activeTab.kind === "flow" ? "Cancelling flow…" : "Cancelling request…");
+  }
+
+  function handleExportDiagnostics() {
+    const bundle = createDiagnosticsBundle({
+      appVersion: "0.1.0",
+      platform: getDesktopPlatform(),
+      project,
+      events: runnerEvents
+    });
+    const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `relay-studio-diagnostics-${Date.now()}.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    setProjectMessage("Redacted diagnostics bundle exported.");
+    setProjectError(null);
   }
 
   function openSaveResponseDialog() {
@@ -1384,6 +1419,7 @@ export function App() {
                 }
               }}
               onSendRequest={handleSendRequest}
+              onCancelRun={handleCancelRun}
               runnerRunning={runnerRunning}
             />
           ) : null}
@@ -1400,6 +1436,7 @@ export function App() {
             }), askToSaveOnClose ? "Close prompt enabled." : "Close prompt disabled.")}
             onSettingChange={handleProjectSettingChange}
             onProxySettingChange={handleProxySettingChange}
+            onExportDiagnostics={handleExportDiagnostics}
             activeService={activeService}
             activeFlow={activeFlow}
             flowDetailsOpen={flowDetailsOpen}
@@ -2608,6 +2645,7 @@ function RequestComposer({
   onRequestUrlChange,
   onMethodChange,
   onSendRequest,
+  onCancelRun,
   runnerRunning
 }: {
   requestUrl: string;
@@ -2615,6 +2653,7 @@ function RequestComposer({
   onRequestUrlChange: (value: string) => void;
   onMethodChange: (method: HttpMethod) => void;
   onSendRequest: () => void;
+  onCancelRun: () => void;
   runnerRunning: boolean;
 }) {
   return (
@@ -2641,13 +2680,12 @@ function RequestComposer({
         <button
           type="button"
           className="primary-command send-button"
-          aria-label={activeTab.kind === "flow" ? "Run Flow" : "Send Request"}
-          title={activeTab.kind === "flow" ? "Run Flow" : "Send Request"}
-          onClick={onSendRequest}
-          disabled={runnerRunning}
+          aria-label={runnerRunning ? (activeTab.kind === "flow" ? "Cancel Flow" : "Cancel Request") : (activeTab.kind === "flow" ? "Run Flow" : "Send Request")}
+          title={runnerRunning ? "Cancel current execution" : (activeTab.kind === "flow" ? "Run Flow" : "Send Request")}
+          onClick={runnerRunning ? onCancelRun : onSendRequest}
         >
-          {activeTab.kind === "flow" ? <Play size={18} /> : <Send size={18} />}
-          <span>{runnerRunning ? "Running..." : activeTab.kind === "flow" ? "Run Flow" : "Send Request"}</span>
+          {runnerRunning ? <X size={18} /> : activeTab.kind === "flow" ? <Play size={18} /> : <Send size={18} />}
+          <span>{runnerRunning ? (activeTab.kind === "flow" ? "Cancel Flow" : "Cancel Request") : activeTab.kind === "flow" ? "Run Flow" : "Send Request"}</span>
         </button>
       </div>
     </div>
@@ -2664,6 +2702,7 @@ function RequestEditor({
   onAskToSaveOnCloseChange,
   onSettingChange,
   onProxySettingChange,
+  onExportDiagnostics,
   activeService,
   activeFlow,
   flowDetailsOpen,
@@ -2697,6 +2736,7 @@ function RequestEditor({
   onAskToSaveOnCloseChange: (enabled: boolean) => void;
   onSettingChange: <K extends keyof ProjectSettings>(key: K, value: ProjectSettings[K], message: string) => void;
   onProxySettingChange: <K extends keyof ProjectSettings["proxy"]>(key: K, value: ProjectSettings["proxy"][K], message: string) => void;
+  onExportDiagnostics: () => void;
   activeService: ProjectService | undefined;
   activeFlow: ProjectFlow | undefined;
   flowDetailsOpen: boolean;
@@ -2765,6 +2805,7 @@ function RequestEditor({
         onAskToSaveOnCloseChange={onAskToSaveOnCloseChange}
         onSettingChange={onSettingChange}
         onProxySettingChange={onProxySettingChange}
+        onExportDiagnostics={onExportDiagnostics}
       />
     );
   }
@@ -3947,7 +3988,8 @@ function ProjectSettingsView({
   onDefaultEnvironmentChange,
   onAskToSaveOnCloseChange,
   onSettingChange,
-  onProxySettingChange
+  onProxySettingChange,
+  onExportDiagnostics
 }: {
   project: RelayProject;
   projectPath: string;
@@ -3957,6 +3999,7 @@ function ProjectSettingsView({
   onAskToSaveOnCloseChange: (enabled: boolean) => void;
   onSettingChange: <K extends keyof ProjectSettings>(key: K, value: ProjectSettings[K], message: string) => void;
   onProxySettingChange: <K extends keyof ProjectSettings["proxy"]>(key: K, value: ProjectSettings["proxy"][K], message: string) => void;
+  onExportDiagnostics: () => void;
 }) {
   const [activeSection, setActiveSection] = useState<"request" | "display" | "proxy" | "workspace">("request");
   const settings = getProjectSettings(project);
@@ -4089,6 +4132,9 @@ function ProjectSettingsView({
             </SettingsRow>
             <SettingsRow label="Project status" help="Read-only save state for this workspace.">
               <output>{hasDirtyState ? "Unsaved changes" : "Saved"}</output>
+            </SettingsRow>
+            <SettingsRow label="Diagnostics bundle" help="Export app, platform, schema, project counts, and recent console events with secrets redacted.">
+              <button type="button" onClick={onExportDiagnostics}>Export Diagnostics</button>
             </SettingsRow>
           </section>
         ) : null}

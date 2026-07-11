@@ -126,6 +126,11 @@ fn open_project_file(path: String) -> Result<Value, String> {
 }
 
 #[tauri::command]
+fn restore_project_backup(path: String) -> Result<(), String> {
+    restore_project_backup_impl(Path::new(&path))
+}
+
+#[tauri::command]
 fn project_file_exists(path: String) -> Result<bool, String> {
     let project_path = Path::new(&path);
     validate_project_path(project_path)?;
@@ -195,6 +200,7 @@ pub fn run() {
             default_project_directory,
             save_project_file,
             open_project_file,
+            restore_project_backup,
             project_file_exists,
             rename_project_file,
             delete_project_file,
@@ -662,6 +668,21 @@ fn open_project_file_impl(path: &Path) -> Result<Value, String> {
     Ok(project)
 }
 
+fn restore_project_backup_impl(path: &Path) -> Result<(), String> {
+    validate_project_path(path)?;
+    let backup_path = backup_path_for(path);
+    let raw = fs::read(&backup_path)
+        .map_err(|error| format!("Could not restore project backup: {error}"))?;
+    let project: Value = serde_json::from_slice(&raw)
+        .map_err(|error| format!("Could not restore project backup: invalid JSON: {error}"))?;
+    validate_project_schema(&project)?;
+    let temp_path = temp_path_for(path);
+    fs::write(&temp_path, raw)
+        .map_err(|error| format!("Could not write restored project: {error}"))?;
+    fs::rename(&temp_path, path)
+        .map_err(|error| format!("Could not finalize project restore: {error}"))
+}
+
 fn rename_project_file_impl(path: &Path, name: &str) -> Result<(), String> {
     validate_project_path(path)?;
     validate_project_name(name)?;
@@ -976,6 +997,28 @@ mod tests {
 
         let opened = open_project_file_impl(&path).expect("open");
         assert_eq!(opened, project);
+    }
+
+    #[test]
+    fn project_backup_restores_last_valid_save() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("recovery.restproj");
+        let original = json!({
+            "format": "relay-studio-restproj",
+            "schemaVersion": 1,
+            "name": "Original"
+        });
+        let updated = json!({
+            "format": "relay-studio-restproj",
+            "schemaVersion": 1,
+            "name": "Updated"
+        });
+
+        save_project_file_impl(&path, &original).expect("save original");
+        save_project_file_impl(&path, &updated).expect("save updated");
+        restore_project_backup_impl(&path).expect("restore backup");
+
+        assert_eq!(open_project_file_impl(&path).expect("open restored"), original);
     }
 
     #[test]

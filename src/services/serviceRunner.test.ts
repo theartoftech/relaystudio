@@ -242,6 +242,44 @@ describe("service runner", () => {
 
     expect(network.error).toBe("Network connection failed.");
     expect(timeout.error).toBe("Request timed out.");
+    expect(network.typedError).toMatchObject({ category: "network", retryable: true });
+    expect(timeout.typedError).toMatchObject({ category: "timeout", retryable: true });
+  });
+
+  it("retries retryable transport failures and records each retry", async () => {
+    const transport = vi.fn()
+      .mockRejectedValueOnce(new Error("Network connection failed."))
+      .mockResolvedValueOnce({
+        status: 200,
+        statusText: "OK",
+        headers: { "content-type": "application/json" },
+        body: `{"ok":true}`,
+        durationMs: 4
+      });
+
+    const result = await runServiceRequest({
+      ...createOrder,
+      retry: { attempts: 1, backoffMs: 0 }
+    }, qa, transport);
+
+    expect(transport).toHaveBeenCalledTimes(2);
+    expect(result.error).toBeNull();
+    expect(result.events.map((event) => event.message)).toContain("Retrying request after network failure (1 of 1).");
+  });
+
+  it("cancels a running request without retrying", async () => {
+    const controller = new AbortController();
+    const transport: HttpTransport = vi.fn(async (_request, signal) => new Promise<never>((_resolve, reject) => {
+      signal?.addEventListener("abort", () => reject(new DOMException("Cancelled", "AbortError")), { once: true });
+    }));
+
+    const pending = runServiceRequest(createOrder, qa, transport, undefined, { signal: controller.signal });
+    controller.abort();
+    const result = await pending;
+
+    expect(result.error).toBe("Request cancelled.");
+    expect(result.typedError).toMatchObject({ category: "cancelled", code: "REQUEST_CANCELLED" });
+    expect(transport).toHaveBeenCalledTimes(1);
   });
 
   it("normalizes non-Error thrown values", async () => {

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { createSampleProject } from "./projectModel";
 import { createProjectPersistence } from "./projectPersistence";
+import { prepareProjectForExport } from "./projectSchema";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn()
@@ -30,7 +31,21 @@ describe("browser fallback project persistence", () => {
       path: "/tmp/sample-api-regression.restproj"
     });
 
-    expect(opened).toEqual(project);
+    expect(opened).toEqual(expect.objectContaining({ id: project.id, name: project.name }));
+    expect(opened.environments[0].variables.find((variable) => variable.name === "accessToken")?.value).toBe("");
+  });
+
+  it("creates and restores a browser recovery backup before overwriting a project", async () => {
+    const persistence = await createProjectPersistence();
+    const path = "/tmp/recovery.restproj";
+    const original = createSampleProject("2026-06-21T00:00:00.000Z");
+    const updated = { ...original, name: "Updated" };
+
+    await persistence.saveProject({ path, project: original });
+    await persistence.saveProject({ path, project: updated });
+    await persistence.restoreProjectBackup(path);
+
+    await expect(persistence.openProject({ path })).resolves.toMatchObject({ name: original.name });
   });
 
   it("opens legacy browser fallback entries without requiring a password", async () => {
@@ -140,7 +155,10 @@ describe("Tauri project persistence adapter", () => {
     await persistence.removeRecentProject("/tmp/project.restproj");
     await persistence.rememberRecentProject({ name: project.name, path: "/tmp/project.restproj", openedAt: project.createdAt });
 
-    expect(invoke).toHaveBeenNthCalledWith(1, "save_project_file", { path: "/tmp/project.restproj", project });
+    expect(invoke).toHaveBeenNthCalledWith(1, "save_project_file", {
+      path: "/tmp/project.restproj",
+      project: prepareProjectForExport(project)
+    });
     expect(invoke).toHaveBeenNthCalledWith(2, "open_project_file", { path: "/tmp/project.restproj" });
     expect(invoke).toHaveBeenNthCalledWith(3, "project_file_exists", { path: "/tmp/project.restproj" });
     expect(invoke).toHaveBeenNthCalledWith(4, "list_recent_projects", undefined);
@@ -158,6 +176,24 @@ describe("Tauri project persistence adapter", () => {
     await expect(persistence.renameProject({ path: "/tmp/project.restproj", name: "" })).rejects.toThrow("Project name is required.");
     await expect(persistence.projectExists("/tmp/project.json")).rejects.toThrow("Project file must use the .restproj extension.");
     expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("guards concurrent saves to the same path", async () => {
+    let finishSave: (() => void) | undefined;
+    vi.mocked(invoke).mockImplementation((command) => {
+      if (command === "save_project_file") {
+        return new Promise<void>((resolve) => { finishSave = resolve; });
+      }
+      return Promise.resolve("0.1.0");
+    });
+    const persistence = await createProjectPersistence();
+    const input = { path: "/tmp/concurrent.restproj", project: createSampleProject() };
+
+    const first = persistence.saveProject(input);
+    await expect(persistence.saveProject(input)).rejects.toThrow("A save is already in progress");
+    await vi.waitFor(() => expect(finishSave).toBeTypeOf("function"));
+    finishSave?.();
+    await first;
   });
 
   it("detects Tauri through app_version when the internal marker is missing", async () => {
