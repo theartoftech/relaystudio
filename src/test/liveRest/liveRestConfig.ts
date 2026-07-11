@@ -122,9 +122,14 @@ function parseLiveRestSuiteConfig(value: unknown, sourceLabel: string): LiveRest
 function parseCredentials(value: unknown, role: "admin" | "standard" | "restricted", sourceLabel: string): LiveRestUserCredentials {
   const users = expectObject(value, `${sourceLabel}.users`);
   const credentials = expectObject(users[role], `${sourceLabel}.users.${role}`);
+  const passwordLabel = `${sourceLabel}.users.${role}.password`;
+  const password = expectNonEmptyString(credentials.password, passwordLabel);
+  if (password === "replace-with-local-secret") {
+    throw new Error(`${passwordLabel} must be replaced with a local secret.`);
+  }
   return {
     username: expectNonEmptyString(credentials.username, `${sourceLabel}.users.${role}.username`),
-    password: expectNonEmptyString(credentials.password, `${sourceLabel}.users.${role}.password`)
+    password
   };
 }
 
@@ -274,8 +279,14 @@ function expectHttpStatus(value: unknown, label: string): number {
 
 function assertUrl(value: string, label: string) {
   try {
-    new URL(value);
+    const url = new URL(value);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      throw new Error(`${label} must use http or https.`);
+    }
   } catch (error) {
+    if (error instanceof Error && error.message === `${label} must use http or https.`) {
+      throw error;
+    }
     throw new Error(`${label} must be a valid absolute URL. ${error instanceof Error ? error.message : String(error)}`);
   }
 }
