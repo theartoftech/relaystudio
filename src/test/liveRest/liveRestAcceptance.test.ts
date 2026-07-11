@@ -13,10 +13,8 @@ import { loadOptionalLiveRestConfig } from "./liveRestConfig";
 const liveRestState = loadOptionalLiveRestConfig();
 
 if (!liveRestState.enabled) {
-  describe("live REST acceptance", () => {
-    it("stays opt-in until a local config file is provided", () => {
-      expect(liveRestState.reason).toContain("RELAY_LIVE_REST_CONFIG");
-    });
+  describe.skip("live REST acceptance", () => {
+    it(`SKIPPED: ${liveRestState.reason}`, () => undefined);
   });
 } else {
   const { config } = liveRestState;
@@ -77,6 +75,7 @@ if (!liveRestState.enabled) {
 
     const token = extractStringValue(loginResult.response?.rawBody, config.login.tokenJsonPath, `login token for ${credentials.username}`);
     expect(token).not.toHaveLength(0);
+    assertSanitizedDiagnostics(loginResult, [credentials.password, token]);
     return token;
   }
 }
@@ -190,4 +189,20 @@ function assertStatus(actual: number | undefined, expected: number, label: strin
 function assertAuthHeaderRedaction(actual: string | undefined, redacted: string | undefined) {
   expect(actual).toMatch(/^Bearer\s+\S+/);
   expect(redacted).toBe("Bearer ********");
+}
+
+function assertSanitizedDiagnostics(
+  result: Awaited<ReturnType<typeof executeScenario>>,
+  sensitiveValues: string[]
+): void {
+  const diagnostics = JSON.stringify({
+    events: result.events,
+    redactedHeaders: result.request?.redactedHeaders,
+    error: result.error,
+    validationIssues: result.validationIssues
+  });
+
+  for (const sensitiveValue of sensitiveValues) {
+    expect(diagnostics).not.toContain(sensitiveValue);
+  }
 }

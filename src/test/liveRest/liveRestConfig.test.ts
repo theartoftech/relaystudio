@@ -42,6 +42,28 @@ describe("liveRestConfig", () => {
     expect(() => loadLiveRestConfig(configPath)).toThrow(".users.standard");
   });
 
+  it("rejects checked-in placeholder credentials", () => {
+    const configPath = join(tempDir, "placeholder.json");
+    const config = validConfig();
+    config.users.standard.password = "replace-with-local-secret";
+    writeFileSync(configPath, JSON.stringify(config, null, 2));
+
+    expect(() => loadLiveRestConfig(configPath)).toThrow(
+      ".users.standard.password must be replaced with a local secret"
+    );
+  });
+
+  it("rejects non-HTTP targets", () => {
+    const configPath = join(tempDir, "file-target.json");
+    const config = validConfig();
+    config.baseUrl = "file:///tmp/not-a-rest-target";
+    writeFileSync(configPath, JSON.stringify(config, null, 2));
+
+    expect(() => loadLiveRestConfig(configPath)).toThrow(
+      ".baseUrl must use http or https"
+    );
+  });
+
   it("loads a valid config file", () => {
     const configPath = join(tempDir, "live-rest.json");
     writeFileSync(configPath, JSON.stringify(validConfig(), null, 2));
