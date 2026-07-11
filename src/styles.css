@@ -2316,17 +2316,17 @@ kbd {
 }
 
 .response-content {
+  position: relative;
   display: grid;
   grid-template-rows: 36px minmax(0, 1fr);
   height: 100%;
 }
 
 .response-meta {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 0 var(--panel-x-padding);
+  min-width: 0;
+  padding: 0 116px 0 var(--panel-x-padding);
   font-size: var(--ui-font-size);
   border-bottom: 1px solid var(--gray-200);
 }
@@ -2339,12 +2339,16 @@ kbd {
   white-space: nowrap;
 }
 
-.response-meta button {
-  flex: 0 0 auto;
+.response-save-button {
+  position: absolute;
+  z-index: 2;
+  top: 4px;
+  right: var(--panel-x-padding);
   height: var(--compact-control-height);
   padding: 0 9px;
   font-size: var(--button-font-size);
   border: 1px solid var(--gray-300);
+  background: var(--white);
 }
 
 .http-ok {

@@ -4216,8 +4216,8 @@ function BottomDock(props: {
       {utilityTab === "Response" ? (
         <div className="utility-panel response-dock">
           {props.responseVisible && props.runnerResponse ? (
-            <div className="response-content">
-              <div className="response-meta" aria-label="Response metadata and actions">
+            <div className="response-content" aria-label="Response content">
+              <div className="response-meta">
                 <div className="response-summary" aria-label="Response metadata">
                   <span className={`response-pill ${props.runnerResponse.ok ? "success" : "error"}`}>
                     {props.runnerResponse.status} {props.runnerResponse.statusText}
@@ -4225,8 +4225,8 @@ function BottomDock(props: {
                   <span className="response-pill">{props.runnerResponse.durationMs} ms</span>
                   <span className="response-pill">{formatResponseSize(props.runnerResponse.rawBody)}</span>
                 </div>
-                <button type="button" disabled={!props.canSaveResponse} onClick={props.onSaveResponse}>Save Response</button>
               </div>
+              <button className="response-save-button" type="button" disabled={!props.canSaveResponse} onClick={props.onSaveResponse}>Save Response</button>
               <div className="response-body">
                 {responseTab === "Pretty" ? <pre>{responseText || "No response body."}</pre> : null}
                 {responseTab === "Raw" ? <pre>{props.runnerResponse.rawBody || "No response body."}</pre> : null}

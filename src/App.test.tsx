@@ -950,9 +950,10 @@ describe("Relay Studio shell", () => {
     await waitFor(() => {
       expect(screen.getByText("3.4 KB")).toBeInTheDocument();
     });
-    const responseActions = screen.getByLabelText("Response metadata and actions");
-    expect(within(responseActions).getByLabelText("Response metadata")).toBeInTheDocument();
-    expect(within(responseActions).getByRole("button", { name: "Save Response" })).toBeEnabled();
+    const responseContent = screen.getByLabelText("Response content");
+    const responseMetadata = within(responseContent).getByLabelText("Response metadata");
+    expect(within(responseMetadata).queryByRole("button", { name: "Save Response" })).not.toBeInTheDocument();
+    expect(within(responseContent).getByRole("button", { name: "Save Response" })).toBeEnabled();
     expect(screen.queryByText("3467 B")).not.toBeInTheDocument();
   });
 
