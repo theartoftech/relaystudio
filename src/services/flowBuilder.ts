@@ -286,7 +286,8 @@ export async function runFlow(
   flow: ProjectFlow,
   services: ProjectService[],
   environment: ProjectEnvironment,
-  transport?: HttpTransport
+  transport?: HttpTransport,
+  options: { signal?: AbortSignal } = {}
 ): Promise<FlowRunResult> {
   const normalized = normalizeFlow(flow);
   const issues = validateFlow(normalized, services);
@@ -316,6 +317,11 @@ export async function runFlow(
   let latestError: string | null = null;
 
   for (const node of ordered) {
+    if (options.signal?.aborted) {
+      events.push("error", "Flow cancelled by user.");
+      latestError = "Flow cancelled.";
+      break;
+    }
     const dependencyFailed = normalized.edges
       .filter((edge) => edge.target === node.id && edge.condition === "success")
       .some((edge) => nodeStatuses.get(edge.source) !== "success");
@@ -336,7 +342,7 @@ export async function runFlow(
 
     nodeStatuses.set(node.id, "running");
     events.push("prepare", `[${node.label}] running ${service.method} ${service.path}.`);
-    const result = await runServiceRequest(service, runtimeEnvironment, transport);
+    const result = await runServiceRequest(service, runtimeEnvironment, transport, undefined, options);
     latestRequest = result.request;
     latestResponse = result.response;
     latestError = result.error;
@@ -357,9 +363,20 @@ export async function runFlow(
     nodeStatuses.set(node.id, status);
     events.push(status === "success" ? "success" : "error", `[${node.label}] ${status}.`);
     stepResults.push({ nodeId: node.id, serviceId: node.serviceId, status, events: result.events });
+    if (result.typedError?.category === "cancelled") {
+      events.push("error", "Flow cancelled by user.");
+      latestError = "Flow cancelled.";
+      break;
+    }
   }
 
-  const nextNodes = normalized.nodes.map((node) => ({ ...node, status: nodeStatuses.get(node.id) ?? "idle" }));
+  const flowCancelled = options.signal?.aborted;
+  const nextNodes = normalized.nodes.map((node) => ({
+    ...node,
+    status: flowCancelled && (nodeStatuses.get(node.id) === "idle" || nodeStatuses.get(node.id) === "running" || nodeStatuses.get(node.id) === "failed")
+      ? "cancelled" as FlowNodeStatus
+      : nodeStatuses.get(node.id) ?? "idle"
+  }));
   return {
     flow: { ...normalized, nodes: nextNodes },
     environment: runtimeEnvironment,

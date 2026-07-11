@@ -63,7 +63,7 @@ export interface ProjectService {
   authProfile: AuthProfile;
 }
 
-export type FlowNodeStatus = "idle" | "running" | "success" | "failed" | "skipped" | "blocked";
+export type FlowNodeStatus = "idle" | "running" | "success" | "failed" | "skipped" | "blocked" | "cancelled";
 export type FlowEdgeCondition = "success" | "failure";
 
 export interface FlowNodePosition {

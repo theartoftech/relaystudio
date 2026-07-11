@@ -379,6 +379,7 @@ describe("Relay Studio shell", () => {
     expect(screen.getByLabelText("Save on close")).toBeChecked();
     expect(screen.getByLabelText("Always ask when closing unsaved tabs")).toBeChecked();
     expect(screen.getByLabelText("Working directory")).toHaveValue("/private/tmp");
+    expect(screen.getByRole("button", { name: "Export Diagnostics" })).toBeInTheDocument();
     expect(screen.queryByLabelText("Request composer")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Request URL")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Send Request" })).not.toBeInTheDocument();
@@ -955,6 +956,24 @@ describe("Relay Studio shell", () => {
     expect(within(responseMetadata).queryByRole("button", { name: "Save Response" })).not.toBeInTheDocument();
     expect(within(responseContent).getByRole("button", { name: "Save Response" })).toBeEnabled();
     expect(screen.queryByText("3467 B")).not.toBeInTheDocument();
+  });
+
+  it("lets the user cancel an in-flight request and explains the cancellation", async () => {
+    vi.stubGlobal("fetch", vi.fn((_url: string, init?: RequestInit) => new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(new DOMException("Cancelled", "AbortError")), { once: true });
+    })));
+    render(<App />);
+
+    const explorer = screen.getByLabelText("Project explorer");
+    fireEvent.click(within(explorer).getByRole("button", { name: /Health Check/i }));
+    fireEvent.click(within(screen.getByLabelText("Request composer")).getByRole("button", { name: "Send Request" }));
+    const cancel = await within(screen.getByLabelText("Request composer")).findByRole("button", { name: "Cancel Request" });
+    fireEvent.click(cancel);
+
+    await waitFor(() => {
+      expect(screen.getAllByText("Request cancelled.").length).toBeGreaterThan(0);
+    });
+    expect(within(screen.getByLabelText("Request composer")).getByRole("button", { name: "Send Request" })).toBeEnabled();
   });
 
   it("creates a new editable flow from the flows section", () => {

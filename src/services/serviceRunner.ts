@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { HttpVersionPreference, KeyValueRow, ProjectEnvironment, ProjectService, ProjectSettings, ProjectVariable, ResponseFormatDetection } from "../project/projectModel";
 import { redactRecord, redactValue } from "../lib/redaction";
+import { AppError, normalizeAppError } from "../lib/appError";
 import { buildUrl, resolveTemplate, validateService, type ValidationIssue } from "./serviceDesigner";
 
 export type ConsolePhase =
@@ -58,16 +59,22 @@ export interface ServiceRunResult {
   response: ExecutedResponse | null;
   events: RunnerConsoleEvent[];
   error: string | null;
+  typedError: AppError | null;
   validationIssues: ValidationIssue[];
 }
 
-export type HttpTransport = (request: ExecutableRequest) => Promise<TransportResponse>;
+export type HttpTransport = (request: ExecutableRequest, signal?: AbortSignal) => Promise<TransportResponse>;
+
+export interface ServiceRunOptions {
+  signal?: AbortSignal;
+}
 
 export async function runServiceRequest(
   service: ProjectService,
   environment: ProjectEnvironment,
   transport: HttpTransport = defaultHttpTransport,
-  settings?: ProjectSettings
+  settings?: ProjectSettings,
+  options: ServiceRunOptions = {}
 ): Promise<ServiceRunResult> {
   const events = createEventRecorder();
   events.push("prepare", "info", `Preparing request: ${service.method} ${service.path}`);
@@ -77,7 +84,14 @@ export async function runServiceRequest(
   if (blockingIssues.length) {
     const message = blockingIssues.map((issue) => issue.message).join(" ");
     events.push("error", "error", message);
-    return { request: null, response: null, events: events.items, error: message, validationIssues };
+    return {
+      request: null,
+      response: null,
+      events: events.items,
+      error: message,
+      typedError: new AppError("validation", "REQUEST_VALIDATION_FAILED", message),
+      validationIssues
+    };
   }
 
   try {
@@ -86,7 +100,27 @@ export async function runServiceRequest(
     events.push("openConnection", "info", `Opening connection to ${extractOrigin(request.url)}.`);
     events.push("sendRequest", "info", `Sending request (${request.method}) with ${Object.keys(request.headers).length} header(s).`);
 
-    const transportResponse = await transport(request);
+    let transportResponse: TransportResponse;
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        if (options.signal?.aborted) {
+          throw new DOMException("Cancelled", "AbortError");
+        }
+        transportResponse = options.signal
+          ? await transport(request, options.signal)
+          : await transport(request);
+        break;
+      } catch (error) {
+        const typedError = normalizeAppError(error, options.signal?.aborted ? "cancelled" : undefined);
+        if (typedError.retryable && attempt < service.retry.attempts && !options.signal?.aborted) {
+          events.push("openConnection", "info", `Retrying request after ${typedError.category} failure (${attempt + 1} of ${service.retry.attempts}).`);
+          await waitForRetry(service.retry.backoffMs, options.signal);
+          continue;
+        }
+        events.push("error", "error", typedError.message);
+        return { request, response: null, events: events.items, error: typedError.message, typedError, validationIssues };
+      }
+    }
     events.push("receiveResponse", transportResponse.status >= 400 ? "error" : "info", `Received response (${transportResponse.status} ${transportResponse.statusText}) in ${transportResponse.durationMs} ms.`);
     if (request.maxResponseTimeMs > 0 && transportResponse.durationMs > request.maxResponseTimeMs) {
       events.push("error", "error", `Response exceeded the ${request.maxResponseTimeMs} ms maximum response time.`);
@@ -102,11 +136,16 @@ export async function runServiceRequest(
       events.push("error", "error", `Request completed with HTTP ${response.status}.`);
     }
 
-    return { request, response, events: events.items, error: response.ok && !response.parseError ? null : response.parseError, validationIssues };
+    const typedError = response.parseError
+      ? new AppError("validation", "RESPONSE_PARSE_FAILED", response.parseError)
+      : response.ok
+        ? null
+        : new AppError("http", "HTTP_ERROR", `Request completed with HTTP ${response.status}.`, { status: response.status, retryable: response.status >= 500 });
+    return { request, response, events: events.items, error: response.ok && !response.parseError ? null : response.parseError, typedError, validationIssues };
   } catch (error) {
-    const message = normalizeRunnerError(error);
-    events.push("error", "error", message);
-    return { request: null, response: null, events: events.items, error: message, validationIssues };
+    const typedError = normalizeAppError(error, options.signal?.aborted ? "cancelled" : undefined);
+    events.push("error", "error", typedError.message);
+    return { request: null, response: null, events: events.items, error: typedError.message, typedError, validationIssues };
   }
 }
 
@@ -200,17 +239,19 @@ export function extractCapturedVariables(service: ProjectService, body: string, 
   }
 }
 
-export async function defaultHttpTransport(request: ExecutableRequest): Promise<TransportResponse> {
+export async function defaultHttpTransport(request: ExecutableRequest, signal?: AbortSignal): Promise<TransportResponse> {
   if ("__TAURI_INTERNALS__" in window) {
     return invoke<TransportResponse>("execute_http_request", { request });
   }
-  return fetchHttpTransport(request);
+  return fetchHttpTransport(request, signal);
 }
 
-export async function fetchHttpTransport(request: ExecutableRequest): Promise<TransportResponse> {
+export async function fetchHttpTransport(request: ExecutableRequest, signal?: AbortSignal): Promise<TransportResponse> {
   const controller = new AbortController();
   const started = performance.now();
   const timeout = window.setTimeout(() => controller.abort(), request.timeoutMs);
+  const cancel = () => controller.abort();
+  signal?.addEventListener("abort", cancel, { once: true });
   try {
     const response = await fetch(request.url, {
       method: request.method,
@@ -229,6 +270,7 @@ export async function fetchHttpTransport(request: ExecutableRequest): Promise<Tr
     };
   } finally {
     window.clearTimeout(timeout);
+    signal?.removeEventListener("abort", cancel);
   }
 }
 
@@ -300,14 +342,20 @@ function credentialValue(environment: ProjectEnvironment, value: string): string
   return environment.variables.find((variable) => variable.name === trimmed)?.value ?? trimmed;
 }
 
-function normalizeRunnerError(error: unknown): string {
-  if (error instanceof DOMException && error.name === "AbortError") {
-    return "Request timed out.";
-  }
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return String(error);
+async function waitForRetry(backoffMs: number, signal?: AbortSignal): Promise<void> {
+  if (backoffMs <= 0) return;
+  await new Promise<void>((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      signal?.removeEventListener("abort", cancel);
+      resolve();
+    }, backoffMs);
+    const cancel = () => {
+      window.clearTimeout(timeout);
+      signal?.removeEventListener("abort", cancel);
+      reject(new DOMException("Cancelled", "AbortError"));
+    };
+    signal?.addEventListener("abort", cancel, { once: true });
+  });
 }
 
 function createEventRecorder() {

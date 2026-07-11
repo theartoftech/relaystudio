@@ -460,4 +460,19 @@ describe("flow builder", () => {
     expect(result.events[0].message).toContain("Flow blocked:");
     expect(transport).not.toHaveBeenCalled();
   });
+
+  it("cancels a running flow and leaves remaining steps cancelled", async () => {
+    const controller = new AbortController();
+    const transport: HttpTransport = vi.fn(async () => {
+      controller.abort();
+      throw new DOMException("Cancelled", "AbortError");
+    });
+
+    const result = await runFlow(flow, services, qa, transport, { signal: controller.signal });
+
+    expect(result.error).toBe("Flow cancelled.");
+    expect(result.flow.nodes.map((node) => node.status)).toEqual(["cancelled", "cancelled", "cancelled", "cancelled"]);
+    expect(result.events.map((event) => event.message)).toContain("Flow cancelled by user.");
+    expect(transport).toHaveBeenCalledTimes(1);
+  });
 });

@@ -1,4 +1,6 @@
 import type { RecentProject, RelayProject } from "./projectModel";
+import { AppError } from "../lib/appError";
+import { parseProjectImport, prepareProjectForExport } from "./projectSchema";
 
 export interface SaveProjectInput {
   path: string;
@@ -17,6 +19,7 @@ export interface RenameProjectInput {
 export interface ProjectPersistence {
   saveProject(input: SaveProjectInput): Promise<void>;
   openProject(input: OpenProjectInput): Promise<RelayProject>;
+  restoreProjectBackup(path: string): Promise<void>;
   projectExists(path: string): Promise<boolean>;
   listRecentProjects(): Promise<RecentProject[]>;
   rememberRecentProject(project: RecentProject): Promise<void>;
@@ -27,6 +30,7 @@ export interface ProjectPersistence {
 
 const STORAGE_PREFIX = "relay-studio:project:";
 const RECENTS_KEY = "relay-studio:recent-projects";
+const activeSavePaths = new Set<string>();
 
 async function invokeTauri<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   const { invoke } = await import("@tauri-apps/api/core");
@@ -67,7 +71,12 @@ function assertProjectName(name: string) {
 class BrowserFallbackPersistence implements ProjectPersistence {
   async saveProject({ path, project }: SaveProjectInput): Promise<void> {
     assertProjectPath(path);
-    localStorage.setItem(fallbackProjectKey(path), JSON.stringify(project));
+    await withSaveGuard(path, async () => {
+      const key = fallbackProjectKey(path);
+      const existing = localStorage.getItem(key);
+      if (existing) localStorage.setItem(`${key}:backup`, existing);
+      localStorage.setItem(key, JSON.stringify(prepareProjectForExport(project)));
+    });
   }
 
   async openProject({ path }: OpenProjectInput): Promise<RelayProject> {
@@ -77,7 +86,16 @@ class BrowserFallbackPersistence implements ProjectPersistence {
       throw new Error(`Project file was not found: ${path}`);
     }
     const parsed = JSON.parse(raw) as RelayProject | { project: RelayProject };
-    return "project" in parsed ? parsed.project : parsed;
+    return parseProjectImport("project" in parsed ? parsed.project : parsed);
+  }
+
+  async restoreProjectBackup(path: string): Promise<void> {
+    assertProjectPath(path);
+    const key = fallbackProjectKey(path);
+    const backup = localStorage.getItem(`${key}:backup`);
+    if (!backup) throw new AppError("filesystem", "PROJECT_BACKUP_MISSING", `Project recovery backup was not found: ${path}`);
+    parseProjectImport(JSON.parse(backup) as unknown);
+    localStorage.setItem(key, backup);
   }
 
   async projectExists(path: string): Promise<boolean> {
@@ -129,17 +147,25 @@ class BrowserFallbackPersistence implements ProjectPersistence {
 class TauriPersistence implements ProjectPersistence {
   async saveProject(input: SaveProjectInput): Promise<void> {
     assertProjectPath(input.path);
-    await invokeTauri("save_project_file", {
-      path: input.path,
-      project: input.project
+    await withSaveGuard(input.path, async () => {
+      await invokeTauri("save_project_file", {
+        path: input.path,
+        project: prepareProjectForExport(input.project)
+      });
     });
   }
 
   async openProject(input: OpenProjectInput): Promise<RelayProject> {
     assertProjectPath(input.path);
-    return invokeTauri("open_project_file", {
+    const project = await invokeTauri<unknown>("open_project_file", {
       path: input.path
     });
+    return parseProjectImport(project);
+  }
+
+  async restoreProjectBackup(path: string): Promise<void> {
+    assertProjectPath(path);
+    await invokeTauri("restore_project_backup", { path });
   }
 
   async projectExists(path: string): Promise<boolean> {
@@ -177,4 +203,16 @@ export async function createProjectPersistence(): Promise<ProjectPersistence> {
     return new TauriPersistence();
   }
   return new BrowserFallbackPersistence();
+}
+
+async function withSaveGuard(path: string, save: () => Promise<void>): Promise<void> {
+  if (activeSavePaths.has(path)) {
+    throw new AppError("filesystem", "CONCURRENT_SAVE_BLOCKED", `A save is already in progress for ${path}.`);
+  }
+  activeSavePaths.add(path);
+  try {
+    await save();
+  } finally {
+    activeSavePaths.delete(path);
+  }
 }
