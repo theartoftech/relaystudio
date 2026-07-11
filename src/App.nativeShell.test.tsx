@@ -48,16 +48,6 @@ describe("Relay Studio native shell commands", () => {
       ...sampleProject,
       id: "test-project-4",
       name: "Test Project 4",
-      services: [
-        {
-          ...sampleProject.services[0],
-          id: "test-project-4-health",
-          name: "Project 4 Health",
-          folder: "Project 4",
-          path: "/api/project-4/health"
-        }
-      ],
-      flows: []
     };
 
     Object.defineProperty(window, "__TAURI_INTERNALS__", {
@@ -98,6 +88,44 @@ describe("Relay Studio native shell commands", () => {
     vi.restoreAllMocks();
   });
 
+  it("reopens the most recent project when the native app starts", async () => {
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "Test Project 4" })).toBeInTheDocument();
+    expect(nativeMocks.invoke).toHaveBeenCalledWith("open_project_file", { path: testProjectPath });
+  });
+
+  it("starts with an empty project when there is no recent native project", async () => {
+    nativeMocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "list_recent_projects") return [];
+      if (command === "default_project_directory") return "C:\\Users\\JeffHaynes\\Documents\\relaystudio";
+      if (command === "refresh_app_menu") return null;
+      throw new Error(`Unexpected Tauri command: ${command}`);
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "Untitled API Project" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Sample API Regression" })).not.toBeInTheDocument();
+  });
+
+  it("shows an explicit error and an empty workspace when the latest project cannot be reopened", async () => {
+    nativeMocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "list_recent_projects") {
+        return [{ name: "Missing Project", path: "C:\\missing.restproj", openedAt: "2026-07-10T20:00:00.000Z" }];
+      }
+      if (command === "default_project_directory") return "C:\\Users\\JeffHaynes\\Documents\\relaystudio";
+      if (command === "open_project_file") throw new Error("Project file was not found: C:\\missing.restproj");
+      if (command === "refresh_app_menu") return null;
+      throw new Error(`Unexpected Tauri command: ${command}`);
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "Untitled API Project" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Status bar")).toHaveTextContent("Could not reopen the most recent project");
+  });
+
   it("opens the payload project from a native Open Recent submenu event", async () => {
     render(<App />);
 
@@ -122,20 +150,14 @@ describe("Relay Studio native shell commands", () => {
     expect(nativeMocks.invoke).toHaveBeenCalledWith("open_project_file", { path: testProjectPath });
   });
 
-  it("opens a recent project from the command palette recent-project dialog", async () => {
+  it("does not duplicate the active startup project in the recent-project dialog", async () => {
     render(<App />);
 
     await screen.findByRole("button", { name: /Search commands/i });
     fireEvent.keyDown(window, { key: "k", metaKey: true });
     fireEvent.click(within(screen.getByRole("dialog", { name: "Command palette" })).getByRole("button", { name: /Open Recent Projects/i }));
     const recentDialog = await screen.findByRole("dialog", { name: "Open Recent Projects" });
-    fireEvent.click(await within(recentDialog).findByRole("button", { name: /Test Project 4/i }));
-
-    await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "Test Project 4" })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: /Project 4 Health/i })).toBeInTheDocument();
-    });
-    expect(nativeMocks.invoke).toHaveBeenCalledWith("open_project_file", { path: testProjectPath });
+    expect(within(recentDialog).getByText("No recent projects yet.")).toBeInTheDocument();
   });
 
   it("opens a native file picker for the Open Project menu event", async () => {
@@ -166,7 +188,7 @@ describe("Relay Studio native shell commands", () => {
 
     expect(await screen.findByRole("dialog", { name: "Save Project" })).toBeInTheDocument();
     await waitFor(() => {
-      expect(screen.getByLabelText("Project file path")).toHaveValue("C:\\Users\\JeffHaynes\\Documents\\relaystudio\\sample-api-regression.restproj");
+      expect(screen.getByLabelText("Project file path")).toHaveValue("C:\\Users\\JeffHaynes\\Documents\\relaystudio\\test-project-4.restproj");
     });
     expect(nativeMocks.invoke).toHaveBeenCalledWith("default_project_directory");
   });
@@ -178,7 +200,7 @@ describe("Relay Studio native shell commands", () => {
     fireEvent.keyDown(window, { key: "s", metaKey: true, shiftKey: true });
 
     expect(await screen.findByRole("dialog", { name: "Save Project As" })).toBeInTheDocument();
-    expect(screen.getByLabelText("Project file path")).toHaveValue("C:\\Users\\JeffHaynes\\Documents\\relaystudio\\sample-api-regression.restproj");
+    expect(screen.getByLabelText("Project file path")).toHaveValue("C:\\Users\\JeffHaynes\\Documents\\relaystudio\\test-project-4.restproj");
   });
 
   it("saves through native persistence and closes the dialog", async () => {
@@ -193,7 +215,7 @@ describe("Relay Studio native shell commands", () => {
       expect(screen.queryByRole("dialog", { name: "Save Project" })).not.toBeInTheDocument();
     });
     expect(nativeMocks.invoke).toHaveBeenCalledWith("save_project_file", expect.objectContaining({
-      path: "C:\\Users\\JeffHaynes\\Documents\\relaystudio\\sample-api-regression.restproj"
+      path: "C:\\Users\\JeffHaynes\\Documents\\relaystudio\\test-project-4.restproj"
     }));
     expect(nativeMocks.invoke).toHaveBeenCalledWith("remember_recent_project", expect.any(Object));
   });
@@ -357,6 +379,88 @@ describe("Relay Studio native shell commands", () => {
       expect(screen.queryByRole("dialog", { name: "Unsaved changes" })).not.toBeInTheDocument();
     });
     expect(nativeMocks.closeWindow).not.toHaveBeenCalled();
+  });
+
+  it("keeps the close bypass active until the delayed native close event arrives", async () => {
+    render(<App />);
+
+    await waitFor(() => {
+      expect(nativeMocks.closeHandler).not.toBeNull();
+    });
+    fireEvent.change(screen.getByLabelText("Request URL"), {
+      target: { value: "https://api.test.local/v1/orders?status=open" }
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /^Save \*$/i })).toBeInTheDocument();
+    });
+    const dirtyCloseHandler = nativeMocks.closeHandler;
+    act(() => {
+      dirtyCloseHandler?.({ preventDefault: vi.fn() });
+    });
+    const prompt = await screen.findByRole("dialog", { name: "Unsaved changes" });
+    fireEvent.click(within(prompt).getByRole("button", { name: "Do Not Save" }));
+    await waitFor(() => {
+      expect(nativeMocks.closeWindow).toHaveBeenCalledTimes(1);
+    });
+
+    const delayedPreventDefault = vi.fn();
+    act(() => {
+      dirtyCloseHandler?.({ preventDefault: delayedPreventDefault });
+    });
+
+    expect(delayedPreventDefault).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog", { name: "Unsaved changes" })).not.toBeInTheDocument();
+  });
+
+  it("routes File Exit through the dirty-project close dialog", async () => {
+    render(<App />);
+
+    await waitFor(() => {
+      expect(nativeMocks.listeners.has("relay-shell-command")).toBe(true);
+    });
+    fireEvent.change(screen.getByLabelText("Request URL"), {
+      target: { value: "https://api.test.local/v1/orders?status=open" }
+    });
+    act(() => {
+      nativeMocks.listeners.get("relay-shell-command")?.({ payload: { id: "file.exit" } });
+    });
+
+    const prompt = await screen.findByRole("dialog", { name: "Unsaved changes" });
+    fireEvent.click(within(prompt).getByRole("button", { name: "Do Not Save" }));
+
+    await waitFor(() => {
+      expect(nativeMocks.closeWindow).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("saves the dirty project before completing an X-triggered exit", async () => {
+    render(<App />);
+
+    await waitFor(() => {
+      expect(nativeMocks.closeHandler).not.toBeNull();
+    });
+    const closeRegistrationCount = nativeMocks.onCloseRequested.mock.calls.length;
+    fireEvent.change(screen.getByLabelText("Request URL"), {
+      target: { value: "https://api.test.local/v1/orders?status=open" }
+    });
+    await waitFor(() => {
+      expect(nativeMocks.onCloseRequested.mock.calls.length).toBeGreaterThan(closeRegistrationCount);
+    });
+    const preventDefault = vi.fn();
+    act(() => {
+      nativeMocks.closeHandler?.({ preventDefault });
+    });
+    const prompt = await screen.findByRole("dialog", { name: "Unsaved changes" });
+    fireEvent.click(within(prompt).getByRole("button", { name: "Save And Continue" }));
+
+    const saveDialog = await screen.findByRole("dialog", { name: "Save Project" });
+    fireEvent.click(within(saveDialog).getByRole("button", { name: "Save Project" }));
+
+    await waitFor(() => {
+      expect(nativeMocks.closeWindow).toHaveBeenCalledTimes(1);
+    });
+    expect(preventDefault).toHaveBeenCalledTimes(1);
+    expect(nativeMocks.invoke).toHaveBeenCalledWith("save_project_file", expect.any(Object));
   });
 
   it("allows the native close-request hook to close a clean window", async () => {

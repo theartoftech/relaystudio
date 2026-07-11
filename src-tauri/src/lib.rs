@@ -20,6 +20,7 @@ const MENU_SHOW_RECENT_PROJECTS: &str = "file.show_recent_projects";
 const MENU_OPEN_RECENT_PREFIX: &str = "file.open_recent.";
 const MENU_FILE_SAVE_PROJECT: &str = "file.save_project";
 const MENU_FILE_SAVE_PROJECT_AS: &str = "file.save_project_as";
+const MENU_FILE_EXIT: &str = "file.exit";
 const MENU_WINDOW_CLOSE_ACTIVE_TAB: &str = "window.close_active_tab";
 const MENU_WINDOW_CLOSE_WINDOW: &str = "window.close_window";
 const MENU_REQUEST_SEND_ACTIVE: &str = "request.send_active";
@@ -271,6 +272,9 @@ fn set_app_menu(app: &tauri::AppHandle, state: &ShellMenuState) -> Result<(), St
         .enabled(state.can_save_project)
         .build(app)
         .map_err(|error| format!("Could not build save-as menu item: {error}"))?;
+    let exit_app = MenuItemBuilder::with_id(MENU_FILE_EXIT, "Exit")
+        .build(app)
+        .map_err(|error| format!("Could not build exit menu item: {error}"))?;
     let send_request = MenuItemBuilder::with_id(MENU_REQUEST_SEND_ACTIVE, "Send Request")
         .accelerator("CmdOrCtrl+Enter")
         .enabled(state.can_send_request)
@@ -336,7 +340,11 @@ fn set_app_menu(app: &tauri::AppHandle, state: &ShellMenuState) -> Result<(), St
         .separator()
         .item(&close_active_tab);
     if !cfg!(target_os = "macos") {
-        file_menu_builder = file_menu_builder.separator().item(&settings);
+        file_menu_builder = file_menu_builder
+            .separator()
+            .item(&settings)
+            .separator()
+            .item(&exit_app);
     }
     let file_menu = file_menu_builder
         .build()
@@ -456,6 +464,7 @@ fn is_shell_command_menu_id(id: &str) -> bool {
             | MENU_SHOW_RECENT_PROJECTS
             | MENU_FILE_SAVE_PROJECT
             | MENU_FILE_SAVE_PROJECT_AS
+            | MENU_FILE_EXIT
             | MENU_WINDOW_CLOSE_ACTIVE_TAB
             | MENU_WINDOW_CLOSE_WINDOW
             | MENU_REQUEST_SEND_ACTIVE
@@ -1163,6 +1172,7 @@ mod tests {
     #[test]
     fn shell_menu_recognizes_contract_command_ids() {
         assert!(is_shell_command_menu_id(MENU_FILE_SAVE_PROJECT));
+        assert!(is_shell_command_menu_id(MENU_FILE_EXIT));
         assert!(is_shell_command_menu_id(MENU_VIEW_TOGGLE_INSPECTOR));
         assert!(is_shell_command_menu_id(MENU_VIEW_TOGGLE_FLOW_DETAILS));
         assert!(!is_shell_command_menu_id("file.open_recent.0"));
@@ -1179,6 +1189,7 @@ mod tests {
             MENU_SHOW_RECENT_PROJECTS,
             MENU_FILE_SAVE_PROJECT,
             MENU_FILE_SAVE_PROJECT_AS,
+            MENU_FILE_EXIT,
             MENU_WINDOW_CLOSE_ACTIVE_TAB,
             MENU_WINDOW_CLOSE_WINDOW,
             MENU_REQUEST_SEND_ACTIVE,

@@ -465,6 +465,7 @@ export function App() {
     let cancelled = false;
 
     async function initializeShell() {
+      const nativeRuntime = hasTauriRuntimeSync();
       try {
         const [createdPersistence, createdSavedResponsePersistence, resolvedProjectDirectory] = await Promise.all([
           createProjectPersistence(),
@@ -476,14 +477,36 @@ export function App() {
         setPersistence(createdPersistence);
         setSavedResponsePersistence(createdSavedResponsePersistence);
         setDefaultProjectDirectory(resolvedProjectDirectory);
-        setProjectPath((currentPath) => (
-          currentPath === buildDefaultProjectPath("Sample API Regression")
-            ? buildDefaultProjectPath(project.name, resolvedProjectDirectory)
-            : currentPath
-        ));
         setRecentProjects(recent);
+        if (nativeRuntime) {
+          const latest = recent[0];
+          if (latest) {
+            try {
+              const opened = await createdPersistence.openProject({ path: latest.path });
+              if (cancelled) return;
+              applyProjectToWorkspace(opened, latest.path, `Reopened ${opened.name} from ${latest.path}.`);
+            } catch (error) {
+              if (cancelled) return;
+              const emptyProject = createEmptyProject();
+              applyProjectToWorkspace(emptyProject, "", "Started an empty project because the most recent project could not be reopened.");
+              setProjectError(`Could not reopen the most recent project: ${error instanceof Error ? error.message : String(error)}`);
+            }
+          } else {
+            const emptyProject = createEmptyProject();
+            applyProjectToWorkspace(emptyProject, "", "Started a new empty project.");
+          }
+        } else {
+          setProjectPath((currentPath) => (
+            currentPath === buildDefaultProjectPath("Sample API Regression")
+              ? buildDefaultProjectPath(project.name, resolvedProjectDirectory)
+              : currentPath
+          ));
+        }
       } catch (error) {
         if (!cancelled) {
+          if (nativeRuntime) {
+            applyProjectToWorkspace(createEmptyProject(), "", "Started an empty project after startup failed.");
+          }
           setProjectError(error instanceof Error ? error.message : String(error));
         }
       } finally {
@@ -646,6 +669,9 @@ export function App() {
       case "file.save_project_as":
         await openSaveProjectDialog("Save Project As", "");
         return;
+      case "file.exit":
+        await requestCloseWindowRequested();
+        return;
       case "window.close_active_tab":
         if (canCloseActiveTab) {
           closeTab(activeTabId);
@@ -706,10 +732,9 @@ export function App() {
     allowWindowCloseRef.current = true;
     try {
       await requestCloseWindowNow();
-    } finally {
-      queueMicrotask(() => {
-        allowWindowCloseRef.current = false;
-      });
+    } catch (error) {
+      allowWindowCloseRef.current = false;
+      setProjectError(`Could not close Relay Studio: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -1482,18 +1507,18 @@ export function App() {
             setSavePromptOpen(false);
           }}
           onDiscard={() => {
+            setSavePromptOpen(false);
+            if (pendingWindowClose) {
+              setPendingWindowClose(false);
+              void closeWindowWithBypass();
+              return;
+            }
             setProjectDirty(false);
             setTabs((current) => current.map((tab) => ({ ...tab, dirty: false })));
-            setSavePromptOpen(false);
             if (pendingTabCloseId) {
               const tabId = pendingTabCloseId;
               setPendingTabCloseId(null);
               closeTabNow(tabId);
-              return;
-            }
-            if (pendingWindowClose) {
-              setPendingWindowClose(false);
-              void closeWindowWithBypass();
               return;
             }
             const pending = pendingProjectOpen;
@@ -1807,18 +1832,9 @@ export function App() {
       const opened = await projectPersistence.openProject({ path });
       const recent = { name: opened.name, path, openedAt: new Date().toISOString() };
       await projectPersistence.rememberRecentProject(recent);
-      setProject(opened);
-      setProjectPath(path);
-      setEnvironment(getDefaultEnvironmentName(opened));
-      setActiveServiceId(opened.services[0]?.id ?? "");
-      setActiveFlowId(opened.flows[0]?.id ?? "");
-      setProjectDirty(false);
-      const openedTabs = createDefaultTabsForProject(opened);
-      setTabs(openedTabs);
-      setActiveTabId(opened.services[0]?.id ?? opened.flows[0]?.id ?? openedTabs[0]?.id ?? "welcome");
+      applyProjectToWorkspace(opened, path, `Project opened from ${path}.`);
       await refreshRecentProjects(projectPersistence);
       setProjectDialog(null);
-      setProjectMessage(`Project opened from ${path}.`);
       setProjectError(null);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -1833,6 +1849,20 @@ export function App() {
       setProjectDialog(null);
       setProjectError(message);
     }
+  }
+
+  function applyProjectToWorkspace(opened: RelayProject, path: string, message: string): void {
+    setProject(opened);
+    setProjectPath(path);
+    setEnvironment(getDefaultEnvironmentName(opened));
+    setActiveServiceId(opened.services[0]?.id ?? "");
+    setActiveFlowId(opened.flows[0]?.id ?? "");
+    setProjectDirty(false);
+    const openedTabs = createDefaultTabsForProject(opened);
+    setTabs(openedTabs);
+    setActiveTabId(opened.services[0]?.id ?? opened.flows[0]?.id ?? openedTabs[0]?.id ?? "welcome");
+    setEditableRequestUrl(null);
+    setProjectMessage(message);
   }
 
   async function handleProjectExists(path: string) {

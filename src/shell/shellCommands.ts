@@ -12,6 +12,7 @@ export type ShellCommandId =
   | "file.open_recent"
   | "file.save_project"
   | "file.save_project_as"
+  | "file.exit"
   | "window.close_active_tab"
   | "window.close_window"
   | "request.send_active"
@@ -91,6 +92,9 @@ const shellCommandDefinitions: ShellCommandDefinition[] = [
   }),
   command("file.save_project_as", "Save Project As", {
     shortcut: "CmdOrCtrl+Shift+S"
+  }),
+  command("file.exit", "Exit", {
+    shortcut: "Alt+F4"
   }),
   command("window.close_active_tab", "Close Tab", {
     shortcut: "CmdOrCtrl+W",
