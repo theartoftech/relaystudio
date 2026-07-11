@@ -484,6 +484,12 @@ Implemented. See `sprint-8b-implementation-status.md`.
 - Windows machine validation starts from `tools/windows-build-installer.ps1`, which runs dependency install, shared verification, Rust tests, and Tauri packaging before manual QA.
 - Human QA for native menus, title bar, breakpoints, and platform-specific keyboard flows.
 
+### Implementation Status
+
+- Shared regression coverage and macOS QA/audit refresh are complete.
+- Windows build handoff, QA script, bounded audit, and evidence checklist are complete.
+- Sprint closure is gated on recording the remaining packaged-Windows breakpoint and high-contrast results in the bounded audit.
+
 ## Sprint 11: Role And Error Coverage
 
 ### Goals

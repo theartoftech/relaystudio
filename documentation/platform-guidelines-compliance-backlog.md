@@ -214,6 +214,8 @@ Make the platform work enforceable rather than subjective.
     - A macOS shell QA script exists for menus, settings, save prompts, and view toggles.
     - A Windows shell QA script exists for title bar, caption controls, breakpoints, contrast, and keyboard behavior.
 
+    Status (2026-07-10): Complete. The macOS script is `documentation/sprint-10b-2-macos-qa-script.md`; the Windows script is `documentation/sprint-10b-3-windows-qa-script.md`.
+
 #### macOS
 
 18. Re-run a macOS HIG audit against the updated desktop app.
@@ -227,6 +229,8 @@ Make the platform work enforceable rather than subjective.
     Acceptance criteria:
     - The review confirms progress against commanding, navigation, title bar, layout, and writing guidance.
     - High-priority Windows findings are tracked as backlog items if they are not closed in the same sprint.
+
+    Status (2026-07-10): Implemented in `audits/windows-2026-07-10/relay-studio-windows-desktop-audit.md`. Installer and save-path findings are closed. Packaged-Windows breakpoint and high-contrast evidence remain explicit 10B-3 closure items owned by the Windows QA tester.
 
 ## Suggested Sprint Mapping
 

@@ -30,6 +30,9 @@ This folder contains the first implementation slice for Relay Studio: reviewable
 - [sprint-9b-implementation-status.md](sprint-9b-implementation-status.md): delivered Sprint 9B platform navigation and command surfaces, including simplified Explorer ownership, command-surface Recent Projects, status bar messaging, contextual inspector content, and verification evidence.
 - [sprint-10b-1-user-test-script.md](sprint-10b-1-user-test-script.md): human QA script for Sprint 10B-1 platform regression coverage, including command palette focus, native view toggles, dirty close flows, and context-menu dismissal.
 - [sprint-10b-2-macos-qa-script.md](sprint-10b-2-macos-qa-script.md): human QA script for Sprint 10B-2 macOS menu, Settings, dirty close, command parity, and audit evidence validation.
+- [sprint-10b-3-windows-qa-script.md](sprint-10b-3-windows-qa-script.md): packaged-Windows QA script for installer build, title bar, caption controls, breakpoints, appearance, keyboard behavior, persistence, and flow execution.
+- [sprint-10b-3-implementation-status.md](sprint-10b-3-implementation-status.md): delivered Windows handoff, fixes, audit artifacts, and the remaining evidence closure gate.
+- [../audits/windows-2026-07-10/relay-studio-windows-desktop-audit.md](../audits/windows-2026-07-10/relay-studio-windows-desktop-audit.md): bounded Windows desktop audit with explicit closed, conditional, and open verification findings.
 - [../tools/windows-build-installer.ps1](../tools/windows-build-installer.ps1): Windows handoff script for Sprint 10B-3; run after pulling the branch on Windows to verify and build installable Relay Studio artifacts.
 - [visual-target.md](visual-target.md): selected Concept 3 visual direction and implementation guardrails.
 - [live-rest-acceptance-test-matrix.md](live-rest-acceptance-test-matrix.md): configurable live REST acceptance suite.

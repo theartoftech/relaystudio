@@ -2322,18 +2322,25 @@ kbd {
 }
 
 .response-meta {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 7px;
-  overflow-x: auto;
   padding: 0 var(--panel-x-padding);
   font-size: var(--ui-font-size);
-  white-space: nowrap;
   border-bottom: 1px solid var(--gray-200);
 }
 
+.response-summary {
+  display: flex;
+  gap: 7px;
+  min-width: 0;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
 .response-meta button {
-  margin-left: auto;
+  flex: 0 0 auto;
   height: var(--compact-control-height);
   padding: 0 9px;
   font-size: var(--button-font-size);
