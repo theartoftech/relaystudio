@@ -488,7 +488,7 @@ Implemented. See `sprint-8b-implementation-status.md`.
 
 - Shared regression coverage and macOS QA/audit refresh are complete.
 - Windows build handoff, QA script, bounded audit, and evidence checklist are complete.
-- Sprint closure is gated on recording the remaining packaged-Windows breakpoint and high-contrast results in the bounded audit.
+- Sprint 10B is closed after packaged Windows testing and follow-up fixes. Additional Windows breakpoint and high-contrast screenshots move to Sprint 11 release-gate evidence hardening.
 
 ## Sprint 11: Role And Error Coverage
 

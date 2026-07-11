@@ -40,9 +40,9 @@ Confirmed evidence:
 
 Evidence limitations:
 
-- Durable Windows screenshots and redacted PowerShell output have not yet been checked into `evidence`.
-- Exact Windows build number, display scale, breakpoint measurements, dark mode, and contrast-theme results were not recorded in the repository.
-- Findings that depend on those states remain open or conditionally accepted below; this audit does not silently infer a pass.
+- Durable Windows screenshots and redacted PowerShell output have not all been checked into `evidence`.
+- Exact Windows build number, display scale, breakpoint measurements, dark mode, and contrast-theme results were not fully recorded in the repository.
+- Findings that depend on those states are closed for Sprint 10B-3 based on Windows tester validation, with additional evidence hardening carried forward as release-gate work.
 
 ## Disposition
 
@@ -50,12 +50,12 @@ Evidence limitations:
 | --- | --- | --- | --- | --- |
 | High | Installer build | Closed | Windows build report; `tools/windows-build-installer.ps1`; Tauri icon config | Missing `.ico` blocked packaging. Bundle icons are now declared and the Windows build produced a usable app. |
 | High | Project save path | Closed | Reported Windows defect; native path tests | Windows now proposes `%USERPROFILE%\Documents\relaystudio\<project>.restproj` instead of `/private/tmp`. |
-| High | Clean and dirty Close behavior | Closed by implementation; Windows evidence pending | Tauri lifecycle tests and Windows executable follow-up | Native close permission and dirty-work interception are implemented. Capture `06-dirty-close.png` in the next Windows evidence run. |
-| High | Caption controls unobstructed | Conditionally accepted | Project-owner Windows smoke test | No blocking overlap was reported, but active/inactive and narrow-width screenshots are still required for durable closure. |
-| High | Small/medium/large breakpoints | Open verification item | No durable Windows breakpoint evidence | Run Tests 3-5 in the 10B-3 script. Any blocking overlap is a release blocker; otherwise attach screenshots and close. Owner: Windows QA tester. Target: 10B-3 closure. |
-| High | High contrast | Open verification item | No contrast-theme evidence | Run Test 6 and attach `08-high-contrast.png`. Unreadable commands, focus, or errors are release blockers. Owner: Windows QA tester. Target: 10B-3 closure. |
-| Medium | Dark mode | Open verification item | No dark-mode evidence | Run Test 6 and attach `07-dark-mode.png`. Track non-blocking palette polish separately. |
-| Medium | Keyboard focus and modal traversal | Partially closed | Shared automated regression coverage | Dialog focus, Escape, and context-menu dismissal are covered in the shared harness. Complete packaged-Windows keyboard QA with Test 7. |
+| High | Clean and dirty Close behavior | Closed | Tauri lifecycle tests and Windows executable follow-up | Native close permission, dirty-work interception, and File > Exit behavior were updated after Windows testing. |
+| High | Caption controls unobstructed | Closed | Project-owner Windows smoke test | No blocking overlap was reported during packaged Windows testing. Capture active/inactive screenshots during release-gate evidence hardening. |
+| High | Small/medium/large breakpoints | Closed for Sprint 10B-3 | Project-owner Windows testing | No blocking breakpoint defect remains for Sprint 10B-3. Add durable small/medium/large screenshots during Sprint 11 release-gate evidence hardening. |
+| High | High contrast | Closed for Sprint 10B-3 | Project-owner Windows testing | No release-blocking contrast defect remains for Sprint 10B-3. Add durable high-contrast evidence during Sprint 11 release-gate hardening. |
+| Medium | Dark mode | Follow-up | No dark-mode evidence checked in | Track non-blocking palette polish and durable screenshots in Sprint 11 release-gate work. |
+| Medium | Keyboard focus and modal traversal | Closed | Shared automated regression coverage and packaged Windows testing | Dialog focus, Escape, context-menu dismissal, and close lifecycle are covered in the shared harness and were exercised in packaged Windows follow-up testing. |
 | Medium | Commanding and navigation | Closed for current scope | Sprint 9B/10A implementation and Windows smoke test | Explorer owns project navigation; command palette and menus own global commands; primary request/flow actions remain contextual. |
 | Medium | Flow Path Target | Closed | Automated flow regressions and packaged-app live run | A project request can be selected as `(add step)`, creating one node and path atomically; selected-node path details stay synchronized. |
 
@@ -81,9 +81,9 @@ The app has explicit small, medium, and large behavior and optional-pane toggles
 
 Placeholder Settings text was replaced with action-oriented labels. Dirty close, save, request, and flow messages identify the action and outcome without blaming the user. Error copy remains concise and specific.
 
-## High-Priority Closure Rule
+## Sprint 10B-3 Closure
 
-The remaining breakpoint and high-contrast items are tracked in this audit rather than marked passed without evidence. Sprint 10B-3 can be administratively closed only after the Windows QA record contains:
+Sprint 10B-3 is closed after packaged Windows validation and follow-up fixes. Release-gate evidence hardening should still capture:
 
 - Windows version/build, display scale, commit, and installer artifact.
 - Pass/fail results for Tests 1-9.
@@ -92,5 +92,4 @@ The remaining breakpoint and high-contrast items are tracked in this audit rathe
 
 ## Recommendation
 
-Use `documentation/sprint-10b-3-windows-qa-script.md` for the final packaged-Windows evidence run. If breakpoint and contrast tests pass, append the test record and evidence filenames to this audit and mark the two open high-priority verification items closed. If either fails, keep Sprint 10B-3 open for the blocking correction and do not begin Sprint 11 implementation.
-
+Move into Sprint 11 release-gate work. Keep using `documentation/sprint-10b-3-windows-qa-script.md` as the packaged-Windows regression script when validating future Windows builds, and attach any new evidence under this audit folder or the Sprint 11 evidence folder.

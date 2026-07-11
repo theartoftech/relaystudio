@@ -230,7 +230,7 @@ Make the platform work enforceable rather than subjective.
     - The review confirms progress against commanding, navigation, title bar, layout, and writing guidance.
     - High-priority Windows findings are tracked as backlog items if they are not closed in the same sprint.
 
-    Status (2026-07-10): Implemented in `audits/windows-2026-07-10/relay-studio-windows-desktop-audit.md`. Installer and save-path findings are closed. Packaged-Windows breakpoint and high-contrast evidence remain explicit 10B-3 closure items owned by the Windows QA tester.
+    Status (2026-07-11): Implemented and closed in `audits/windows-2026-07-10/relay-studio-windows-desktop-audit.md`. Installer, save-path, flow-authoring, response-action, and close-lifecycle findings are closed after packaged Windows testing. Additional breakpoint and high-contrast screenshots move to Sprint 11 release-gate evidence hardening.
 
 ## Suggested Sprint Mapping
 

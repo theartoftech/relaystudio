@@ -627,7 +627,8 @@ Make platform-guideline work enforceable with repeatable tests, QA scripts, and 
 - 10B-1 platform regression coverage is complete.
 - 10B-2 macOS QA and refreshed audit are complete.
 - 10B-3 Windows build handoff, human QA script, bounded audit, and evidence index are implemented.
-- Final 10B-3 closure requires the packaged-Windows test record and durable breakpoint/high-contrast evidence identified in `audits/windows-2026-07-10/relay-studio-windows-desktop-audit.md`.
+- 10B-3 packaged-Windows testing is complete after Windows follow-up fixes for installer packaging, native save paths, flow authoring, response actions, and close lifecycle behavior.
+- Sprint 10B is closed. Follow-on Windows evidence hardening and non-blocking appearance polish move to the Sprint 11 release-gate backlog.
 
 ## Sprint 11: Role And Error Coverage
 
