@@ -190,4 +190,4 @@ Decision:
 
 ## Sprint 2 Acceptance Checklist
 
-Sprint 2 is ready when the scaffolded shell satisfies the checklist in `sprint-2-acceptance-checklist.md`.
+Sprint 2 was accepted against its original checklist. The Sprint Portfolio preserves the outcome and Git history retains the detailed checklist.

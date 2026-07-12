@@ -37,7 +37,7 @@ Create the review package that aligns stakeholders on what Relay Studio is befor
 - Selected visual target in `documentation/visual-target.md`.
 - Live REST acceptance test matrix in `documentation/live-rest-acceptance-test-matrix.md`.
 - Initial build phase plan in `documentation/build-phase-plan.md`.
-- Sprint 0 decision record in `documentation/sprint-0-decision-record.md`.
+- Sprint 0 decision summary in the Sprint Portfolio; the detailed record remains in Git history.
 - Review notes captured as backlog changes before Sprint 2 starts.
 
 ### Work Items
@@ -68,7 +68,7 @@ Implemented as planning artifacts:
 - `product-terminology-glossary.md`
 - `sample-test-project-definition.md`
 - `secret-redaction-policy.md`
-- `sprint-2-acceptance-checklist.md`
+- Sprint 2 acceptance criteria summarized in the Sprint Portfolio.
 
 ### Objective
 
@@ -108,7 +108,7 @@ Convert the UX package into an implementation-ready blueprint and test strategy.
 
 ### Status
 
-Implemented. See `sprint-2-implementation-status.md`.
+Implemented. See the Sprint Portfolio for the delivery summary.
 
 ### Objective
 
@@ -144,7 +144,7 @@ Establish the cross-platform app shell, development workflow, and automated qual
 
 ### Status
 
-Implemented. See `sprint-3-implementation-status.md`.
+Implemented. See the Sprint Portfolio for the delivery summary.
 
 ### Objective
 
@@ -180,7 +180,7 @@ Give users reliable local project persistence and safe close behavior.
 
 ### Status
 
-Implemented. See `sprint-4-implementation-status.md`.
+Implemented. See the Sprint Portfolio for the delivery summary.
 
 ### Objective
 
@@ -248,7 +248,7 @@ Preload REST service definitions from published API documentation.
 
 ### Status
 
-Implemented. See `sprint-5-implementation-status.md`.
+Implemented. See the Sprint Portfolio for the delivery summary.
 
 ### Objective
 
@@ -282,7 +282,7 @@ Execute individual REST calls and display trustworthy diagnostics.
 
 ### Status
 
-Implemented. See `sprint-6-implementation-status.md`.
+Implemented. See the Sprint Portfolio for the delivery summary.
 
 ### Objective
 
@@ -316,7 +316,7 @@ Persist response evidence for later inspection and review.
 
 ### Status
 
-Implemented. See `sprint-7-implementation-status.md`.
+Implemented. See the Sprint Portfolio for the delivery summary.
 
 ### Objective
 
@@ -353,7 +353,7 @@ Model chained REST workflows visually.
 
 ### Status
 
-Implemented. See `sprint-7a-implementation-status.md`.
+Implemented. See the Sprint Portfolio for the delivery summary.
 
 ### Objective
 
@@ -395,7 +395,7 @@ Reduce visible workbench clutter and align the shell with common macOS and Windo
 
 ### Status
 
-Implemented. See `sprint-8-implementation-status.md`.
+Implemented. See the Sprint Portfolio for the delivery summary.
 
 ### Objective
 
@@ -430,7 +430,7 @@ Pass values from one REST response into later REST calls.
 
 ### Status
 
-Implemented. See `sprint-8a-implementation-status.md`.
+Implemented. See the Sprint Portfolio for the delivery summary.
 
 ### Objective
 
@@ -468,7 +468,7 @@ Make flows the product's clearest differentiator by turning the basic flow varia
 
 ### Status
 
-Implemented. See `sprint-8b-implementation-status.md`.
+Implemented. See the Sprint Portfolio for the delivery summary.
 
 ### Objective
 
@@ -762,7 +762,31 @@ Produce installable beta builds for macOS, Windows, and Linux.
 - The helper/help file ships inside the application and is reachable from the native Help menu on macOS and Windows.
 - Final macOS and Windows beta installers are regenerated from the commit containing the helper/help file and pass packaged-app regression testing.
 
-## Sprint 15: Developer Productivity And Import Hardening
+## Sprint 15: Documentation, UML, And Knowledge Transfer
+
+### Objective
+
+Create an authoritative documentation library that enables a junior developer to build and debug Relay Studio, a product manager to understand its architecture and delivery history, and technical or business leaders to explain the product accurately.
+
+### Scope
+
+- Create consolidated Word manuals for onboarding, architecture, UML, sprint history, testing, and security/platform/release operations.
+- Create all 14 UML diagram types as editable Visio `.vsdx` documents plus a 14-page master atlas.
+- Retain Markdown as the authority for build criteria, engineering policy, design constraints, and operative test procedures.
+- Consolidate valid material from historical sprint documents and remove obsolete scripts after traceability review.
+- Verify every Word page visually and every Visio package structurally.
+- Exercise the documented development and debugging workflows against the running application.
+
+### Acceptance Criteria
+
+- The Word library covers developer onboarding, product and technical architecture, all 14 UML views, sprint history, current QA, and security/platform/release operations.
+- A traceability manifest identifies every retained, consolidated, and removed human-facing source.
+- Obsolete sprint-specific test scripts are not converted one-for-one; current scenarios are deduplicated into the QA manual.
+- Retained Markdown directives and Word manuals identify their authority without conflict.
+- All `.docx` pages pass render inspection and all `.vsdx` packages pass structural validation.
+- A junior developer can follow the onboarding and debugging procedures without undocumented setup knowledge.
+
+## Sprint 16: Developer Productivity And Import Hardening
 
 ### Objective
 

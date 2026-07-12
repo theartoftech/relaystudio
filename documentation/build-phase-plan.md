@@ -57,7 +57,7 @@ The first implementation deliverable is a reviewable UX package. Product impleme
 
 ### Status
 
-Implemented. See `sprint-1-ux-blueprint.md`, `product-terminology-glossary.md`, `sample-test-project-definition.md`, `secret-redaction-policy.md`, and `sprint-2-acceptance-checklist.md`.
+Implemented. See `sprint-1-ux-blueprint.md`, `product-terminology-glossary.md`, `sample-test-project-definition.md`, `secret-redaction-policy.md`, and the Sprint Portfolio.
 
 ### Goals
 
@@ -85,7 +85,7 @@ Implemented. See `sprint-1-ux-blueprint.md`, `product-terminology-glossary.md`, 
 
 ### Status
 
-Implemented. See `sprint-2-implementation-status.md`.
+Implemented. See the Sprint Portfolio for the delivery summary.
 
 ### Goals
 
@@ -108,7 +108,7 @@ Implemented. See `sprint-2-implementation-status.md`.
 
 ### Status
 
-Implemented. See `sprint-3-implementation-status.md`.
+Implemented. See the Sprint Portfolio for the delivery summary.
 
 ### Goals
 
@@ -135,7 +135,7 @@ Implemented. See `sprint-3-implementation-status.md`.
 
 ### Status
 
-Implemented. See `sprint-4-implementation-status.md`.
+Implemented. See the Sprint Portfolio for the delivery summary.
 
 ### Goals
 
@@ -188,7 +188,7 @@ Implemented. See `sprint-4-implementation-status.md`.
 
 ### Status
 
-Implemented. See `sprint-5-implementation-status.md`.
+Implemented. See the Sprint Portfolio for the delivery summary.
 
 ### Goals
 
@@ -224,7 +224,7 @@ Implemented. See `sprint-5-implementation-status.md`.
 
 ### Status
 
-Implemented. See `sprint-6-implementation-status.md`.
+Implemented. See the Sprint Portfolio for the delivery summary.
 
 ### Goals
 
@@ -252,7 +252,7 @@ Implemented. See `sprint-6-implementation-status.md`.
 
 ### Status
 
-Implemented. See `sprint-7-implementation-status.md`.
+Implemented. See the Sprint Portfolio for the delivery summary.
 
 ### Goals
 
@@ -287,7 +287,7 @@ Implemented. See `sprint-7-implementation-status.md`.
 
 ### Status
 
-Implemented. See `sprint-7a-implementation-status.md`.
+Implemented. See the Sprint Portfolio for the delivery summary.
 
 ### Goals
 
@@ -316,7 +316,7 @@ Implemented. See `sprint-7a-implementation-status.md`.
 
 ### Status
 
-Implemented. See `sprint-8-implementation-status.md`.
+Implemented. See the Sprint Portfolio for the delivery summary.
 
 ### Goals
 
@@ -351,7 +351,7 @@ Implemented. See `sprint-8-implementation-status.md`.
 
 ### Status
 
-Implemented. See `sprint-8a-implementation-status.md`.
+Implemented. See the Sprint Portfolio for the delivery summary.
 
 ### Goals
 
@@ -379,7 +379,7 @@ Implemented. See `sprint-8a-implementation-status.md`.
 
 ### Status
 
-Implemented. See `sprint-8b-implementation-status.md`.
+Implemented. See the Sprint Portfolio for the delivery summary.
 
 ### Goals
 
@@ -592,7 +592,29 @@ Implemented. See `sprint-8b-implementation-status.md`.
 - Offline helper/help file opens from the native Help menu on macOS and Windows.
 - Rebuilt macOS and Windows installers contain the helper/help file and pass packaged regression checks.
 
-## Sprint 15: Developer Productivity And Import Hardening
+## Sprint 15: Documentation, UML, And Knowledge Transfer
+
+### Goals
+
+- Create a curated Word documentation library for development, debugging, product handoff, testing, and release operations.
+- Model Relay Studio through all 14 UML diagram types in editable Visio format.
+- Preserve authoritative Markdown directives while retiring obsolete sprint-specific documentation.
+
+### Documentation Scope
+
+- Developer onboarding and debugging guide.
+- Technical architecture and product handoff.
+- Word UML guide plus individual Visio diagrams and a master atlas.
+- Consolidated sprint portfolio and current test/QA manual.
+- Security, platform, packaging, and release manual.
+- Documentation traceability and obsolete-script cleanup.
+
+### Non-Goals
+
+- One-for-one Word conversion of obsolete testing scripts.
+- Product feature development other than correctness fixes discovered during documentation validation.
+
+## Sprint 16: Developer Productivity And Import Hardening
 
 ### Goals
 

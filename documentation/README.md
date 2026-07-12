@@ -1,56 +1,42 @@
-# Relay Studio Planning Package
+# Relay Studio Documentation
 
-This folder contains the first implementation slice for Relay Studio: reviewable design and testing artifacts before product code is scaffolded.
+Relay Studio uses a curated documentation library instead of preserving every historical sprint file. Word documents are authoritative for onboarding, architecture narrative, product handoff, UML guidance, sprint summaries, consolidated QA, and release operations. Markdown remains authoritative for build criteria, engineering policy, design constraints, and operative test procedures.
 
-## Files
+## Word Library
 
-- [build-phase-plan.md](build-phase-plan.md): 2-week sprint breakdown from mockups through cross-platform beta, including OpenAPI/Swagger import and Sprint 8B desktop density polish.
-- [current-human-test-script.md](current-human-test-script.md): consolidated human QA script for the current uncommitted app state.
-- [detailed-sprint-plan.md](detailed-sprint-plan.md): review-ready sprint plan with objectives, deliverables, work items, acceptance criteria, dependencies, and quality gates.
-- [live-rest-local-config.example.json](live-rest-local-config.example.json): example local-only config for the gated live REST acceptance suite.
-- [platform-guidelines-compliance-backlog.md](platform-guidelines-compliance-backlog.md): concrete shared, macOS, and Windows backlog for meeting platform design guidelines with phased acceptance criteria.
-- [sprint-0-decision-record.md](sprint-0-decision-record.md): concluded Sprint 0 decision record approving the provided reference screenshots as the product direction.
-- [sprint-1-ux-blueprint.md](sprint-1-ux-blueprint.md): implemented Sprint 1 blueprint with shell anatomy, navigation, command placement, screen inventory, import flow, and test strategy.
-- [product-terminology-glossary.md](product-terminology-glossary.md): stable product terms for UI, docs, code naming, and tests.
-- [sample-test-project-definition.md](sample-test-project-definition.md): neutral sample acceptance project structure, services, environments, variables, and flows.
-- [secret-redaction-policy.md](secret-redaction-policy.md): redaction rules and test expectations for credentials and secret-bearing data.
-- [sprint-2-acceptance-checklist.md](sprint-2-acceptance-checklist.md): explicit exit checklist for the desktop foundation scaffold.
-- [sprint-2-implementation-status.md](sprint-2-implementation-status.md): delivered Sprint 2 scaffold, verification results, QA evidence, and known deferred gaps.
-- [sprint-3-implementation-status.md](sprint-3-implementation-status.md): delivered Sprint 3 project persistence, dirty-state, and verification results.
-- [sprint-4-implementation-status.md](sprint-4-implementation-status.md): delivered Sprint 4 REST service designer, request validation, and 90% coverage gate.
-- [sprint-5-implementation-status.md](sprint-5-implementation-status.md): delivered Sprint 5 single request runner, native HTTP execution, response dock, console diagnostics, and verification results.
-- [sprint-13-implementation-status.md](sprint-13-implementation-status.md): Sprint 13 release-blocking coverage, CI, dependency, static-analysis, secret-scanning, and live REST gates.
-- [sprint-13-release-candidate-readiness.md](sprint-13-release-candidate-readiness.md): release gate evidence, known risks, deferrals, and final approval checklist.
-- [sprint-14-platform-validation.md](sprint-14-platform-validation.md): native macOS, Windows, and Linux installer and UI acceptance record.
-- [sprint-14-beta-release-notes.md](sprint-14-beta-release-notes.md): stakeholder-facing beta scope, packages, signing deferrals, and known limitations.
-- [sprint-14-implementation-status.md](sprint-14-implementation-status.md): delivered packaging automation, verification evidence, and pending native beta approval work.
-- [openapi-import-implementation-status.md](openapi-import-implementation-status.md): Swagger/OpenAPI discovery, selective REST service import, security behavior, verification, and current boundaries.
-- [tauri-security-checklist.md](tauri-security-checklist.md): reviewed Tauri CSP, capabilities, command, filesystem, updater, transport, and window security boundary.
-- [sprint-6-implementation-status.md](sprint-6-implementation-status.md): delivered Sprint 6 saved responses, redacted response artifacts, native/browser file persistence, reload workflow, and coverage results.
-- [sprint-7-implementation-status.md](sprint-7-implementation-status.md): delivered Sprint 7 visual flow builder, React Flow canvas, flow ordering, dependency validation, branch paths, console grouping, and coverage results.
-- [sprint-7a-implementation-status.md](sprint-7a-implementation-status.md): delivered Sprint 7A UX consolidation, including simplified navigation, contextual toolbar, optional inspector, and tabbed utility dock.
-- [sprint-8-implementation-status.md](sprint-8-implementation-status.md): delivered Sprint 8 flow variables, JSONPath response mappings, runtime injection, and lifecycle flow coverage.
-- [sprint-8a-implementation-status.md](sprint-8a-implementation-status.md): delivered Sprint 8A flow UX hardening, templates, variable capture/consumption display, and cleanup-step affordances.
-- [sprint-8a-user-test-script.md](sprint-8a-user-test-script.md): human QA script for first-time flow authoring and debugging.
-- [sprint-8b-implementation-status.md](sprint-8b-implementation-status.md): delivered Sprint 8B desktop density pass, compact shell sizing, native fonts, and density regression coverage.
-- [sprint-9a-implementation-status.md](sprint-9a-implementation-status.md): delivered Sprint 9A platform shell contract, shared command model, native menu wiring, and shell verification evidence.
-- [sprint-9b-implementation-status.md](sprint-9b-implementation-status.md): delivered Sprint 9B platform navigation and command surfaces, including simplified Explorer ownership, command-surface Recent Projects, status bar messaging, contextual inspector content, and verification evidence.
-- [sprint-10b-1-user-test-script.md](sprint-10b-1-user-test-script.md): human QA script for Sprint 10B-1 platform regression coverage, including command palette focus, native view toggles, dirty close flows, and context-menu dismissal.
-- [sprint-10b-2-macos-qa-script.md](sprint-10b-2-macos-qa-script.md): human QA script for Sprint 10B-2 macOS menu, Settings, dirty close, command parity, and audit evidence validation.
-- [sprint-10b-3-windows-qa-script.md](sprint-10b-3-windows-qa-script.md): packaged-Windows QA script for installer build, title bar, caption controls, breakpoints, appearance, keyboard behavior, persistence, and flow execution.
-- [sprint-10b-3-implementation-status.md](sprint-10b-3-implementation-status.md): delivered Windows handoff, fixes, audit artifacts, and the remaining evidence closure gate.
-- [../audits/windows-2026-07-10/relay-studio-windows-desktop-audit.md](../audits/windows-2026-07-10/relay-studio-windows-desktop-audit.md): bounded Windows desktop audit with explicit closed, conditional, and open verification findings.
-- [../tools/windows-build-installer.ps1](../tools/windows-build-installer.ps1): Windows handoff script for Sprint 10B-3; run after pulling the branch on Windows to verify and build installable Relay Studio artifacts.
-- [visual-target.md](visual-target.md): selected Concept 3 visual direction and implementation guardrails.
-- [live-rest-acceptance-test-matrix.md](live-rest-acceptance-test-matrix.md): configurable live REST acceptance suite.
-- [mockups/index.html](mockups/index.html): static full-app mockup set.
-- [mockups/mockups.css](mockups/mockups.css): Cowboys-inspired visual styling for the mockups.
+- [Developer Onboarding and Debugging Guide](word/Relay-Studio-Developer-Onboarding-and-Debugging-Guide.docx)
+- [Technical Architecture and Product Handoff](word/Relay-Studio-Technical-Architecture-and-Product-Handoff.docx)
+- [UML Guide](word/Relay-Studio-UML-Guide.docx)
+- [Sprint Portfolio](word/Relay-Studio-Sprint-Portfolio.docx)
+- [Test and QA Manual](word/Relay-Studio-Test-and-QA-Manual.docx)
+- [Security, Platform, and Release Manual](word/Relay-Studio-Security-Platform-and-Release-Manual.docx)
 
-## Review Order
+## Visio UML
 
-1. Open the static mockups and review screen intent.
-2. Review the Sprint 0 decision record and selected visual target so implementation stays aligned to the approved screenshots and Concept 3.
-3. Review the Sprint 1 UX blueprint, terminology glossary, redaction policy, and sample test project definition.
-4. Review the detailed sprint plan for scope, sequencing, dependencies, and release gates.
-5. Review the live REST acceptance matrix for endpoint and role coverage.
-6. Use the Sprint 2 acceptance checklist before scaffolding the desktop app.
+- [Relay Studio UML Atlas](uml/visio/Relay-Studio-UML-Atlas.vsdx): editable 14-page Visio atlas.
+- `uml/visio/*-diagram.vsdx`: fourteen individual editable Visio diagrams.
+- `uml/previews/*.png`: reviewed previews embedded in the Word UML guide.
+
+## Authoritative Markdown Directives
+
+- [Detailed Sprint Plan](detailed-sprint-plan.md)
+- [Build Phase Plan](build-phase-plan.md)
+- [Product Terminology](product-terminology-glossary.md)
+- [Secret Redaction Policy](secret-redaction-policy.md)
+- [Tauri Security Checklist](tauri-security-checklist.md)
+- [Platform Guidelines Backlog](platform-guidelines-compliance-backlog.md)
+- [Live REST Acceptance Matrix](live-rest-acceptance-test-matrix.md)
+- [Sample Test Project](sample-test-project-definition.md)
+- [Visual Target](visual-target.md)
+- [UX Blueprint](sprint-1-ux-blueprint.md)
+- [Current Human Test Script](current-human-test-script.md)
+- [Packaged Windows QA Script](sprint-10b-3-windows-qa-script.md)
+
+## Governance
+
+- `documentation-traceability.json` records every retained or consolidated historical Markdown source and its destination.
+- Historical sprint-specific status and QA detail remains available through Git history.
+- Update the retained Markdown directive first when build criteria, policy, design constraints, or operative procedures change; update the related Word explanation in the same change.
+- Update Word directly for narrative or stakeholder documentation.
+- Validate Word and Visio artifacts with `tools/validate_documentation_artifacts.py`.
+- Render and inspect every Word page after a meaningful edit.

@@ -4,7 +4,7 @@
 
 The approved visual target is **Concept 3: Developer IDE Console** from the three generated design directions.
 
-Sprint 0 is concluded and the approved reference screenshots define the target look and interaction model. Sprint 7A refines that direction to reduce clutter while preserving the desktop IDE feel. The current coded mockup at `mockups/index.html` remains a historical working reference, but implementation should use the approved screenshots, Sprint 7A UX consolidation, and `sprint-0-decision-record.md` as the north star for polish, density, and desktop-native feel.
+Sprint 0 is concluded and the approved reference screenshots define the target look and interaction model. Sprint 7A refines that direction to reduce clutter while preserving the desktop IDE feel. The current coded mockup at `mockups/index.html` remains a historical working reference; the Sprint Portfolio preserves the decision summary while Git history retains the original Sprint 0 record.
 
 ## Design Intent
 

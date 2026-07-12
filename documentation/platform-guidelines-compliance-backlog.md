@@ -17,7 +17,7 @@ This backlog is intentionally split into:
 Apple basis:
 
 - `documentation` review target: `https://developer.apple.com/design/human-interface-guidelines/designing-for-macos`
-- current app evidence: [../audits/apple-hig-2026-06-30/relay-studio-macos-hig-audit.md](../audits/apple-hig-2026-06-30/relay-studio-macos-hig-audit.md)
+- current app evidence: summarized in [Security, Platform, and Release Manual](word/Relay-Studio-Security-Platform-and-Release-Manual.docx); dated audit detail remains in Git history.
 
 Windows basis:
 
@@ -214,7 +214,7 @@ Make the platform work enforceable rather than subjective.
     - A macOS shell QA script exists for menus, settings, save prompts, and view toggles.
     - A Windows shell QA script exists for title bar, caption controls, breakpoints, contrast, and keyboard behavior.
 
-    Status (2026-07-10): Complete. The macOS script is `documentation/sprint-10b-2-macos-qa-script.md`; the Windows script is `documentation/sprint-10b-3-windows-qa-script.md`.
+    Status (2026-07-10): Complete. Current macOS coverage is consolidated in the Test and QA Manual; the Windows script remains `documentation/sprint-10b-3-windows-qa-script.md`.
 
 #### macOS
 
@@ -230,7 +230,7 @@ Make the platform work enforceable rather than subjective.
     - The review confirms progress against commanding, navigation, title bar, layout, and writing guidance.
     - High-priority Windows findings are tracked as backlog items if they are not closed in the same sprint.
 
-    Status (2026-07-11): Implemented and closed in `audits/windows-2026-07-10/relay-studio-windows-desktop-audit.md`. Installer, save-path, flow-authoring, response-action, and close-lifecycle findings are closed after packaged Windows testing. Additional breakpoint and high-contrast screenshots move to Sprint 11 release-gate evidence hardening.
+    Status (2026-07-11): Implemented and closed. The dated audit is summarized in the Security, Platform, and Release Manual and remains available through Git history. Installer, save-path, flow-authoring, response-action, and close-lifecycle findings are closed after packaged Windows testing.
 
 ## Suggested Sprint Mapping
 
@@ -251,7 +251,7 @@ Exit criteria:
 - Shared backlog items 5, 6, 7
 - macOS backlog item 8
 - Windows backlog item 9
-- Implementation status: see `sprint-9b-implementation-status.md`.
+- Implementation status: see the Sprint Portfolio Word document.
 
 Exit criteria:
 

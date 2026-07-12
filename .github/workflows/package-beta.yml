@@ -14,7 +14,32 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  live-rest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      LIVE_REST_CONFIG_B64: ${{ secrets.RELAY_LIVE_REST_CONFIG_B64 }}
+    steps:
+      - name: Require live REST configuration
+        if: env.LIVE_REST_CONFIG_B64 == ''
+        run: |
+          echo "Live REST configuration is required before beta packaging."
+          exit 1
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Materialize protected live REST configuration
+        run: printf '%s' "$LIVE_REST_CONFIG_B64" | base64 --decode > "$RUNNER_TEMP/live-rest.json"
+      - name: Run configured live REST acceptance suite
+        env:
+          RELAY_LIVE_REST_CONFIG: ${{ runner.temp }}/live-rest.json
+        run: npm run test:live-rest
+
   package:
+    needs: live-rest
     name: ${{ matrix.name }} beta package
     strategy:
       fail-fast: false

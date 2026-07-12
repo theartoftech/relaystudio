@@ -61,6 +61,13 @@ describe("Sprint 13 release gates", () => {
     expect(workflow).toContain("if: env.LIVE_REST_CONFIG_B64 != ''");
   });
 
+  it("reports missing live REST configuration without failing ordinary main validation", () => {
+    const workflow = readRepositoryFile(".github/workflows/ci.yml");
+
+    expect(workflow).toContain("Live REST acceptance not configured; release packaging remains blocked.");
+    expect(workflow).not.toContain("Block release without live REST configuration");
+  });
+
   it("enables a restrictive CSP and selects the reviewed capability", () => {
     const config = readJsonFile<TauriConfiguration>("src-tauri/tauri.conf.json");
     const security = config.app?.security;

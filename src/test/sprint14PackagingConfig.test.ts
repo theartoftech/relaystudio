@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 interface BundleConfiguration {
@@ -60,17 +60,36 @@ describe("Sprint 14 cross-platform packaging", () => {
     expect(workflow).toContain("if-no-files-found: error");
   });
 
-  it("documents platform validation and signing decisions", () => {
-    const report = readRepositoryFile("documentation/sprint-14-platform-validation.md");
-    const releaseNotes = readRepositoryFile("documentation/sprint-14-beta-release-notes.md");
+  it("blocks beta packaging until configured live REST acceptance passes", () => {
+    const workflow = readRepositoryFile(".github/workflows/package-beta.yml");
 
-    for (const platform of ["macOS", "Windows", "Linux"]) {
-      expect(report).toContain(platform);
-      expect(releaseNotes).toContain(platform);
+    expect(workflow).toContain("live-rest:");
+    expect(workflow).toContain("RELAY_LIVE_REST_CONFIG_B64");
+    expect(workflow).toContain("npm run test:live-rest");
+    expect(workflow).toContain("needs: live-rest");
+    expect(workflow).toContain("Live REST configuration is required before beta packaging.");
+  });
+
+  it("documents platform validation and signing decisions", () => {
+    const manualPath = resolve(
+      process.cwd(),
+      "documentation/word/Relay-Studio-Security-Platform-and-Release-Manual.docx"
+    );
+    const traceability = readJsonFile<{
+      entries?: Array<{ source?: string; action?: string; destination?: string }>;
+    }>("documentation/documentation-traceability.json");
+
+    expect(existsSync(manualPath)).toBe(true);
+    for (const historicalSource of [
+      "documentation/sprint-14-platform-validation.md",
+      "documentation/sprint-14-beta-release-notes.md"
+    ]) {
+      expect(traceability.entries).toContainEqual({
+        source: historicalSource,
+        action: "consolidate-remove",
+        destination: "documentation/word/Relay-Studio-Security-Platform-and-Release-Manual.docx"
+      });
     }
-    expect(report).toContain("Signing");
-    expect(report).toContain("Permission failure");
-    expect(releaseNotes).toContain("Known Limitations");
   });
 
   it("bundles an offline help file and exposes it through the native Help menu", () => {

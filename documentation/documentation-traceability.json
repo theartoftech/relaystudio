@@ -1,0 +1,270 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-07-12T18:36:41+00:00",
+  "authority": {
+    "word": "Narrative onboarding, architecture, UML guidance, sprint summaries, QA consolidation, and release operations",
+    "markdown": "Build criteria, engineering policy, design constraints, and operative test procedures listed as retained"
+  },
+  "entries": [
+    {
+      "source": "audits/apple-hig-2026-06-30/relay-studio-macos-hig-audit.md",
+      "action": "consolidate-remove",
+      "destination": "documentation/word/Relay-Studio-Security-Platform-and-Release-Manual.docx"
+    },
+    {
+      "source": "audits/apple-hig-2026-07-08/evidence/README.md",
+      "action": "consolidate-remove",
+      "destination": "documentation/word/Relay-Studio-Security-Platform-and-Release-Manual.docx"
+    },
+    {
+      "source": "audits/apple-hig-2026-07-08/relay-studio-macos-hig-audit-refresh.md",
+      "action": "consolidate-remove",
+      "destination": "documentation/word/Relay-Studio-Security-Platform-and-Release-Manual.docx"
+    },
+    {
+      "source": "audits/windows-2026-07-10/evidence/README.md",
+      "action": "consolidate-remove",
+      "destination": "documentation/word/Relay-Studio-Security-Platform-and-Release-Manual.docx"
+    },
+    {
+      "source": "audits/windows-2026-07-10/relay-studio-windows-desktop-audit.md",
+      "action": "consolidate-remove",
+      "destination": "documentation/word/Relay-Studio-Security-Platform-and-Release-Manual.docx"
+    },
+    {
+      "source": "design-qa.md",
+      "action": "consolidate-remove",
+      "destination": "documentation/word/Relay-Studio-Test-and-QA-Manual.docx"
+    },
+    {
+      "source": "documentation/README.md",
+      "action": "retain",
+      "destination": "Retained authoritative Markdown; referenced by the Word library"
+    },
+    {
+      "source": "documentation/build-phase-plan.md",
+      "action": "retain",
+      "destination": "Retained authoritative Markdown; referenced by the Word library"
+    },
+    {
+      "source": "documentation/current-human-test-script.md",
+      "action": "retain",
+      "destination": "Retained authoritative Markdown; referenced by the Word library"
+    },
+    {
+      "source": "documentation/detailed-sprint-plan.md",
+      "action": "retain",
+      "destination": "Retained authoritative Markdown; referenced by the Word library"
+    },
+    {
+      "source": "documentation/live-rest-acceptance-test-matrix.md",
+      "action": "retain",
+      "destination": "Retained authoritative Markdown; referenced by the Word library"
+    },
+    {
+      "source": "documentation/openapi-import-implementation-status.md",
+      "action": "consolidate-remove",
+      "destination": "documentation/word/Relay-Studio-Sprint-Portfolio.docx"
+    },
+    {
+      "source": "documentation/platform-guidelines-compliance-backlog.md",
+      "action": "retain",
+      "destination": "Retained authoritative Markdown; referenced by the Word library"
+    },
+    {
+      "source": "documentation/product-terminology-glossary.md",
+      "action": "retain",
+      "destination": "Retained authoritative Markdown; referenced by the Word library"
+    },
+    {
+      "source": "documentation/sample-test-project-definition.md",
+      "action": "retain",
+      "destination": "Retained authoritative Markdown; referenced by the Word library"
+    },
+    {
+      "source": "documentation/secret-redaction-policy.md",
+      "action": "retain",
+      "destination": "Retained authoritative Markdown; referenced by the Word library"
+    },
+    {
+      "source": "documentation/sprint-0-decision-record.md",
+      "action": "consolidate-remove",
+      "destination": "documentation/word/Relay-Studio-Sprint-Portfolio.docx"
+    },
+    {
+      "source": "documentation/sprint-1-ux-blueprint.md",
+      "action": "retain",
+      "destination": "Retained authoritative Markdown; referenced by the Word library"
+    },
+    {
+      "source": "documentation/sprint-10a-user-test-script.md",
+      "action": "consolidate-remove",
+      "destination": "documentation/word/Relay-Studio-Test-and-QA-Manual.docx"
+    },
+    {
+      "source": "documentation/sprint-10b-1-user-test-script.md",
+      "action": "consolidate-remove",
+      "destination": "documentation/word/Relay-Studio-Test-and-QA-Manual.docx"
+    },
+    {
+      "source": "documentation/sprint-10b-2-macos-qa-script.md",
+      "action": "consolidate-remove",
+      "destination": "documentation/word/Relay-Studio-Test-and-QA-Manual.docx"
+    },
+    {
+      "source": "documentation/sprint-10b-3-implementation-status.md",
+      "action": "consolidate-remove",
+      "destination": "documentation/word/Relay-Studio-Sprint-Portfolio.docx"
+    },
+    {
+      "source": "documentation/sprint-10b-3-windows-qa-script.md",
+      "action": "retain",
+      "destination": "Retained authoritative Markdown; referenced by the Word library"
+    },
+    {
+      "source": "documentation/sprint-11-start-summary.md",
+      "action": "consolidate-remove",
+      "destination": "documentation/word/Relay-Studio-Sprint-Portfolio.docx"
+    },
+    {
+      "source": "documentation/sprint-12-enterprise-hardening-qa-script.md",
+      "action": "consolidate-remove",
+      "destination": "documentation/word/Relay-Studio-Test-and-QA-Manual.docx"
+    },
+    {
+      "source": "documentation/sprint-12-implementation-status.md",
+      "action": "consolidate-remove",
+      "destination": "documentation/word/Relay-Studio-Sprint-Portfolio.docx"
+    },
+    {
+      "source": "documentation/sprint-13-coverage-security-gate-qa-script.md",
+      "action": "consolidate-remove",
+      "destination": "documentation/word/Relay-Studio-Test-and-QA-Manual.docx"
+    },
+    {
+      "source": "documentation/sprint-13-implementation-status.md",
+      "action": "consolidate-remove",
+      "destination": "documentation/word/Relay-Studio-Sprint-Portfolio.docx"
+    },
+    {
+      "source": "documentation/sprint-13-release-candidate-readiness.md",
+      "action": "consolidate-remove",
+      "destination": "documentation/word/Relay-Studio-Security-Platform-and-Release-Manual.docx"
+    },
+    {
+      "source": "documentation/sprint-14-beta-release-notes.md",
+      "action": "consolidate-remove",
+      "destination": "documentation/word/Relay-Studio-Security-Platform-and-Release-Manual.docx"
+    },
+    {
+      "source": "documentation/sprint-14-implementation-status.md",
+      "action": "consolidate-remove",
+      "destination": "documentation/word/Relay-Studio-Sprint-Portfolio.docx"
+    },
+    {
+      "source": "documentation/sprint-14-platform-validation.md",
+      "action": "consolidate-remove",
+      "destination": "documentation/word/Relay-Studio-Security-Platform-and-Release-Manual.docx"
+    },
+    {
+      "source": "documentation/sprint-2-acceptance-checklist.md",
+      "action": "consolidate-remove",
+      "destination": "documentation/word/Relay-Studio-Test-and-QA-Manual.docx"
+    },
+    {
+      "source": "documentation/sprint-2-implementation-status.md",
+      "action": "consolidate-remove",
+      "destination": "documentation/word/Relay-Studio-Sprint-Portfolio.docx"
+    },
+    {
+      "source": "documentation/sprint-3-implementation-status.md",
+      "action": "consolidate-remove",
+      "destination": "documentation/word/Relay-Studio-Sprint-Portfolio.docx"
+    },
+    {
+      "source": "documentation/sprint-4-implementation-status.md",
+      "action": "consolidate-remove",
+      "destination": "documentation/word/Relay-Studio-Sprint-Portfolio.docx"
+    },
+    {
+      "source": "documentation/sprint-5-implementation-status.md",
+      "action": "consolidate-remove",
+      "destination": "documentation/word/Relay-Studio-Sprint-Portfolio.docx"
+    },
+    {
+      "source": "documentation/sprint-6-implementation-status.md",
+      "action": "consolidate-remove",
+      "destination": "documentation/word/Relay-Studio-Sprint-Portfolio.docx"
+    },
+    {
+      "source": "documentation/sprint-6-user-test-script.md",
+      "action": "consolidate-remove",
+      "destination": "documentation/word/Relay-Studio-Test-and-QA-Manual.docx"
+    },
+    {
+      "source": "documentation/sprint-7-implementation-status.md",
+      "action": "consolidate-remove",
+      "destination": "documentation/word/Relay-Studio-Sprint-Portfolio.docx"
+    },
+    {
+      "source": "documentation/sprint-7-user-test-script.md",
+      "action": "consolidate-remove",
+      "destination": "documentation/word/Relay-Studio-Test-and-QA-Manual.docx"
+    },
+    {
+      "source": "documentation/sprint-7a-implementation-status.md",
+      "action": "consolidate-remove",
+      "destination": "documentation/word/Relay-Studio-Sprint-Portfolio.docx"
+    },
+    {
+      "source": "documentation/sprint-7a-user-test-script.md",
+      "action": "consolidate-remove",
+      "destination": "documentation/word/Relay-Studio-Test-and-QA-Manual.docx"
+    },
+    {
+      "source": "documentation/sprint-8-implementation-status.md",
+      "action": "consolidate-remove",
+      "destination": "documentation/word/Relay-Studio-Sprint-Portfolio.docx"
+    },
+    {
+      "source": "documentation/sprint-8-user-test-script.md",
+      "action": "consolidate-remove",
+      "destination": "documentation/word/Relay-Studio-Test-and-QA-Manual.docx"
+    },
+    {
+      "source": "documentation/sprint-8a-implementation-status.md",
+      "action": "consolidate-remove",
+      "destination": "documentation/word/Relay-Studio-Sprint-Portfolio.docx"
+    },
+    {
+      "source": "documentation/sprint-8a-user-test-script.md",
+      "action": "consolidate-remove",
+      "destination": "documentation/word/Relay-Studio-Test-and-QA-Manual.docx"
+    },
+    {
+      "source": "documentation/sprint-8b-implementation-status.md",
+      "action": "consolidate-remove",
+      "destination": "documentation/word/Relay-Studio-Sprint-Portfolio.docx"
+    },
+    {
+      "source": "documentation/sprint-9a-implementation-status.md",
+      "action": "consolidate-remove",
+      "destination": "documentation/word/Relay-Studio-Sprint-Portfolio.docx"
+    },
+    {
+      "source": "documentation/sprint-9b-implementation-status.md",
+      "action": "consolidate-remove",
+      "destination": "documentation/word/Relay-Studio-Sprint-Portfolio.docx"
+    },
+    {
+      "source": "documentation/tauri-security-checklist.md",
+      "action": "retain",
+      "destination": "Retained authoritative Markdown; referenced by the Word library"
+    },
+    {
+      "source": "documentation/visual-target.md",
+      "action": "retain",
+      "destination": "Retained authoritative Markdown; referenced by the Word library"
+    }
+  ]
+}
