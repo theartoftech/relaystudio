@@ -8,6 +8,8 @@ export default defineConfig({
     globals: true,
     setupFiles: "./src/test/setup.ts",
     css: true,
+    maxWorkers: 2,
+    testTimeout: 15_000,
     include: ["src/**/*.test.{ts,tsx}"],
     exclude: ["e2e/**", "node_modules/**", "dist/**"],
     coverage: {

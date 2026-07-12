@@ -4,6 +4,10 @@ version = "0.1.0"
 description = "Relay Studio desktop shell"
 authors = ["Relay Studio"]
 edition = "2021"
+publish = false
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(coverage_nightly)"] }
 
 [lib]
 name = "relay_studio_lib"

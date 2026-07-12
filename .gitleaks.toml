@@ -1,0 +1,17 @@
+title = "Relay Studio secret scanning"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Documentation placeholders and generated dependency metadata"
+paths = [
+  '''documentation/live-rest-local-config\.example\.json''',
+  '''documentation/sprint-12-enterprise-hardening-qa-script\.md''',
+  '''package-lock\.json''',
+  '''src-tauri/Cargo\.lock'''
+]
+regexes = [
+  '''replace-with-local-secret''',
+  '''qa-(?:password|token|api-key)-S12-\[unique-run-id\]'''
+]

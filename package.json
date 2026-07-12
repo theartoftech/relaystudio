@@ -6,6 +6,12 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc -b && vite build",
+    "check:types": "tsc -b --pretty false",
+    "check:rust": "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings",
+    "check:rust-coverage": "cargo +nightly llvm-cov --manifest-path src-tauri/Cargo.toml --all-features --workspace --ignore-filename-regex 'src/main.rs' --fail-under-lines 90",
+    "check:secrets": "node tools/secret-scan.mjs",
+    "check:licenses": "node tools/license-check.mjs",
+    "check:dependencies": "npm audit --audit-level=high && npm run check:licenses && cargo deny --manifest-path src-tauri/Cargo.toml check",
     "preview": "vite preview --host 127.0.0.1",
     "tauri": "tauri",
     "lint": "eslint .",
@@ -14,7 +20,8 @@
     "test:component": "vitest run src",
     "test:e2e": "playwright test",
     "test:live-rest": "vitest run src/test/liveRest/liveRestAcceptance.test.ts",
-    "verify": "npm run lint && npm run test:coverage && npm run build"
+    "verify": "npm run check:types && npm run lint && npm run test:coverage && npm run build",
+    "verify:release": "npm run verify && npm run test:component && npm run check:rust && npm run check:rust-coverage && cargo test --manifest-path src-tauri/Cargo.toml && npm run test:e2e && npm run check:secrets && npm run check:dependencies"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",

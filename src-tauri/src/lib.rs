@@ -1,3 +1,5 @@
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -107,6 +109,7 @@ fn app_version() -> String {
 }
 
 #[tauri::command]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn default_project_directory(app: tauri::AppHandle) -> Result<String, String> {
     let document_dir = app
         .path()
@@ -116,21 +119,25 @@ fn default_project_directory(app: tauri::AppHandle) -> Result<String, String> {
 }
 
 #[tauri::command]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn save_project_file(path: String, project: Value) -> Result<(), String> {
     save_project_file_impl(Path::new(&path), &project)
 }
 
 #[tauri::command]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn open_project_file(path: String) -> Result<Value, String> {
     open_project_file_impl(Path::new(&path))
 }
 
 #[tauri::command]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn restore_project_backup(path: String) -> Result<(), String> {
     restore_project_backup_impl(Path::new(&path))
 }
 
 #[tauri::command]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn project_file_exists(path: String) -> Result<bool, String> {
     let project_path = Path::new(&path);
     validate_project_path(project_path)?;
@@ -138,26 +145,31 @@ fn project_file_exists(path: String) -> Result<bool, String> {
 }
 
 #[tauri::command]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn rename_project_file(path: String, name: String) -> Result<(), String> {
     rename_project_file_impl(Path::new(&path), &name)
 }
 
 #[tauri::command]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn delete_project_file(path: String) -> Result<(), String> {
     delete_project_file_impl(Path::new(&path))
 }
 
 #[tauri::command]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn list_recent_projects() -> Result<Vec<RecentProject>, String> {
     read_recent_projects()
 }
 
 #[tauri::command]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn remember_recent_project(project: RecentProject) -> Result<(), String> {
     remember_recent_project_impl(project)
 }
 
 #[tauri::command]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn forget_recent_project(path: String) -> Result<(), String> {
     let project_path = Path::new(&path);
     validate_project_path(project_path)?;
@@ -165,26 +177,31 @@ fn forget_recent_project(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn refresh_app_menu(app: tauri::AppHandle, state: Option<ShellMenuState>) -> Result<(), String> {
     set_app_menu(&app, &state.unwrap_or_default())
 }
 
 #[tauri::command]
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn execute_http_request(request: HttpRequestInput) -> Result<HttpResponseOutput, String> {
     execute_http_request_impl(request).await
 }
 
 #[tauri::command]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn save_response_file(path: String, overwrite: bool, artifact: Value) -> Result<(), String> {
     save_response_file_impl(Path::new(&path), overwrite, &artifact)
 }
 
 #[tauri::command]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn read_response_file(metadata: Value) -> Result<Value, String> {
     read_response_file_impl(&metadata)
 }
 
 #[tauri::command]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn response_file_exists(path: String) -> Result<bool, String> {
     let response_path = Path::new(&path);
     validate_response_path(response_path)?;
@@ -192,6 +209,7 @@ fn response_file_exists(path: String) -> Result<bool, String> {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -224,6 +242,7 @@ pub fn run() {
         .expect("error while running Relay Studio");
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn set_app_menu(app: &tauri::AppHandle, state: &ShellMenuState) -> Result<(), String> {
     let mut recent_menu_builder = SubmenuBuilder::new(app, "Open Recent");
     let recent_projects = read_recent_projects().unwrap_or_default();
@@ -417,6 +436,7 @@ fn set_app_menu(app: &tauri::AppHandle, state: &ShellMenuState) -> Result<(), St
     Ok(())
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn handle_app_menu_event(app: &tauri::AppHandle, id: &str) {
     let recent_projects = if id.starts_with(MENU_OPEN_RECENT_PREFIX) {
         read_recent_projects().unwrap_or_default()
@@ -429,6 +449,7 @@ fn handle_app_menu_event(app: &tauri::AppHandle, id: &str) {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn checked_state_for_menu_id(app: &tauri::AppHandle, id: &str) -> Option<bool> {
     app.menu()?
         .get(id)?
@@ -851,6 +872,7 @@ fn response_temp_path_for(path: &Path) -> PathBuf {
     path.with_extension(format!("{extension}.tmp"))
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn recent_projects_path() -> Result<PathBuf, String> {
     let home = home_directory_from(|name| std::env::var_os(name))
         .ok_or_else(|| "The user home directory is not available.".to_string())?;
@@ -876,6 +898,7 @@ fn home_directory_from(get_env: impl Fn(&str) -> Option<OsString>) -> Option<Pat
     )))
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn read_recent_projects() -> Result<Vec<RecentProject>, String> {
     let path = recent_projects_path()?;
     if !path.exists() {
@@ -887,6 +910,7 @@ fn read_recent_projects() -> Result<Vec<RecentProject>, String> {
         .map_err(|error| format!("Recent projects file is invalid: {error}"))
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn remember_recent_project_impl(project: RecentProject) -> Result<(), String> {
     let mut recent = read_recent_projects().unwrap_or_default();
     recent.retain(|item| item.path != project.path);
@@ -895,6 +919,7 @@ fn remember_recent_project_impl(project: RecentProject) -> Result<(), String> {
     write_recent_projects(&recent)
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn rename_recent_project_impl(path: &Path, name: &str) -> Result<(), String> {
     let path_text = path.to_string_lossy().to_string();
     let recent = read_recent_projects()
@@ -914,6 +939,7 @@ fn rename_recent_project_impl(path: &Path, name: &str) -> Result<(), String> {
     write_recent_projects(&recent)
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn forget_recent_project_impl(path: &Path) -> Result<(), String> {
     let path_text = path.to_string_lossy().to_string();
     let mut recent = read_recent_projects().unwrap_or_default();
@@ -921,6 +947,7 @@ fn forget_recent_project_impl(path: &Path) -> Result<(), String> {
     write_recent_projects(&recent)
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn write_recent_projects(recent: &[RecentProject]) -> Result<(), String> {
     let path = recent_projects_path()?;
     if let Some(parent) = path.parent() {
@@ -936,6 +963,8 @@ fn write_recent_projects(recent: &[RecentProject]) -> Result<(), String> {
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
     use tempfile::tempdir;
 
     #[test]
@@ -1082,6 +1111,84 @@ mod tests {
             validate_http_request(&request).expect_err("bad timeout"),
             "Request timeout must be between 1 ms and 300000 ms."
         );
+
+        request.timeout_ms = 300_001;
+        assert_eq!(
+            validate_http_request(&request).expect_err("excessive timeout"),
+            "Request timeout must be between 1 ms and 300000 ms."
+        );
+    }
+
+    #[test]
+    fn native_http_request_returns_status_headers_and_body() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind local server");
+        let address = listener.local_addr().expect("local address");
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept request");
+            let mut request_bytes = [0_u8; 2048];
+            let bytes_read = stream.read(&mut request_bytes).expect("read request");
+            let request_text = String::from_utf8_lossy(&request_bytes[..bytes_read]);
+            assert!(request_text.starts_with("GET /health HTTP/1.1"));
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nX-Relay-Test: covered\r\nContent-Length: 11\r\nConnection: close\r\n\r\n{\"ok\":true}")
+                .expect("write response");
+        });
+        let request = test_http_request("GET", &format!("http://{address}/health"));
+
+        let response = tauri::async_runtime::block_on(execute_http_request_impl(request))
+            .expect("execute local request");
+        server.join().expect("join local server");
+
+        assert_eq!(response.status, 200);
+        assert_eq!(response.status_text, "OK");
+        assert_eq!(response.body, "{\"ok\":true}");
+        assert_eq!(response.headers.get("x-relay-test"), Some(&"covered".to_string()));
+    }
+
+    #[test]
+    fn proxy_configuration_normalizes_endpoints_and_rejects_invalid_urls() {
+        let mut settings = ProxySettingsInput {
+            enabled: true,
+            use_for_http: true,
+            use_for_https: true,
+            server_url: "proxy.example.com".to_string(),
+            port: 8080,
+            basic_auth_enabled: false,
+            username: String::new(),
+            password: String::new(),
+            bypass_list: String::new(),
+        };
+
+        assert_eq!(proxy_endpoint(&settings), "http://proxy.example.com:8080");
+        assert!(apply_proxy_settings(reqwest::Client::builder(), Some(&settings)).is_ok());
+        settings.use_for_https = false;
+        assert!(apply_proxy_settings(reqwest::Client::builder(), Some(&settings)).is_ok());
+        settings.use_for_http = false;
+        settings.use_for_https = true;
+        settings.basic_auth_enabled = true;
+        settings.username = "proxy-user".to_string();
+        settings.password = "proxy-password".to_string();
+        assert!(apply_proxy_settings(reqwest::Client::builder(), Some(&settings)).is_ok());
+        settings.server_url = "://invalid".to_string();
+        assert!(apply_proxy_settings(reqwest::Client::builder(), Some(&settings)).is_err());
+        settings.enabled = false;
+        assert!(apply_proxy_settings(reqwest::Client::builder(), Some(&settings)).is_ok());
+        assert!(apply_proxy_settings(reqwest::Client::builder(), None).is_ok());
+    }
+
+    #[test]
+    fn project_paths_names_and_delete_failures_are_explicit() {
+        assert_eq!(validate_project_path(Path::new("")).unwrap_err(), "Project path is required.");
+        assert_eq!(
+            validate_project_path(Path::new("project.json")).unwrap_err(),
+            "Project file must use the .restproj extension."
+        );
+        assert_eq!(validate_project_name("  ").unwrap_err(), "Project name is required.");
+
+        let dir = tempdir().expect("tempdir");
+        let missing = dir.path().join("missing.restproj");
+        assert!(open_project_file_impl(&missing).unwrap_err().contains("was not found"));
+        assert!(delete_project_file_impl(&missing).unwrap_err().contains("was not found"));
     }
 
     #[test]

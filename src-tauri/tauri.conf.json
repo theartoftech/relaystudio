@@ -20,7 +20,19 @@
       }
     ],
     "security": {
-      "csp": null
+      "capabilities": ["default"],
+      "csp": {
+        "default-src": "'self'",
+        "base-uri": "'none'",
+        "connect-src": "ipc: http://ipc.localhost http: https:",
+        "font-src": "'self' data:",
+        "form-action": "'none'",
+        "frame-src": "'none'",
+        "img-src": "'self' asset: http://asset.localhost blob: data: http: https:",
+        "object-src": "'none'",
+        "script-src": "'self'",
+        "style-src": "'self' 'unsafe-inline'"
+      }
     }
   },
   "bundle": {
