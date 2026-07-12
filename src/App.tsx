@@ -121,6 +121,7 @@ import {
 import { formatResponseSize } from "./services/responseFormatting";
 import { createDiagnosticsBundle } from "./services/diagnostics";
 import { runServiceRequest, type ExecutableRequest, type ExecutedResponse, type RunnerConsoleEvent } from "./services/serviceRunner";
+import { loadOpenApiFromUrl, selectedOperationsToServices, type ParsedOpenApi } from "./services/openApiImporter";
 import {
   createNativeShellMenuState,
   getCommandPaletteCommands,
@@ -131,8 +132,9 @@ import {
   type ShellCommandId,
   type ShellCommandTabKind
 } from "./shell/shellCommands";
+import helpDocument from "./help/relay-studio-help.json";
 
-type TabKind = "welcome" | "request" | "flow" | "response" | "import" | "settings";
+type TabKind = "welcome" | "request" | "flow" | "response" | "import" | "settings" | "help";
 type DesktopPlatform = "macos" | "windows" | "linux" | "web";
 type LayoutBreakpoint = "small" | "medium" | "large";
 
@@ -651,6 +653,9 @@ export function App() {
       case "app.open_settings":
         openPlaceholderTab("settings", "Settings");
         return;
+      case "app.open_help":
+        openPlaceholderTab("help", "Help");
+        return;
       case "file.new_project":
         setNewProjectDialogOpen(true);
         return;
@@ -699,7 +704,7 @@ export function App() {
         setInspectorOpen((current) => typeof payload?.checked === "boolean" ? payload.checked : !current);
         return;
       case "view.toggle_response_dock":
-        if (!["welcome", "settings", "import"].includes(activeTab.kind)) {
+        if (!["welcome", "settings", "import", "help"].includes(activeTab.kind)) {
           setResponseVisible((current) => typeof payload?.checked === "boolean" ? payload.checked : !current);
         }
         return;
@@ -888,6 +893,22 @@ export function App() {
     handleSelectService(next);
   }
 
+  function handleImportServices(parsed: ParsedOpenApi, selectedIds: string[]) {
+    const imported = selectedOperationsToServices(parsed, selectedIds, project.services.map((service) => service.id));
+    if (!imported.length) throw new Error("Select at least one REST service to add.");
+    setProject((current) => touchProject({
+      ...current,
+      services: [...current.services, ...imported],
+      environments: current.environments.map((item) => item.name === environment
+        ? { ...item, variables: upsertEnvironmentVariable(item.variables, { name: "baseUrl", value: parsed.serverUrl, secret: false }) }
+        : item)
+    }));
+    setProjectDirty(true);
+    setProjectMessage(`${imported.length} REST service${imported.length === 1 ? "" : "s"} imported from ${parsed.title}.`);
+    setProjectError(null);
+    handleSelectService(imported[0]);
+  }
+
   function handleDuplicateService() {
     if (!activeService) return;
     const copy = duplicateService(activeService, project.services.map((service) => service.id));
@@ -897,11 +918,21 @@ export function App() {
 
   function handleDeleteService() {
     if (!activeService) return;
-    const nextServices = deleteService(project.services, activeService.id);
+    handleDeleteRequest(activeService.id);
+  }
+
+  function handleDeleteRequest(serviceId: string) {
+    if (!project.services.some((service) => service.id === serviceId)) {
+      setProjectError("Request could not be deleted because it no longer exists.");
+      return;
+    }
+    const nextServices = deleteService(project.services, serviceId);
     updateProjectServices(nextServices, "Request deleted.");
-    const nextActive = nextServices[0];
-    if (nextActive) {
-      handleSelectService(nextActive);
+    setTabs((current) => current.filter((tab) => tab.id !== serviceId));
+    if (activeService?.id === serviceId) {
+      const nextActive = nextServices[0];
+      if (nextActive) handleSelectService(nextActive);
+      else setActiveTabId("welcome");
     }
   }
 
@@ -1363,6 +1394,7 @@ export function App() {
                 const service = project.services.find((item) => item.id === serviceId);
                 if (service) setRenameRequestDialog(service);
               }}
+              onDeleteRequest={handleDeleteRequest}
               activeFlowId={activeFlow?.id ?? ""}
               onSelectFlow={handleSelectFlow}
               onCreateFlow={handleCreateFlow}
@@ -1437,6 +1469,7 @@ export function App() {
             onSettingChange={handleProjectSettingChange}
             onProxySettingChange={handleProxySettingChange}
             onExportDiagnostics={handleExportDiagnostics}
+            onImportServices={handleImportServices}
             activeService={activeService}
             activeFlow={activeFlow}
             flowDetailsOpen={flowDetailsOpen}
@@ -2135,6 +2168,7 @@ function ProjectExplorer(props: {
   onSelectService: (service: ProjectService) => void;
   onCreateRequest: () => void;
   onRenameRequest: (serviceId: string) => void;
+  onDeleteRequest: (serviceId: string) => void;
   activeFlowId: string;
   onSelectFlow: (flow: ProjectFlow) => void;
   onCreateFlow: () => void;
@@ -2262,14 +2296,24 @@ function ProjectExplorer(props: {
               </button>
             ) : null}
             {contextMenu.target === "request" && contextMenu.serviceId ? (
-              <button type="button" role="menuitem" onClick={() => {
-                const serviceId = contextMenu.serviceId as string;
-                setContextMenu(null);
-                props.onRenameRequest(serviceId);
-              }}>
-                <Pencil size={14} />
-                <span>Rename Request</span>
-              </button>
+              <>
+                <button type="button" role="menuitem" onClick={() => {
+                  const serviceId = contextMenu.serviceId as string;
+                  setContextMenu(null);
+                  props.onRenameRequest(serviceId);
+                }}>
+                  <Pencil size={14} />
+                  <span>Rename Request</span>
+                </button>
+                <button type="button" role="menuitem" className="danger" onClick={() => {
+                  const serviceId = contextMenu.serviceId as string;
+                  setContextMenu(null);
+                  props.onDeleteRequest(serviceId);
+                }}>
+                  <Trash2 size={14} />
+                  <span>Delete Request</span>
+                </button>
+              </>
             ) : null}
             {contextMenu.target === "flows" ? (
               <button type="button" role="menuitem" onClick={() => {
@@ -2703,6 +2747,7 @@ function RequestEditor({
   onSettingChange,
   onProxySettingChange,
   onExportDiagnostics,
+  onImportServices,
   activeService,
   activeFlow,
   flowDetailsOpen,
@@ -2737,6 +2782,7 @@ function RequestEditor({
   onSettingChange: <K extends keyof ProjectSettings>(key: K, value: ProjectSettings[K], message: string) => void;
   onProxySettingChange: <K extends keyof ProjectSettings["proxy"]>(key: K, value: ProjectSettings["proxy"][K], message: string) => void;
   onExportDiagnostics: () => void;
+  onImportServices: (parsed: ParsedOpenApi, selectedIds: string[]) => void;
   activeService: ProjectService | undefined;
   activeFlow: ProjectFlow | undefined;
   flowDetailsOpen: boolean;
@@ -2766,7 +2812,11 @@ function RequestEditor({
   }
 
   if (activeTab.kind === "import") {
-    return <PlaceholderView title="Import API Docs" description="Paste an OpenAPI URL or choose a local Swagger file to preview requests." />;
+    return <ImportApiView onImportServices={onImportServices} />;
+  }
+
+  if (activeTab.kind === "help") {
+    return <HelpView />;
   }
 
   if (activeTab.kind === "flow") {
@@ -3977,6 +4027,102 @@ function WelcomeView() {
         </p>
       </div>
     </section>
+  );
+}
+
+function ImportApiView({ onImportServices }: { onImportServices: (parsed: ParsedOpenApi, selectedIds: string[]) => void }) {
+  const [url, setUrl] = useState("");
+  const [parsed, setParsed] = useState<ParsedOpenApi | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  async function inspectDefinition() {
+    setLoading(true);
+    setError("");
+    setParsed(null);
+    try {
+      const result = await loadOpenApiFromUrl(url);
+      setParsed(result);
+      setSelectedIds(result.operations.map((operation) => operation.id));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function addSelected() {
+    if (!parsed || !selectedIds.length) {
+      setError("Select at least one REST service to add.");
+      return;
+    }
+    try {
+      onImportServices(parsed, selectedIds);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    }
+  }
+
+  return (
+    <section className="api-import-view" aria-label="Import API definition">
+      <header>
+        <h1>Import Swagger / OpenAPI</h1>
+        <p>Enter a Swagger UI page or direct OpenAPI JSON/YAML URL. Inspect first, then choose exactly which REST services to add.</p>
+      </header>
+      <div className="api-import-source">
+        <label htmlFor="api-definition-url">Swagger UI or definition URL</label>
+        <div>
+          <input id="api-definition-url" value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://api.example.com/swagger/index.html" />
+          <button type="button" className="primary-button" disabled={loading || !url.trim()} onClick={() => void inspectDefinition()}>{loading ? "Inspecting…" : "Inspect Definition"}</button>
+        </div>
+      </div>
+      {error ? <div className="api-import-error" role="alert">{error}</div> : null}
+      {parsed ? (
+        <div className="api-import-results">
+          <div className="api-import-summary">
+            <div><strong>{parsed.title}</strong><span>OpenAPI {parsed.version}</span></div>
+            <code>{parsed.serverUrl}</code>
+          </div>
+          <div className="api-import-actions">
+            <span>{selectedIds.length} of {parsed.operations.length} selected</span>
+            <button type="button" onClick={() => setSelectedIds(parsed.operations.map((operation) => operation.id))}>Select All</button>
+            <button type="button" onClick={() => setSelectedIds([])}>Clear</button>
+            <button type="button" className="primary-button" disabled={!selectedIds.length} onClick={addSelected}>Add {selectedIds.length} Selected</button>
+          </div>
+          <div className="api-operation-list" aria-label="Discovered REST services">
+            {parsed.operations.map((operation) => (
+              <label key={operation.id} className={operation.deprecated ? "deprecated" : ""}>
+                <input type="checkbox" checked={selectedIds.includes(operation.id)} onChange={(event) => setSelectedIds((current) => event.target.checked ? [...current, operation.id] : current.filter((id) => id !== operation.id))} />
+                <span className={`method-badge method-${operation.method.toLowerCase()}`}>{operation.method}</span>
+                <span><strong>{operation.label}</strong><code>{operation.path}</code></span>
+                <small>{operation.tag}{operation.deprecated ? " · Deprecated" : ""}</small>
+              </label>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function HelpView() {
+  return (
+    <article className="help-view" aria-label="Relay Studio help">
+      <header>
+        <h1>{helpDocument.title}</h1>
+        <p>{helpDocument.introduction}</p>
+      </header>
+      {helpDocument.sections.map((section) => (
+        <section key={section.title}>
+          <h2>{section.title}</h2>
+          <p>{section.body}</p>
+          <ol>
+            {section.steps.map((step) => <li key={step}>{step}</li>)}
+          </ol>
+        </section>
+      ))}
+    </article>
   );
 }
 

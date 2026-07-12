@@ -21,6 +21,10 @@ This folder contains the first implementation slice for Relay Studio: reviewable
 - [sprint-5-implementation-status.md](sprint-5-implementation-status.md): delivered Sprint 5 single request runner, native HTTP execution, response dock, console diagnostics, and verification results.
 - [sprint-13-implementation-status.md](sprint-13-implementation-status.md): Sprint 13 release-blocking coverage, CI, dependency, static-analysis, secret-scanning, and live REST gates.
 - [sprint-13-release-candidate-readiness.md](sprint-13-release-candidate-readiness.md): release gate evidence, known risks, deferrals, and final approval checklist.
+- [sprint-14-platform-validation.md](sprint-14-platform-validation.md): native macOS, Windows, and Linux installer and UI acceptance record.
+- [sprint-14-beta-release-notes.md](sprint-14-beta-release-notes.md): stakeholder-facing beta scope, packages, signing deferrals, and known limitations.
+- [sprint-14-implementation-status.md](sprint-14-implementation-status.md): delivered packaging automation, verification evidence, and pending native beta approval work.
+- [openapi-import-implementation-status.md](openapi-import-implementation-status.md): Swagger/OpenAPI discovery, selective REST service import, security behavior, verification, and current boundaries.
 - [tauri-security-checklist.md](tauri-security-checklist.md): reviewed Tauri CSP, capabilities, command, filesystem, updater, transport, and window security boundary.
 - [sprint-6-implementation-status.md](sprint-6-implementation-status.md): delivered Sprint 6 saved responses, redacted response artifacts, native/browser file persistence, reload workflow, and coverage results.
 - [sprint-7-implementation-status.md](sprint-7-implementation-status.md): delivered Sprint 7 visual flow builder, React Flow canvas, flow ordering, dependency validation, branch paths, console grouping, and coverage results.

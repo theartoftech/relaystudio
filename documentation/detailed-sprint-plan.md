@@ -748,6 +748,9 @@ Produce installable beta builds for macOS, Windows, and Linux.
 - Verify platform-specific filesystem paths and permission failures.
 - Confirm code signing, notarization, or signing deferrals as appropriate.
 - Draft beta release notes with known limitations.
+- Create the Relay Studio helper/help file referenced by the application and expose it through the native Help menu.
+- Verify the packaged helper/help file is available offline and opens correctly on macOS and Windows.
+- Rebuild the macOS and Windows installers after the helper/help file is added, then repeat packaged-app smoke and native Help-menu validation on both platforms.
 
 ### Acceptance Criteria
 
@@ -756,8 +759,23 @@ Produce installable beta builds for macOS, Windows, and Linux.
 - Single request runner and flow runner work on each platform.
 - Saved response behavior is consistent across platforms.
 - Beta release notes are ready for stakeholder review.
+- The helper/help file ships inside the application and is reachable from the native Help menu on macOS and Windows.
+- Final macOS and Windows beta installers are regenerated from the commit containing the helper/help file and pass packaged-app regression testing.
 
 ## Cross-Sprint Backlog
+
+### Strategic OpenAPI Import Construction
+
+- Replace the Import API Docs placeholder with a production OpenAPI/Swagger UI importer.
+- Accept a Swagger UI page URL or direct OpenAPI JSON/YAML definition URL.
+- Discover relative Swagger UI `url` or `configUrl` definitions and load them through the native transport when packaged.
+- Validate OpenAPI 3.x and Swagger 2.0 documents and present actionable errors for unreachable or invalid definitions.
+- Preview API title, version, server, tags, methods, paths, summaries, and deprecation state before changing the project.
+- Require explicit checkbox selection of the REST operations to import, with Select All and Clear controls.
+- Convert selected operations into Relay Studio requests with path, query and header parameters, JSON body examples, folders, and authentication variable placeholders.
+- Never import example bearer tokens, passwords, API keys, cookies, or credentials.
+- Mark the project dirty only after the user confirms selected operations.
+- Verify discovery, parsing, selection, conversion, duplicate IDs, negative paths, browser UI, and packaged native UI.
 
 | Area | Backlog Item | Target Sprint |
 | --- | --- | --- |

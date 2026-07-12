@@ -1,0 +1,69 @@
+{
+  "title": "Relay Studio Help",
+  "introduction": "Use Relay Studio to design REST requests, run multi-step flows, save response evidence, and diagnose failures without sending project data to a hosted workspace.",
+  "sections": [
+    {
+      "title": "Projects",
+      "body": "Projects are local .restproj files containing requests, flows, environments, variables, and workspace settings.",
+      "steps": [
+        "Create or open a project from File or the command palette.",
+        "Use Save Project As to choose its first location.",
+        "Keep credentials out of project values; use approved local-only configuration for secrets."
+      ]
+    },
+    {
+      "title": "Requests",
+      "body": "Select a request in Explorer, choose its method, URL, authorization, headers, parameters, body, retry policy, and timeout, then select Send Request.",
+      "steps": [
+        "Choose the intended environment before sending.",
+        "Review status, headers, timing, body, and console diagnostics.",
+        "Use Cancel Request to stop an in-progress request."
+      ]
+    },
+    {
+      "title": "Flows",
+      "body": "Flows connect requests into ordered success and failure paths with response mappings and assertions.",
+      "steps": [
+        "Add request steps and connect their success or failure paths.",
+        "Map earlier response values into variables needed by later steps.",
+        "Run the flow, inspect each step, and use Cancel Flow when necessary."
+      ]
+    },
+    {
+      "title": "Saved Responses",
+      "body": "Save response artifacts for offline evidence and reopen them from Explorer.",
+      "steps": [
+        "Choose a JSON or text destination.",
+        "Confirm explicitly before overwriting an existing artifact.",
+        "Verify sensitive headers and values are redacted before sharing."
+      ]
+    },
+    {
+      "title": "Recovery And Backups",
+      "body": "Relay Studio validates project schema, uses atomic native saves, and keeps recovery backups for the last valid project state.",
+      "steps": [
+        "Follow the recovery guidance shown when a project is invalid.",
+        "Restore the backup only when the primary file cannot be opened.",
+        "Do not edit the primary project concurrently in multiple Relay Studio windows."
+      ]
+    },
+    {
+      "title": "Diagnostics And Security",
+      "body": "Diagnostics export includes application, platform, project counts, and recent console context with known secrets redacted.",
+      "steps": [
+        "Export diagnostics from Settings > Workspace.",
+        "Inspect the generated JSON before sharing it.",
+        "Never include passwords, bearer tokens, cookies, API keys, or private project data in issue reports."
+      ]
+    },
+    {
+      "title": "Keyboard And Navigation",
+      "body": "The native menus and command palette expose the same primary workspace actions.",
+      "steps": [
+        "Open command search with Cmd+K on macOS or Ctrl+K on Windows and Linux.",
+        "Save with Cmd+S or Ctrl+S and send or run with Cmd+Enter or Ctrl+Enter.",
+        "Use the View menu to toggle Explorer, Inspector, Response Dock, and Flow Details."
+      ]
+    }
+  ]
+}

@@ -1,11 +1,12 @@
 import type { RecentProject } from "../project/projectModel";
 
-export type ShellCommandTabKind = "welcome" | "request" | "flow" | "response" | "import" | "settings";
+export type ShellCommandTabKind = "welcome" | "request" | "flow" | "response" | "import" | "settings" | "help";
 
 export type ShellCommandId =
   | "app.search_commands"
   | "app.open_import"
   | "app.open_settings"
+  | "app.open_help"
   | "file.new_project"
   | "file.open_project"
   | "file.show_recent_projects"
@@ -77,6 +78,7 @@ const shellCommandDefinitions: ShellCommandDefinition[] = [
   command("app.open_settings", "Settings", {
     shortcut: "CmdOrCtrl+,"
   }),
+  command("app.open_help", "Relay Studio Help"),
   command("file.new_project", "New Project", {
     shortcut: "CmdOrCtrl+N"
   }),
@@ -116,7 +118,7 @@ const shellCommandDefinitions: ShellCommandDefinition[] = [
   command("view.toggle_explorer", "Toggle Sidebar"),
   command("view.toggle_inspector", "Toggle Inspector"),
   command("view.toggle_response_dock", "Toggle Response Dock", {
-    visible: (context) => !["welcome", "settings", "import"].includes(context.activeTabKind)
+    visible: (context) => !["welcome", "settings", "import", "help"].includes(context.activeTabKind)
   }),
   command("view.toggle_flow_details", "Toggle Flow Details", {
     visible: (context) => context.activeTabKind === "flow"

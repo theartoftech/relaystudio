@@ -131,6 +131,44 @@ test("opens command palette and import placeholder", async ({ page }) => {
   await expect(page.getByRole("tab", { name: /Import API Docs/i })).toBeVisible();
 });
 
+test("inspects Swagger UI and imports only selected REST services", async ({ page }) => {
+  await page.route("https://swagger.test/docs/", (route) => route.fulfill({ contentType: "text/html", body: '<script>SwaggerUIBundle({ url: "./openapi.json" })</script>' }));
+  await page.route("https://swagger.test/docs/openapi.json", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({ openapi: "3.0.4", info: { title: "Selection API" }, servers: [{ url: "https://api.test/v1" }], paths: {
+      "/orders": { get: { summary: "List Orders", responses: { "200": { description: "OK" } } }, post: { summary: "Create Order", responses: { "201": { description: "Created" } } } },
+      "/health": { get: { summary: "Health Check", responses: { "200": { description: "OK" } } } }
+    } })
+  }));
+  await page.goto("/");
+  await page.getByRole("button", { name: /Search commands/i }).click();
+  await page.getByRole("dialog", { name: "Command palette" }).getByRole("button", { name: "Import API Docs" }).click();
+  await page.getByLabel("Swagger UI or definition URL").fill("https://swagger.test/docs/");
+  await page.getByRole("button", { name: "Inspect Definition" }).click();
+  await expect(page.getByText("3 of 3 selected")).toBeVisible();
+  await page.getByLabel("Discovered REST services").getByText("Create Order").click();
+  await expect(page.getByText("2 of 3 selected")).toBeVisible();
+  await page.getByRole("button", { name: "Add 2 Selected" }).click();
+  await expect(page.getByRole("button", { name: "GET List Orders" })).toBeVisible();
+  await expect(page.getByLabel("Request URL")).toHaveValue("https://api.test/v1/orders");
+  await expect(page.getByRole("button", { name: "GET Health Check" }).last()).toBeVisible();
+  await expect(page.getByRole("button", { name: "POST Create Order" })).toHaveCount(1);
+});
+
+test("opens bundled Relay Studio help without navigating away", async ({ page }) => {
+  await page.goto("/");
+
+  await page.getByRole("button", { name: /Search commands/i }).click();
+  await page.getByRole("dialog", { name: "Command palette" }).getByRole("button", { name: "Relay Studio Help" }).click();
+
+  await expect(page.getByRole("tab", { name: "Help" })).toBeVisible();
+  const help = page.getByLabel("Relay Studio help");
+  await expect(help.getByRole("heading", { name: "Relay Studio Help" })).toBeVisible();
+  await expect(help.getByRole("heading", { name: "Projects" })).toBeVisible();
+  await expect(help.getByRole("heading", { name: "Diagnostics And Security" })).toBeVisible();
+  await expect(page).toHaveURL(/\/$/);
+});
+
 test("keeps command palette focus trapped and toggles the response dock", async ({ page }) => {
   await page.goto("/");
 
@@ -588,6 +626,18 @@ test("renames a flow from the explorer context menu", async ({ page }) => {
   await expect(explorer.getByRole("button", { name: /Session Bootstrap Flow/i })).toBeVisible();
   await expect(page.getByRole("tab", { name: /Session Bootstrap Flow/i })).toBeVisible();
   await expect(page.getByLabel("Flow builder").getByText("Session Bootstrap Flow")).toBeVisible();
+});
+
+test("deletes a request from the explorer context menu", async ({ page }) => {
+  await page.goto("/");
+  const request = page.getByRole("button", { name: "GET Search Products" });
+  await request.click({ button: "right" });
+  const menu = page.getByRole("menu", { name: "Request context menu" });
+  await expect(menu.getByRole("menuitem", { name: "Rename Request" })).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: "Delete Request" })).toBeVisible();
+  await menu.getByRole("menuitem", { name: "Delete Request" }).click();
+  await expect(request).toHaveCount(0);
+  await expect(page.getByText("Request deleted.")).toBeVisible();
 });
 
 test("renames an open flow from the tab context menu", async ({ page }) => {

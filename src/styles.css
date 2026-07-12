@@ -1113,6 +1113,73 @@ kbd {
   font-size: var(--code-font-size);
 }
 
+.help-view {
+  min-height: 0;
+  padding: 36px clamp(24px, 5vw, 72px) 56px;
+  overflow: auto;
+  color: var(--gray-700);
+  background: var(--white);
+}
+
+.api-import-view { min-height: 0; padding: 30px clamp(22px, 4vw, 56px); overflow: auto; color: var(--gray-700); background: var(--white); }
+.api-import-view h1 { margin: 0 0 8px; color: var(--navy-900); font-size: 26px; }
+.api-import-view header p { margin: 0 0 24px; max-width: 78ch; line-height: 1.5; }
+.api-import-source label { display: block; margin-bottom: 7px; font-weight: 700; }
+.api-import-source > div { display: flex; gap: 10px; }
+.api-import-source input { flex: 1; min-width: 0; padding: 10px 12px; border: 1px solid var(--gray-300); border-radius: 6px; }
+.api-import-error { margin-top: 14px; padding: 10px 12px; border: 1px solid var(--danger); border-radius: 6px; color: var(--danger); background: #fff5f5; }
+.api-import-results { margin-top: 22px; border: 1px solid var(--gray-200); border-radius: 8px; overflow: hidden; }
+.api-import-summary, .api-import-actions { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 14px 16px; border-bottom: 1px solid var(--gray-200); }
+.api-import-summary div { display: grid; gap: 3px; }
+.api-import-summary span { color: var(--gray-500); font-size: 12px; }
+.api-import-actions { justify-content: flex-end; background: var(--gray-50); }
+.api-import-actions span { margin-right: auto; font-weight: 700; }
+.api-operation-list { max-height: 480px; overflow: auto; }
+.api-operation-list > label { display: grid; grid-template-columns: 22px 62px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 11px 16px; border-bottom: 1px solid var(--gray-100); cursor: pointer; }
+.api-operation-list > label:hover { background: var(--blue-100); }
+.api-operation-list > label:last-child { border-bottom: 0; }
+.api-operation-list > label.deprecated { opacity: .66; }
+.api-operation-list label > span:not(.method-badge) { display: grid; gap: 2px; }
+.api-operation-list code { color: var(--gray-600); font-size: 12px; }
+.api-operation-list small { color: var(--gray-500); }
+
+.help-view > header,
+.help-view > section {
+  max-width: 820px;
+}
+
+.help-view header {
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--gray-200);
+}
+
+.help-view h1 {
+  margin: 0 0 10px;
+  color: var(--navy-900);
+  font-size: 28px;
+}
+
+.help-view h2 {
+  margin: 26px 0 8px;
+  color: var(--gray-800);
+  font-size: 18px;
+}
+
+.help-view p,
+.help-view li {
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.help-view p {
+  margin: 0 0 10px;
+}
+
+.help-view ol {
+  margin: 8px 0 0;
+  padding-left: 24px;
+}
+
 .project-settings-view {
   display: grid;
   grid-template-columns: 228px minmax(0, 1fr);

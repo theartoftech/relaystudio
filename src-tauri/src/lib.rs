@@ -16,6 +16,8 @@ const SAVED_RESPONSE_FORMAT: &str = "relay-studio-response";
 const SAVED_RESPONSE_SCHEMA_VERSION: u16 = 1;
 const MENU_APP_SEARCH_COMMANDS: &str = "app.search_commands";
 const MENU_APP_OPEN_SETTINGS: &str = "app.open_settings";
+const MENU_APP_OPEN_HELP: &str = "app.open_help";
+const MENU_APP_OPEN_IMPORT: &str = "app.open_import";
 const MENU_FILE_NEW_PROJECT: &str = "file.new_project";
 const MENU_OPEN_PROJECT: &str = "file.open_project";
 const MENU_SHOW_RECENT_PROJECTS: &str = "file.show_recent_projects";
@@ -275,6 +277,12 @@ fn set_app_menu(app: &tauri::AppHandle, state: &ShellMenuState) -> Result<(), St
         .accelerator("CmdOrCtrl+,")
         .build(app)
         .map_err(|error| format!("Could not build settings menu item: {error}"))?;
+    let open_help = MenuItemBuilder::with_id(MENU_APP_OPEN_HELP, "Relay Studio Help")
+        .build(app)
+        .map_err(|error| format!("Could not build help menu item: {error}"))?;
+    let open_import = MenuItemBuilder::with_id(MENU_APP_OPEN_IMPORT, "Import API Definition...")
+        .build(app)
+        .map_err(|error| format!("Could not build import API definition menu item: {error}"))?;
     let new_project = MenuItemBuilder::with_id(MENU_FILE_NEW_PROJECT, "New Project")
         .accelerator("CmdOrCtrl+N")
         .build(app)
@@ -357,6 +365,8 @@ fn set_app_menu(app: &tauri::AppHandle, state: &ShellMenuState) -> Result<(), St
         .item(&show_recent_projects)
         .item(&recent_menu)
         .separator()
+        .item(&open_import)
+        .separator()
         .item(&save_project)
         .item(&save_project_as)
         .separator()
@@ -402,6 +412,8 @@ fn set_app_menu(app: &tauri::AppHandle, state: &ShellMenuState) -> Result<(), St
         .build()
         .map_err(|error| format!("Could not build window menu: {error}"))?;
     let help_menu = SubmenuBuilder::new(app, "Help")
+        .item(&open_help)
+        .separator()
         .item(&search_commands)
         .build()
         .map_err(|error| format!("Could not build help menu: {error}"))?;
@@ -486,6 +498,8 @@ fn is_shell_command_menu_id(id: &str) -> bool {
         id,
         MENU_APP_SEARCH_COMMANDS
             | MENU_APP_OPEN_SETTINGS
+            | MENU_APP_OPEN_HELP
+            | MENU_APP_OPEN_IMPORT
             | MENU_FILE_NEW_PROJECT
             | MENU_OPEN_PROJECT
             | MENU_SHOW_RECENT_PROJECTS
@@ -1334,6 +1348,8 @@ mod tests {
         let command_ids = [
             MENU_APP_SEARCH_COMMANDS,
             MENU_APP_OPEN_SETTINGS,
+            MENU_APP_OPEN_HELP,
+            MENU_APP_OPEN_IMPORT,
             MENU_FILE_NEW_PROJECT,
             MENU_OPEN_PROJECT,
             MENU_SHOW_RECENT_PROJECTS,

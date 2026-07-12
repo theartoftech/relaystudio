@@ -1,5 +1,6 @@
 import {
   createNativeShellMenuState,
+  getCommandDefinition,
   getCommandPaletteCommands,
   getPrimaryExecutionCommand,
   parseRecentProjectMenuIndex,
@@ -30,6 +31,13 @@ describe("shellCommands", () => {
     expect(responseCommands).toContain("Toggle Response Dock");
     expect(responseCommands).not.toContain("Toggle Flow Details");
     expect(flowCommands).toContain("Toggle Flow Details");
+  });
+
+  it("exposes bundled Relay Studio help from the command surface", () => {
+    const commands = getCommandPaletteCommands(context()).map((command) => command.label);
+
+    expect(commands).toContain("Relay Studio Help");
+    expect(getCommandDefinition("app.open_help").label).toBe("Relay Studio Help");
   });
 
   it("derives the correct primary execution command for the active tab", () => {

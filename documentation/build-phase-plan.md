@@ -578,6 +578,8 @@ Implemented. See `sprint-8b-implementation-status.md`.
 - Windows package.
 - Linux package.
 - Platform-specific filesystem and file-dialog validation.
+- Packaged Relay Studio helper/help file integrated with the native Help menu.
+- Regenerated macOS and Windows installers after helper/help integration.
 
 ### Testing Scope
 
@@ -587,6 +589,8 @@ Implemented. See `sprint-8b-implementation-status.md`.
 - Single request runner on each platform.
 - Flow runner on each platform.
 - Save-on-close prompt on each platform.
+- Offline helper/help file opens from the native Help menu on macOS and Windows.
+- Rebuilt macOS and Windows installers contain the helper/help file and pass packaged regression checks.
 
 ## Default Implementation Stack
 

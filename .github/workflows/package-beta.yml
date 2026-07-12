@@ -1,0 +1,67 @@
+name: Package Beta
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*-beta.*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: package-beta-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: ${{ matrix.name }} beta package
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS
+            os: macos-latest
+            bundles: dmg
+            artifact: relay-studio-macos-beta
+            paths: src-tauri/target/release/bundle/dmg/*.dmg
+          - name: Windows
+            os: windows-latest
+            bundles: nsis,msi
+            artifact: relay-studio-windows-beta
+            paths: |
+              src-tauri/target/release/bundle/nsis/*-setup.exe
+              src-tauri/target/release/bundle/msi/*.msi
+          - name: Linux
+            os: ubuntu-22.04
+            bundles: deb,appimage
+            artifact: relay-studio-linux-beta
+            paths: |
+              src-tauri/target/release/bundle/deb/*.deb
+              src-tauri/target/release/bundle/appimage/*.AppImage
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux packaging dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm ci
+      - run: npm run verify
+      - run: cargo test --manifest-path src-tauri/Cargo.toml
+      - name: Build unsigned beta installer
+        run: npm run tauri build -- --bundles ${{ matrix.bundles }}
+      - name: Retain native beta installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.paths }}
+          if-no-files-found: error
+          retention-days: 14

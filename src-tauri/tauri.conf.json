@@ -38,6 +38,10 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "category": "DeveloperTool",
+    "shortDescription": "A local-first REST API and flow testing studio.",
+    "longDescription": "Relay Studio designs, runs, and diagnoses REST requests and multi-step flows while keeping project data local.",
+    "createUpdaterArtifacts": false,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
