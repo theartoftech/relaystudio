@@ -592,6 +592,27 @@ Implemented. See `sprint-8b-implementation-status.md`.
 - Offline helper/help file opens from the native Help menu on macOS and Windows.
 - Rebuilt macOS and Windows installers contain the helper/help file and pass packaged regression checks.
 
+## Sprint 15: Developer Productivity And Import Hardening
+
+### Goals
+
+- Improve the workflows used in day-to-day API development.
+- Continue learning and validating AI-driven software development practices.
+- Keep unsigned personal-use builds reproducible without paid platform verification.
+
+### Candidate Scope
+
+- External OpenAPI reference resolution.
+- Form, multipart, and additional HTTP method support.
+- Saved-response comparison.
+- Beta defect fixes driven by personal use.
+- Developer diagnostics and organization improvements.
+
+### Non-Goals
+
+- Paid Apple or Microsoft signing/readiness programs.
+- Commercial store distribution or enterprise certification.
+
 ## Default Implementation Stack
 
 - Tauri desktop shell.

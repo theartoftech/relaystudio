@@ -762,6 +762,35 @@ Produce installable beta builds for macOS, Windows, and Linux.
 - The helper/help file ships inside the application and is reachable from the native Help menu on macOS and Windows.
 - Final macOS and Windows beta installers are regenerated from the commit containing the helper/help file and pass packaged-app regression testing.
 
+## Sprint 15: Developer Productivity And Import Hardening
+
+### Objective
+
+Improve Relay Studio as a practical personal developer tool while continuing the AI-driven development exercise. Commercial distribution readiness is not a goal.
+
+### Scope
+
+- Extend OpenAPI import with external `$ref` resolution and additional safe schema examples.
+- Add form and multipart request-body support.
+- Evaluate PATCH and other methods needed by real developer workflows.
+- Add saved-response comparison as a debugging aid.
+- Improve developer-facing diagnostics, import review, and request organization based on daily use.
+- Fix beta defects discovered through personal macOS, Windows, and Linux usage.
+
+### Explicit Non-Goals
+
+- Paid Apple Developer Program enrollment or notarization.
+- Paid Microsoft code-signing certificates or readiness verification.
+- App Store, Microsoft Store, or commercial marketplace submission.
+- Enterprise deployment certification or public automatic-update infrastructure.
+
+### Acceptance Criteria
+
+- Each selected feature solves a demonstrated personal developer workflow.
+- Automated coverage and security gates remain above Sprint 13 thresholds.
+- Changed behavior is verified interactively in Relay Studio.
+- Unsigned local installers remain reproducible when packaging changes are made.
+
 ## Cross-Sprint Backlog
 
 ### Strategic OpenAPI Import Construction

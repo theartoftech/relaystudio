@@ -20,6 +20,6 @@ Relay Studio is a local-first desktop workspace for designing REST requests, com
 - Automatic updates are disabled for this beta. Install a newer beta manually.
 - Project secrets are redacted from persistence and diagnostics. Keep service credentials in approved local-only configuration.
 
-## Stakeholder Review
+## Personal Developer Beta
 
-Review the platform validation record, known limitations, signing deferrals, and Sprint 13 release-gate evidence before approving broader beta distribution. Report the operating system, artifact filename, exact reproduction steps, and redacted logs for any issue.
+This build is intended for personal developer use and AI-driven development learning. Apple notarization, Microsoft Authenticode, paid readiness verification, public stores, and commercial distribution are not planned. Review the platform validation record before installation and report the operating system, artifact filename, exact reproduction steps, and redacted logs for any issue.
