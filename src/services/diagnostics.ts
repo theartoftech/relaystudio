@@ -23,6 +23,11 @@ export interface DiagnosticsBundle {
     flowCount: number;
     environmentCount: number;
   };
+  requestInventory: {
+    methods: Record<string, number>;
+    bodyTypes: Record<string, number>;
+    folders: Array<{ name: string; requestCount: number }>;
+  };
   recentEvents: RunnerConsoleEvent[];
 }
 
@@ -41,11 +46,25 @@ export function createDiagnosticsBundle(input: DiagnosticsBundleInput): Diagnost
       flowCount: input.project.flows.length,
       environmentCount: input.project.environments.length
     },
+    requestInventory: {
+      methods: countBy(input.project.services.map((service) => service.method)),
+      bodyTypes: countBy(input.project.services.map((service) => service.body.contentType)),
+      folders: Object.entries(countBy(input.project.services.map((service) => service.folder || "Unfiled")))
+        .map(([name, requestCount]) => ({ name, requestCount }))
+        .sort((left, right) => left.name.localeCompare(right.name))
+    },
     recentEvents: input.events.slice(-100).map((event) => ({
       ...event,
       message: redactDiagnosticText(event.message)
     }))
   };
+}
+
+function countBy(values: string[]): Record<string, number> {
+  return values.reduce<Record<string, number>>((counts, value) => ({
+    ...counts,
+    [value]: (counts[value] ?? 0) + 1
+  }), {});
 }
 
 function redactDiagnosticText(value: string): string {

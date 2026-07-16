@@ -155,6 +155,116 @@ test("inspects Swagger UI and imports only selected REST services", async ({ pag
   await expect(page.getByRole("button", { name: "POST Create Order" })).toHaveCount(1);
 });
 
+test("reviews external references and imports a PATCH form request", async ({ page }) => {
+  await page.route("https://swagger.test/openapi.json", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({ openapi: "3.1.0", info: { title: "Profiles" }, paths: {
+      "/profiles/{id}": { patch: { summary: "Update Profile", requestBody: { $ref: "./forms.yaml#/profile" } } }
+    } })
+  }));
+  await page.route("https://swagger.test/forms.yaml", (route) => route.fulfill({
+    contentType: "application/yaml",
+    body: "profile:\n  content:\n    application/x-www-form-urlencoded:\n      schema:\n        type: object\n        properties:\n          displayName: { type: string, example: Developer }"
+  }));
+  await page.goto("/");
+  await page.getByRole("button", { name: /Search commands/i }).click();
+  await page.getByRole("dialog", { name: "Command palette" }).getByRole("button", { name: "Import API Docs" }).click();
+  await page.getByLabel("Swagger UI or definition URL").fill("https://swagger.test/openapi.json");
+  await page.getByRole("button", { name: "Inspect Definition" }).click();
+  await expect(page.getByLabel("Import review summary")).toContainText("1 external documents");
+  await page.getByRole("button", { name: "Add 1 Selected" }).click();
+  await expect(page.getByLabel("Request method")).toHaveValue("PATCH");
+  await page.getByRole("button", { name: "Body" }).click();
+  await expect(page.getByLabel("Body content type")).toHaveValue("application/x-www-form-urlencoded");
+  await expect(page.getByLabel("Form Fields name")).toHaveValue("displayName");
+  await expect(page.getByLabel("Form Fields value")).toHaveValue("Developer");
+});
+
+test("saves selected OpenAPI operations directly from import review", async ({ page }) => {
+  await page.route("https://swagger.test/save-openapi.json", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({
+      openapi: "3.1.0",
+      info: { title: "Saved Import" },
+      servers: [{ url: "https://saved-api.test" }],
+      paths: {
+        "/widgets": {
+          get: { summary: "List Widgets", responses: { "200": { description: "OK" } } },
+          post: { summary: "Create Widget", responses: { "201": { description: "Created" } } }
+        }
+      }
+    })
+  }));
+  await page.goto("/");
+  await page.getByRole("button", { name: /Search commands/i }).click();
+  await page.getByRole("dialog", { name: "Command palette" }).getByRole("button", { name: "Import API Docs" }).click();
+  await page.getByLabel("Swagger UI or definition URL").fill("https://swagger.test/save-openapi.json");
+  await page.getByRole("button", { name: "Inspect Definition" }).click();
+  await page.getByLabel("Discovered REST services").getByText("Create Widget").click();
+
+  const importActions = [
+    { name: "Select All", title: "Select every discovered REST operation." },
+    { name: "Clear", title: "Clear all selected REST operations." },
+    { name: "Add 1 Selected", title: "Add selected REST operations to the current project without saving it yet." },
+    { name: "Add and Save 1 Selected", title: "Add selected REST operations to the current project and open the Save Project dialog." }
+  ];
+  for (const { name, title } of importActions) {
+    const action = page.getByRole("button", { name });
+    await expect(action).toHaveAttribute("title", title);
+    await expect(action).toHaveCSS("color", "rgb(11, 95, 199)");
+    await expect(action).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+    await expect(action).toHaveCSS("border-style", "none");
+  }
+  const addAndSaveButton = page.getByRole("button", { name: "Add and Save 1 Selected" });
+  await addAndSaveButton.click();
+
+  const dialog = page.getByRole("dialog", { name: "Save Project" });
+  await expect(dialog).toBeVisible();
+  await dialog.getByLabel("Project file path").fill("/private/tmp/e2e-saved-import.restproj");
+  await dialog.getByRole("button", { name: "Save Project" }).click();
+  await expect(page.getByText("Project saved to /private/tmp/e2e-saved-import.restproj.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "GET List Widgets" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "POST Create Widget" })).toHaveCount(0);
+
+  await page.reload();
+  await page.getByRole("button", { name: /Search commands/i }).click();
+  await page.getByRole("dialog", { name: "Command palette" }).getByRole("button", { name: "Open Project" }).click();
+  const openDialog = page.getByRole("dialog", { name: "Open Project" });
+  await openDialog.getByLabel("Project file path").fill("/private/tmp/e2e-saved-import.restproj");
+  await openDialog.getByRole("button", { name: "Open Project" }).click();
+  await expect(page.getByRole("button", { name: "GET List Widgets" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "POST Create Widget" })).toHaveCount(0);
+});
+
+test("compares two selected redacted saved responses", async ({ page }) => {
+  const metadata = (id: string, status: number) => ({
+    id, serviceId: "health-check", serviceName: "Health Check", fileName: `${id}.json`, filePath: `/private/tmp/${id}.json`,
+    method: "GET", url: "https://api.example.com/api/health", status, statusText: status === 200 ? "OK" : "Created",
+    durationMs: status === 200 ? 20 : 35, contentType: "application/json", sizeBytes: 20, bodyKind: "json", redacted: true,
+    capturedAt: `2026-07-${status === 200 ? "14" : "15"}T00:00:00.000Z`
+  });
+  const before = metadata("before", 200);
+  const after = metadata("after", 201);
+  const project = {
+    id: "comparison-project", name: "Comparison Project", format: "relay-studio-restproj", schemaVersion: 1,
+    createdAt: "2026-07-14T00:00:00.000Z", updatedAt: "2026-07-15T00:00:00.000Z", services: [], environments: [], flows: [],
+    savedResponses: [before, after], importSources: [], settings: { askToSaveOnClose: true, redactSecretsInConsole: true }
+  };
+  await page.addInitScript(({ seedProject, beforeMetadata, afterMetadata }) => {
+    localStorage.setItem("relay-studio:project:/private/tmp/comparison.restproj", JSON.stringify(seedProject));
+    localStorage.setItem("relay-studio:recent-projects", JSON.stringify([{ name: "Comparison Project", path: "/private/tmp/comparison.restproj", openedAt: "2026-07-15T00:00:00.000Z" }]));
+    localStorage.setItem("relay-studio:saved-response:/private/tmp/before.json", JSON.stringify({ format: "relay-studio-response", schemaVersion: 1, metadata: beforeMetadata, body: '{"id":1,"stable":true}' }));
+    localStorage.setItem("relay-studio:saved-response:/private/tmp/after.json", JSON.stringify({ format: "relay-studio-response", schemaVersion: 1, metadata: afterMetadata, body: '{"id":2,"added":"yes"}' }));
+  }, { seedProject: project, beforeMetadata: before, afterMetadata: after });
+  await page.goto("/");
+  await openRecentProject(page, /Comparison Project/);
+  await page.getByLabel("Select before.json for comparison").check();
+  await page.getByLabel("Select after.json for comparison").check();
+  await page.getByRole("button", { name: "Compare selected responses" }).click();
+  await expect(page.getByLabel("Response content")).toContainText('"kind": "json"');
+  await expect(page.getByLabel("Response content")).toContainText('"path": "$.id"');
+});
+
 test("opens bundled Relay Studio help without navigating away", async ({ page }) => {
   await page.goto("/");
 

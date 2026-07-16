@@ -644,7 +644,7 @@ async fn execute_http_request_impl(
 
 fn validate_http_request(request: &HttpRequestInput) -> Result<(), String> {
     match request.method.as_str() {
-        "GET" | "POST" | "PUT" | "DELETE" => {}
+        "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS" => {}
         method => return Err(format!("Unsupported HTTP method: {method}")),
     }
     if !(request.url.starts_with("http://") || request.url.starts_with("https://")) {
@@ -1105,11 +1105,11 @@ mod tests {
 
     #[test]
     fn http_request_validation_rejects_unsupported_inputs() {
-        let mut request = test_http_request("PATCH", "https://api.example.com/api/health");
+        let mut request = test_http_request("TRACE", "https://api.example.com/api/health");
 
         assert_eq!(
             validate_http_request(&request).expect_err("unsupported method"),
-            "Unsupported HTTP method: PATCH"
+            "Unsupported HTTP method: TRACE"
         );
 
         request.method = "GET".to_string();

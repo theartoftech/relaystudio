@@ -120,6 +120,7 @@ import {
 } from "./services/savedResponses";
 import { formatResponseSize } from "./services/responseFormatting";
 import { createDiagnosticsBundle } from "./services/diagnostics";
+import { compareSavedResponses, comparisonToExecutedResponse } from "./services/responseComparison";
 import { runServiceRequest, type ExecutableRequest, type ExecutedResponse, type RunnerConsoleEvent } from "./services/serviceRunner";
 import { loadOpenApiFromUrl, selectedOperationsToServices, type ParsedOpenApi } from "./services/openApiImporter";
 import {
@@ -142,7 +143,7 @@ interface WorkbenchTab {
   id: string;
   label: string;
   kind: TabKind;
-  method?: "GET" | "POST" | "PUT" | "DELETE";
+  method?: HttpMethod;
   dirty?: boolean;
 }
 
@@ -893,7 +894,7 @@ export function App() {
     handleSelectService(next);
   }
 
-  function handleImportServices(parsed: ParsedOpenApi, selectedIds: string[]) {
+  function handleImportServices(parsed: ParsedOpenApi, selectedIds: string[], saveAfterImport: boolean) {
     const imported = selectedOperationsToServices(parsed, selectedIds, project.services.map((service) => service.id));
     if (!imported.length) throw new Error("Select at least one REST service to add.");
     setProject((current) => touchProject({
@@ -907,6 +908,9 @@ export function App() {
     setProjectMessage(`${imported.length} REST service${imported.length === 1 ? "" : "s"} imported from ${parsed.title}.`);
     setProjectError(null);
     handleSelectService(imported[0]);
+    if (saveAfterImport) {
+      void openSaveProjectDialog("Save Project", projectPath);
+    }
   }
 
   function handleDuplicateService() {
@@ -1348,6 +1352,36 @@ export function App() {
     }
   }
 
+  async function handleCompareSavedResponses(before: SavedResponseMetadata, after: SavedResponseMetadata) {
+    try {
+      const responsePersistence = savedResponsePersistence ?? await createSavedResponsePersistence();
+      if (!savedResponsePersistence) setSavedResponsePersistence(responsePersistence);
+      const [beforeArtifact, afterArtifact] = await Promise.all([
+        responsePersistence.readResponse(before),
+        responsePersistence.readResponse(after)
+      ]);
+      const comparison = compareSavedResponses(beforeArtifact, afterArtifact);
+      const response = comparisonToExecutedResponse(comparison);
+      const tabId = `comparison:${before.id}:${after.id}`;
+      setRunnerResponse(response);
+      setRunnerRequest(null);
+      setRunnerError(null);
+      setRunnerEvents([
+        { sequence: 1, phase: "prepare", level: "info", message: `Comparing redacted responses: ${before.fileName} and ${after.fileName}.` },
+        { sequence: 2, phase: "success", level: "success", message: `${comparison.summary.added + comparison.summary.removed + comparison.summary.changed} response difference(s) found.` }
+      ]);
+      setResponseVisible(true);
+      setTabs((current) => current.some((tab) => tab.id === tabId)
+        ? current
+        : [...current, { id: tabId, label: `${before.fileName} ↔ ${after.fileName}`, kind: "response", method: before.method }]);
+      setActiveTabId(tabId);
+      setProjectMessage(`Compared ${before.fileName} with ${after.fileName}.`);
+      setProjectError(null);
+    } catch (error) {
+      setProjectError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
   return (
     <main
       className="app-shell"
@@ -1404,6 +1438,7 @@ export function App() {
                 if (flow) setRenameFlowDialog(flow);
               }}
               onOpenSavedResponse={handleOpenSavedResponse}
+              onCompareSavedResponses={(before, after) => void handleCompareSavedResponses(before, after)}
             />
             <ResizeHandle
               ariaLabel="Resize explorer"
@@ -2176,6 +2211,7 @@ function ProjectExplorer(props: {
   onRenameFlow: (flowId: string) => void;
   onCreateProject: () => void;
   onOpenSavedResponse: (metadata: SavedResponseMetadata) => void;
+  onCompareSavedResponses: (before: SavedResponseMetadata, after: SavedResponseMetadata) => void;
 }) {
   const [contextMenu, setContextMenu] = useState<null | {
     x: number;
@@ -2184,6 +2220,12 @@ function ProjectExplorer(props: {
     serviceId?: string;
     flowId?: string;
   }>(null);
+  const [comparisonIds, setComparisonIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    const available = new Set(props.project.savedResponses.map((response) => response.id));
+    setComparisonIds((current) => current.filter((id) => available.has(id)).slice(0, 2));
+  }, [props.project.savedResponses]);
 
   useEffect(() => {
     if (!contextMenu) return;
@@ -2366,17 +2408,38 @@ function ProjectExplorer(props: {
         </TreeSection>
         <TreeSection title="Saved Responses" count={String(props.project.savedResponses.length)}>
           {props.project.savedResponses.map((response) => (
+            <div className="saved-response-row" key={response.id}>
+              <input
+                type="checkbox"
+                aria-label={`Select ${response.fileName} for comparison`}
+                checked={comparisonIds.includes(response.id)}
+                disabled={!comparisonIds.includes(response.id) && comparisonIds.length >= 2}
+                onChange={(event) => setComparisonIds((current) => event.target.checked ? [...current, response.id] : current.filter((id) => id !== response.id))}
+              />
+              <button
+                type="button"
+                className={response.status >= 400 ? "tree-item warning" : "tree-item"}
+                onClick={() => props.onOpenSavedResponse(response)}
+                title={`${response.method} ${response.status} - ${response.filePath}`}
+              >
+                <FileJson size={15} />
+                <span>{response.fileName}</span>
+              </button>
+            </div>
+          ))}
+          {props.project.savedResponses.length >= 2 ? (
             <button
               type="button"
-              className={response.status >= 400 ? "tree-item warning" : "tree-item"}
-              key={response.id}
-              onClick={() => props.onOpenSavedResponse(response)}
-              title={`${response.method} ${response.status} - ${response.filePath}`}
+              className="compare-responses-button"
+              disabled={comparisonIds.length !== 2}
+              onClick={() => {
+                const selected = comparisonIds.map((id) => props.project.savedResponses.find((response) => response.id === id)).filter((response): response is SavedResponseMetadata => Boolean(response));
+                if (selected.length === 2) props.onCompareSavedResponses(selected[0], selected[1]);
+              }}
             >
-              <FileJson size={15} />
-              <span>{response.fileName}</span>
+              Compare selected responses
             </button>
-          ))}
+          ) : null}
         </TreeSection>
       </div>
     </aside>
@@ -2782,7 +2845,7 @@ function RequestEditor({
   onSettingChange: <K extends keyof ProjectSettings>(key: K, value: ProjectSettings[K], message: string) => void;
   onProxySettingChange: <K extends keyof ProjectSettings["proxy"]>(key: K, value: ProjectSettings["proxy"][K], message: string) => void;
   onExportDiagnostics: () => void;
-  onImportServices: (parsed: ParsedOpenApi, selectedIds: string[]) => void;
+  onImportServices: (parsed: ParsedOpenApi, selectedIds: string[], saveAfterImport: boolean) => void;
   activeService: ProjectService | undefined;
   activeFlow: ProjectFlow | undefined;
   flowDetailsOpen: boolean;
@@ -3098,12 +3161,25 @@ function BodyPanel({ service, onUpdate }: { service: ProjectService; onUpdate: (
             <option value="none">No Body</option>
             <option value="application/json">JSON</option>
             <option value="text/plain">Text</option>
+            <option value="application/x-www-form-urlencoded">Form URL Encoded</option>
+            <option value="multipart/form-data">Multipart Form</option>
           </select>
-          <button type="button" onClick={() => transformBody(formatJsonBody)}>Beautify</button>
-          <button type="button" onClick={() => transformBody(minifyJsonBody)}>Minify</button>
+          {service.body.contentType === "application/json" ? (
+            <>
+              <button type="button" onClick={() => transformBody(formatJsonBody)}>Beautify</button>
+              <button type="button" onClick={() => transformBody(minifyJsonBody)}>Minify</button>
+            </>
+          ) : null}
         </div>
       </header>
-      <textarea aria-label="Request body" value={service.body.raw} onChange={(event) => updateBody(event.target.value)} />
+      {["application/x-www-form-urlencoded", "multipart/form-data"].includes(service.body.contentType) ? (
+        <>
+          <p className="body-editor-note">Text form fields are encoded at send time. File-path uploads are not supported.</p>
+          <RowsPanel title="Form Fields" rows={service.body.fields ?? []} onChange={(fields) => onUpdate({ body: { ...service.body, fields } }, "Request form fields updated.")} />
+        </>
+      ) : (
+        <textarea aria-label="Request body" value={service.body.raw} onChange={(event) => updateBody(event.target.value)} />
+      )}
       {formatError ? <p className="field-error">{formatError}</p> : null}
     </section>
   );
@@ -4030,7 +4106,7 @@ function WelcomeView() {
   );
 }
 
-function ImportApiView({ onImportServices }: { onImportServices: (parsed: ParsedOpenApi, selectedIds: string[]) => void }) {
+function ImportApiView({ onImportServices }: { onImportServices: (parsed: ParsedOpenApi, selectedIds: string[], saveAfterImport: boolean) => void }) {
   const [url, setUrl] = useState("");
   const [parsed, setParsed] = useState<ParsedOpenApi | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -4052,13 +4128,13 @@ function ImportApiView({ onImportServices }: { onImportServices: (parsed: Parsed
     }
   }
 
-  function addSelected() {
+  function addSelected(saveAfterImport: boolean) {
     if (!parsed || !selectedIds.length) {
       setError("Select at least one REST service to add.");
       return;
     }
     try {
-      onImportServices(parsed, selectedIds);
+      onImportServices(parsed, selectedIds, saveAfterImport);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
     }
@@ -4084,11 +4160,18 @@ function ImportApiView({ onImportServices }: { onImportServices: (parsed: Parsed
             <div><strong>{parsed.title}</strong><span>OpenAPI {parsed.version}</span></div>
             <code>{parsed.serverUrl}</code>
           </div>
+          <div className="api-import-review" aria-label="Import review summary">
+            <span>{parsed.review.operationCount} operations</span>
+            <span>{parsed.review.externalDocumentCount} external documents</span>
+            <span>{parsed.review.formBodyCount} form bodies</span>
+            <span>{parsed.review.deprecatedCount} deprecated</span>
+          </div>
           <div className="api-import-actions">
             <span>{selectedIds.length} of {parsed.operations.length} selected</span>
-            <button type="button" onClick={() => setSelectedIds(parsed.operations.map((operation) => operation.id))}>Select All</button>
-            <button type="button" onClick={() => setSelectedIds([])}>Clear</button>
-            <button type="button" className="primary-button" disabled={!selectedIds.length} onClick={addSelected}>Add {selectedIds.length} Selected</button>
+            <button type="button" title="Select every discovered REST operation." onClick={() => setSelectedIds(parsed.operations.map((operation) => operation.id))}>Select All</button>
+            <button type="button" title="Clear all selected REST operations." onClick={() => setSelectedIds([])}>Clear</button>
+            <button type="button" title="Add selected REST operations to the current project without saving it yet." disabled={!selectedIds.length} onClick={() => addSelected(false)}>Add {selectedIds.length} Selected</button>
+            <button type="button" className="primary-button" title="Add selected REST operations to the current project and open the Save Project dialog." disabled={!selectedIds.length} onClick={() => addSelected(true)}>Add and Save {selectedIds.length} Selected</button>
           </div>
           <div className="api-operation-list" aria-label="Discovered REST services">
             {parsed.operations.map((operation) => (

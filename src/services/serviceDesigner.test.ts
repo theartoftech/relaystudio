@@ -120,7 +120,7 @@ describe("service designer helpers", () => {
   it("validates unsupported methods, bad paths, ranges, duplicates, missing path params, and malformed JSON", () => {
     const service = {
       ...createOrder,
-      method: "PATCH",
+      method: "TRACE",
       path: "api/orders/{orderId}",
       timeoutMs: 0,
       retry: { attempts: 11, backoffMs: 60_001 },

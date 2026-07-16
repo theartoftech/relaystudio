@@ -24,6 +24,13 @@ describe("structured diagnostics", () => {
       platform: "macos",
       project: { schemaVersion: 1, serviceCount: 13 }
     });
+    expect(bundle.requestInventory).toMatchObject({
+      methods: { GET: 8, POST: 3, PUT: 1, DELETE: 1 },
+      bodyTypes: { "application/json": 3, none: 10 }
+    });
+    expect(bundle.requestInventory.folders).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "Auth", requestCount: 3 })
+    ]));
     expect(snapshot).not.toContain("secret-token-value");
     expect(snapshot).not.toContain("super-secret");
     expect(snapshot).not.toContain("sample-access-token");

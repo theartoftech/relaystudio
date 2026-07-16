@@ -104,6 +104,118 @@ paths:
     fetchMock.mockRestore();
   });
 
+  it("resolves same-origin external references and imports PATCH form bodies", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    fetchMock.mockImplementation(async (input) => String(input).endsWith("common.yaml") ? new Response(`
+parameters:
+  profileId: { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+requestBodies:
+  profileForm:
+    content:
+      application/x-www-form-urlencoded:
+        schema:
+          type: object
+          properties:
+            displayName: { type: string, example: Developer }
+            password: { type: string, example: should-never-import }
+`, { status: 200, headers: { "content-type": "application/yaml" } }) : new Response(JSON.stringify({
+      openapi: "3.1.0",
+      info: { title: "Developer API" },
+      paths: {
+        "/profiles/{id}": {
+          patch: {
+            parameters: [{ $ref: "./common.yaml#/parameters/profileId" }],
+            requestBody: { $ref: "./common.yaml#/requestBodies/profileForm" }
+          }
+        }
+      }
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+
+    const parsed = await loadOpenApiFromUrl("https://api.test/openapi.json");
+    const service = selectedOperationsToServices(parsed, ["patch:/profiles/{id}"], [])[0];
+
+    expect(service.method).toBe("PATCH");
+    expect(service.pathParams[0]).toMatchObject({ name: "id", enabled: true });
+    expect(service.body.contentType).toBe("application/x-www-form-urlencoded");
+    expect(service.body.fields).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "displayName", value: "Developer" }),
+      expect.objectContaining({ name: "password", value: "{{password}}" })
+    ]));
+    expect(JSON.stringify(service)).not.toContain("should-never-import");
+    fetchMock.mockRestore();
+  });
+
+  it("rejects cross-origin, circular, and unreachable external references", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ openapi: "3.0.0", paths: { "/x": { get: { parameters: [{ $ref: "https://other.test/common.json#/id" }] } } } }), { status: 200 }));
+    await expect(loadOpenApiFromUrl("https://api.test/openapi.json")).rejects.toThrow("Cross-origin OpenAPI reference is blocked");
+
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ openapi: "3.0.0", paths: { "/x": { get: { parameters: [{ $ref: "./common.json#/a" }] } } } }), { status: 200 }));
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ a: { $ref: "#/b" }, b: { $ref: "#/a" } }), { status: 200 }));
+    await expect(loadOpenApiFromUrl("https://api.test/openapi.json")).rejects.toThrow("Circular OpenAPI reference");
+
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ openapi: "3.0.0", paths: { "/x": { get: { parameters: [{ $ref: "./missing.json#/id" }] } } } }), { status: 200 }));
+    fetchMock.mockResolvedValueOnce(new Response("missing", { status: 404, statusText: "Not Found" }));
+    await expect(loadOpenApiFromUrl("https://api.test/openapi.json")).rejects.toThrow("HTTP 404");
+    fetchMock.mockRestore();
+  });
+
+  it("rejects malformed, missing, and excessively deep reference graphs", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    fetchMock.mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.endsWith("malformed.json")) return new Response(JSON.stringify({ value: { name: "id", in: "query" } }), { status: 200 });
+      if (url.endsWith("scalar.json")) return new Response("- not-an-object", { status: 200 });
+      return new Response(JSON.stringify({ openapi: "3.0.0", paths: { "/x": { get: { parameters: [{ $ref: url.includes("missing-root") ? "./malformed.json#/missing" : url.includes("scalar-root") ? "./scalar.json#/0" : "./malformed.json#value" }] } } } }), { status: 200 });
+    });
+    await expect(loadOpenApiFromUrl("https://api.test/malformed-root.json")).rejects.toThrow("Malformed OpenAPI reference");
+    await expect(loadOpenApiFromUrl("https://api.test/missing-root.json")).rejects.toThrow("target was not found");
+    await expect(loadOpenApiFromUrl("https://api.test/scalar-root.json")).rejects.toThrow("Referenced OpenAPI document must be an object");
+    fetchMock.mockRestore();
+
+    let nested: Record<string, unknown> = { get: {} };
+    for (let index = 0; index < 34; index += 1) nested = { nested };
+    const deepFetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ openapi: "3.0.0", paths: { "/x": nested } }), { status: 200 }));
+    await expect(loadOpenApiFromUrl("https://api.test/deep.json")).rejects.toThrow("depth exceeds");
+    deepFetch.mockRestore();
+  });
+
+  it("creates safe examples for composition and common formats", () => {
+    const parsed = parseOpenApiDocument({
+      openapi: "3.1.0",
+      paths: { "/examples": { options: {}, head: {}, post: { requestBody: { content: { "application/json": { schema: {
+        type: "object",
+        properties: {
+          id: { type: "string", format: "uuid" },
+          createdAt: { type: "string", format: "date-time" },
+          choice: { oneOf: [{ type: "string", enum: ["safe"] }, { type: "integer" }] },
+          password: { type: "string", example: "real-secret" }
+        }
+      } } } } } } }
+    }, "https://api.test/openapi.json");
+    const service = selectedOperationsToServices(parsed, ["post:/examples"], [])[0];
+    expect(parsed.operations.map((operation) => operation.method)).toEqual(["POST", "HEAD", "OPTIONS"]);
+    expect(parsed.review).toMatchObject({ operationCount: 3, externalDocumentCount: 0, formBodyCount: 0 });
+    expect(service.body.raw).toContain("00000000-0000-4000-8000-000000000000");
+    expect(service.body.raw).toContain("{{password}}");
+    expect(service.body.raw).not.toContain("real-secret");
+  });
+
+  it("creates examples for arrays, allOf, anyOf, defaults, dates, email, and write-only-safe objects", () => {
+    const parsed = parseOpenApiDocument({ openapi: "3.1.0", paths: { "/examples": { post: { requestBody: { content: { "application/json": { schema: {
+      type: "object",
+      properties: {
+        list: { type: "array", items: { type: "boolean" } },
+        combined: { allOf: [{ type: "object", properties: { count: { type: "number" } } }, { type: "object", properties: { date: { type: "string", format: "date" } } }] },
+        fallback: { anyOf: [{ type: "string", default: "chosen" }, { type: "number" }] },
+        email: { type: "string", format: "email" },
+        ignored: { type: "string", readOnly: true }
+      }
+    } } } } } } } }, "https://api.test/openapi.json");
+    const body = JSON.parse(selectedOperationsToServices(parsed, ["post:/examples"], [])[0].body.raw);
+    expect(body).toEqual({ list: [false], combined: { count: 0, date: "2026-01-01" }, fallback: "chosen", email: "developer@example.invalid" });
+  });
+
   it("rejects invalid URL protocols, malformed definitions, and undiscoverable pages", async () => {
     await expect(loadOpenApiFromUrl("file:///tmp/openapi.json")).rejects.toThrow("HTTP or HTTPS");
     await expect(loadOpenApiFromUrl(" ")).rejects.toThrow("required");

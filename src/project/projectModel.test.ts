@@ -2,6 +2,22 @@ import { describe, expect, it, vi } from "vitest";
 import { PROJECT_FORMAT, PROJECT_SCHEMA_VERSION, createEmptyProject, createSampleProject, touchProject } from "./projectModel";
 
 describe("project model", () => {
+  it("supports developer workflow methods and structured form bodies", () => {
+    const project = createSampleProject("2026-07-15T00:00:00.000Z");
+    const service = project.services[0];
+    const patched = {
+      ...service,
+      method: "PATCH" as const,
+      body: {
+        contentType: "multipart/form-data" as const,
+        raw: "",
+        fields: [{ id: "description", name: "description", value: "sample", enabled: true }]
+      }
+    };
+
+    expect(patched.method).toBe("PATCH");
+    expect(patched.body.fields).toHaveLength(1);
+  });
   it("creates a versioned sample project with REST request designer fields", () => {
     const project = createSampleProject("2026-06-21T00:00:00.000Z");
     const createOrder = project.services.find((service) => service.id === "create-order");

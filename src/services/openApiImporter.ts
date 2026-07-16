@@ -1,9 +1,12 @@
 import { parse as parseYaml } from "yaml";
 import type { AuthProfile, HttpMethod, KeyValueRow, ProjectService } from "../project/projectModel";
+import { isSecretKey } from "../lib/redaction";
 import { createService } from "./serviceDesigner";
 
 type JsonObject = Record<string, unknown>;
-const methods = ["get", "post", "put", "delete"] as const;
+const methods = ["get", "post", "put", "patch", "delete", "head", "options"] as const;
+const MAX_EXTERNAL_DOCUMENTS = 20;
+const MAX_REFERENCE_DEPTH = 32;
 
 export interface OpenApiOperation {
   id: string;
@@ -26,6 +29,12 @@ export interface ParsedOpenApi {
   securitySchemes: JsonObject;
   globalSecurity: JsonObject[];
   document: JsonObject;
+  review: {
+    operationCount: number;
+    deprecatedCount: number;
+    externalDocumentCount: number;
+    formBodyCount: number;
+  };
 }
 
 export function discoverDefinitionUrl(html: string, pageUrl: string): string {
@@ -42,6 +51,10 @@ export function discoverDefinitionUrl(html: string, pageUrl: string): string {
 }
 
 export function parseOpenApiText(text: string, definitionUrl: string): ParsedOpenApi {
+  return parseOpenApiDocument(parseDocumentText(text), definitionUrl);
+}
+
+function parseDocumentText(text: string): unknown {
   let value: unknown;
   try {
     value = JSON.parse(text);
@@ -52,10 +65,10 @@ export function parseOpenApiText(text: string, definitionUrl: string): ParsedOpe
       throw new Error(`OpenAPI definition is not valid JSON or YAML: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
-  return parseOpenApiDocument(value, definitionUrl);
+  return value;
 }
 
-export function parseOpenApiDocument(value: unknown, definitionUrl: string): ParsedOpenApi {
+export function parseOpenApiDocument(value: unknown, definitionUrl: string, externalDocumentCount = 0): ParsedOpenApi {
   const root = object(value, "OpenAPI definition must be an object.");
   const paths = object(root.paths, "OpenAPI definition is missing paths.");
   const operations: OpenApiOperation[] = [];
@@ -80,7 +93,7 @@ export function parseOpenApiDocument(value: unknown, definitionUrl: string): Par
       });
     }
   }
-  if (!operations.length) throw new Error("OpenAPI definition contains no supported REST operations (GET, POST, PUT, or DELETE).");
+  if (!operations.length) throw new Error("OpenAPI definition contains no supported REST operations (GET, POST, PUT, PATCH, DELETE, HEAD, or OPTIONS).");
   const info = optionalObject(root.info) ?? {};
   return {
     title: string(info.title) || "Imported API",
@@ -90,7 +103,16 @@ export function parseOpenApiDocument(value: unknown, definitionUrl: string): Par
     operations,
     securitySchemes: optionalObject(optionalObject(root.components)?.securitySchemes) ?? optionalObject(root.securityDefinitions) ?? {},
     globalSecurity: arrayOfObjects(root.security)
-    ,document: root
+    ,document: root,
+    review: {
+      operationCount: operations.length,
+      deprecatedCount: operations.filter((operation) => operation.deprecated).length,
+      externalDocumentCount,
+      formBodyCount: operations.filter((operation) => {
+        const content = optionalObject(operation.requestBody?.content);
+        return Boolean(content?.["application/x-www-form-urlencoded"] || content?.["multipart/form-data"]);
+      }).length
+    }
   };
 }
 
@@ -124,10 +146,74 @@ export async function loadOpenApiFromUrl(inputUrl: string): Promise<ParsedOpenAp
   const first = await fetchText(url);
   const contentType = first.contentType.toLowerCase();
   const looksHtml = contentType.includes("text/html") || /^\s*<!doctype html|^\s*<html/i.test(first.body);
-  if (!looksHtml) return parseOpenApiText(first.body, url);
+  if (!looksHtml) return loadResolvedDocument(first.body, url);
   const definitionUrl = discoverDefinitionUrl(first.body, url);
   const definition = await fetchText(definitionUrl);
-  return parseOpenApiText(definition.body, definitionUrl);
+  return loadResolvedDocument(definition.body, definitionUrl);
+}
+
+async function loadResolvedDocument(text: string, definitionUrl: string): Promise<ParsedOpenApi> {
+  const root = object(parseDocumentText(text), "OpenAPI definition must be an object.");
+  const documents = new Map<string, JsonObject>([[withoutFragment(definitionUrl), root]]);
+  const resolved = await resolveDocumentValue(root, withoutFragment(definitionUrl), definitionUrl, documents, [], 0);
+  return parseOpenApiDocument(resolved, definitionUrl, documents.size - 1);
+}
+
+async function resolveDocumentValue(
+  value: unknown,
+  documentUrl: string,
+  rootDefinitionUrl: string,
+  documents: Map<string, JsonObject>,
+  stack: string[],
+  depth: number
+): Promise<unknown> {
+  if (depth > MAX_REFERENCE_DEPTH) throw new Error(`OpenAPI reference depth exceeds the safe limit of ${MAX_REFERENCE_DEPTH}.`);
+  if (Array.isArray(value)) {
+    return Promise.all(value.map((item) => resolveDocumentValue(item, documentUrl, rootDefinitionUrl, documents, stack, depth + 1)));
+  }
+  const item = optionalObject(value);
+  if (!item) return value;
+  const ref = string(item.$ref);
+  if (ref) {
+    const targetUrl = new URL(ref, documentUrl);
+    if (targetUrl.origin !== new URL(rootDefinitionUrl).origin) {
+      throw new Error(`Cross-origin OpenAPI reference is blocked: ${targetUrl.origin}. Keep referenced documents on ${new URL(rootDefinitionUrl).origin}.`);
+    }
+    const targetDocumentUrl = withoutFragment(targetUrl.toString());
+    const referenceKey = targetUrl.toString();
+    if (stack.includes(referenceKey)) throw new Error(`Circular OpenAPI reference detected at ${referenceKey}.`);
+    let targetDocument = documents.get(targetDocumentUrl);
+    if (!targetDocument) {
+      if (documents.size >= MAX_EXTERNAL_DOCUMENTS) throw new Error(`OpenAPI import exceeds the safe limit of ${MAX_EXTERNAL_DOCUMENTS} referenced documents.`);
+      const external = await fetchText(targetDocumentUrl);
+      targetDocument = object(parseDocumentText(external.body), `Referenced OpenAPI document must be an object: ${targetDocumentUrl}.`);
+      documents.set(targetDocumentUrl, targetDocument);
+    }
+    const target = resolveJsonPointer(targetDocument, targetUrl.hash, referenceKey);
+    const resolvedTarget = await resolveDocumentValue(target, targetDocumentUrl, rootDefinitionUrl, documents, [...stack, referenceKey], depth + 1);
+    const siblings = Object.fromEntries(Object.entries(item).filter(([key]) => key !== "$ref"));
+    return optionalObject(resolvedTarget)
+      ? resolveDocumentValue({ ...resolvedTarget as JsonObject, ...siblings }, targetDocumentUrl, rootDefinitionUrl, documents, [...stack, referenceKey], depth + 1)
+      : resolvedTarget;
+  }
+  return Object.fromEntries(await Promise.all(Object.entries(item).map(async ([key, nested]) => [
+    key,
+    await resolveDocumentValue(nested, documentUrl, rootDefinitionUrl, documents, stack, depth + 1)
+  ])));
+}
+
+function resolveJsonPointer(document: JsonObject, hash: string, reference: string): unknown {
+  if (!hash || hash === "#") return document;
+  if (!hash.startsWith("#/")) throw new Error(`Malformed OpenAPI reference: ${reference}. Only JSON Pointer fragments are supported.`);
+  const result = hash.slice(2).split("/").reduce<unknown>((current, key) => optionalObject(current)?.[decodeURIComponent(key).replace(/~1/g, "/").replace(/~0/g, "~")], document);
+  if (result === undefined) throw new Error(`OpenAPI reference target was not found: ${reference}.`);
+  return result;
+}
+
+function withoutFragment(url: string): string {
+  const parsed = new URL(url);
+  parsed.hash = "";
+  return parsed.toString();
 }
 
 async function fetchText(url: string): Promise<{ body: string; contentType: string }> {
@@ -166,10 +252,24 @@ function requestBody(body: JsonObject | undefined, root: JsonObject): ProjectSer
   const resolved = optionalObject(resolveReference(body, root)) ?? body;
   const content = optionalObject(resolved.content);
   const json = content ? optionalObject(content["application/json"]) : undefined;
-  if (!json) return { contentType: "none", raw: "" };
-  const schema = optionalObject(resolveReference(json.schema, root));
-  const value = json.example ?? schemaExample(schema);
-  return { contentType: "application/json", raw: JSON.stringify(value ?? {}, null, 2) };
+  if (json) {
+    const schema = optionalObject(resolveReference(json.schema, root));
+    const value = safeExample(json.example ?? schemaExample(schema));
+    return { contentType: "application/json", raw: JSON.stringify(value ?? {}, null, 2) };
+  }
+  const formType = (["application/x-www-form-urlencoded", "multipart/form-data"] as const)
+    .find((contentType) => optionalObject(content?.[contentType]));
+  if (!formType) return { contentType: "none", raw: "" };
+  const media = optionalObject(content?.[formType]) ?? {};
+  const schema = optionalObject(resolveReference(media.schema, root));
+  const properties = optionalObject(schema?.properties) ?? {};
+  const fields = Object.entries(properties).map(([name, property], index) => ({
+    id: `import-form-${index}`,
+    name,
+    value: exampleValue(schemaExample(optionalObject(resolveReference(property, root)), name), name),
+    enabled: true
+  }));
+  return { contentType: formType, raw: "", fields };
 }
 
 function authProfile(security: JsonObject[], schemes: JsonObject): AuthProfile {
@@ -197,7 +297,33 @@ function resolveReference(value: unknown, root: JsonObject): unknown {
   return ref.slice(2).split("/").reduce<unknown>((current, key) => optionalObject(current)?.[key.replace(/~1/g, "/").replace(/~0/g, "~")], root);
 }
 function mergeParameters(a: JsonObject[], b: JsonObject[]): JsonObject[] { const map = new Map<string, JsonObject>(); [...a, ...b].forEach((p) => map.set(`${string(p.in)}:${string(p.name)}`, p)); return [...map.values()]; }
-function schemaExample(schema: JsonObject | undefined): unknown { if (!schema) return {}; if (schema.example !== undefined) return schema.example; if (string(schema.type) === "array") return [schemaExample(optionalObject(schema.items))]; const properties = optionalObject(schema.properties); if (properties) return Object.fromEntries(Object.entries(properties).map(([key, value]) => [key, schemaExample(optionalObject(value))])); if (schema.default !== undefined) return schema.default; if (Array.isArray(schema.enum)) return schema.enum[0]; if (string(schema.type) === "boolean") return false; if (["integer", "number"].includes(string(schema.type))) return 0; return ""; }
+function schemaExample(schema: JsonObject | undefined, propertyName = ""): unknown {
+  if (isSecretKey(propertyName)) return `{{${propertyName}}}`;
+  if (!schema) return {};
+  if (schema.example !== undefined) return safeExample(schema.example, propertyName);
+  const composed = Array.isArray(schema.oneOf) ? schema.oneOf[0] : Array.isArray(schema.anyOf) ? schema.anyOf[0] : undefined;
+  if (composed) return schemaExample(optionalObject(composed), propertyName);
+  if (Array.isArray(schema.allOf)) return Object.assign({}, ...schema.allOf.map((part) => schemaExample(optionalObject(part), propertyName)).filter(optionalObject));
+  if (string(schema.type) === "array") return [schemaExample(optionalObject(schema.items), propertyName)];
+  const properties = optionalObject(schema.properties);
+  if (properties) return Object.fromEntries(Object.entries(properties).filter(([, value]) => optionalObject(value)?.readOnly !== true).map(([key, value]) => [key, schemaExample(optionalObject(value), key)]));
+  if (schema.default !== undefined) return safeExample(schema.default, propertyName);
+  if (Array.isArray(schema.enum)) return schema.enum[0];
+  if (string(schema.type) === "boolean") return false;
+  if (["integer", "number"].includes(string(schema.type))) return 0;
+  const format = string(schema.format);
+  if (format === "uuid") return "00000000-0000-4000-8000-000000000000";
+  if (format === "date-time") return "2026-01-01T00:00:00Z";
+  if (format === "date") return "2026-01-01";
+  if (format === "email") return "developer@example.invalid";
+  return "";
+}
+function safeExample(value: unknown, propertyName = ""): unknown {
+  if (isSecretKey(propertyName)) return `{{${propertyName}}}`;
+  if (Array.isArray(value)) return value.map((item) => safeExample(item));
+  const item = optionalObject(value);
+  return item ? Object.fromEntries(Object.entries(item).map(([key, nested]) => [key, safeExample(nested, key)])) : value;
+}
 function validatedUrl(value: string): string { const trimmed = value.trim(); if (!trimmed) throw new Error("Swagger UI or OpenAPI URL is required."); const url = new URL(trimmed); if (!["http:", "https:"].includes(url.protocol)) throw new Error("Swagger UI or OpenAPI URL must use HTTP or HTTPS."); return url.toString(); }
 function header(headers: Record<string, string>, name: string): string { return Object.entries(headers).find(([key]) => key.toLowerCase() === name)?.[1] ?? ""; }
 function object(value: unknown, message: string): JsonObject { const result = optionalObject(value); if (!result) throw new Error(message); return result; }

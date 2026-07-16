@@ -43,6 +43,67 @@ describe("service runner", () => {
     expect(request.body).not.toContain("{{productId}}");
   });
 
+  it("encodes URL-encoded and multipart form bodies with resolved variables", () => {
+    const urlEncoded = buildExecutableRequest({
+      ...createOrder,
+      method: "PATCH",
+      headers: [{ id: "old", name: "Content-Type", value: "application/json", enabled: true }],
+      body: {
+        contentType: "application/x-www-form-urlencoded",
+        raw: "",
+        fields: [
+          { id: "status", name: "status", value: "ready & waiting", enabled: true },
+          { id: "product", name: "product", value: "{{productId}}", enabled: true },
+          { id: "ignored", name: "ignored", value: "no", enabled: false }
+        ]
+      }
+    }, qa);
+
+    expect(urlEncoded.method).toBe("PATCH");
+    expect(urlEncoded.headers["Content-Type"]).toBe("application/x-www-form-urlencoded");
+    expect(urlEncoded.body).toBe("status=ready+%26+waiting&product=prod-1001");
+
+    const multipart = buildExecutableRequest({
+      ...createOrder,
+      headers: [],
+      body: {
+        contentType: "multipart/form-data",
+        raw: "",
+        fields: [{ id: "note", name: "note", value: "hello {{username}}", enabled: true }]
+      }
+    }, qa);
+
+    expect(multipart.headers["Content-Type"]).toMatch(/^multipart\/form-data; boundary=relay-studio-/);
+    expect(multipart.body).toContain('Content-Disposition: form-data; name="note"');
+    expect(multipart.body).toContain("hello qa_user");
+  });
+
+  it("rejects malformed form rows instead of silently dropping them", () => {
+    expect(() => buildExecutableRequest({
+      ...createOrder,
+      body: {
+        contentType: "application/x-www-form-urlencoded",
+        raw: "",
+        fields: [{ id: "blank", name: " ", value: "value", enabled: true }]
+      }
+    }, qa)).toThrow("Enabled form fields require a name.");
+  });
+
+  it("handles empty forms and rejects multipart header injection", () => {
+    const empty = buildExecutableRequest({
+      ...createOrder,
+      headers: [],
+      body: { contentType: "application/x-www-form-urlencoded", raw: "", fields: [] }
+    }, qa);
+    expect(empty.body).toBeNull();
+
+    expect(() => buildExecutableRequest({
+      ...createOrder,
+      headers: [],
+      body: { contentType: "multipart/form-data", raw: "", fields: [{ id: "bad", name: "bad\r\nheader", value: "x", enabled: true }] }
+    }, qa)).toThrow("cannot contain line breaks");
+  });
+
   it("applies project request settings to executable requests and response parsing", async () => {
     const settings = {
       ...project.settings,

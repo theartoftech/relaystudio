@@ -13,7 +13,7 @@ export interface ProjectEnvironment {
   variables: ProjectVariable[];
 }
 
-export type HttpMethod = "GET" | "POST" | "PUT" | "DELETE";
+export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
 export type AuthMode = "none" | "bearer" | "apiKey" | "basic" | "oauthClientCredentials" | "customHeader";
 
 export interface KeyValueRow {
@@ -24,8 +24,9 @@ export interface KeyValueRow {
 }
 
 export interface RequestBodyDefinition {
-  contentType: "application/json" | "text/plain" | "none";
+  contentType: "application/json" | "text/plain" | "application/x-www-form-urlencoded" | "multipart/form-data" | "none";
   raw: string;
+  fields?: KeyValueRow[];
 }
 
 export interface RetryPolicy {

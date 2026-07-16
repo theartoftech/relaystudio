@@ -151,13 +151,16 @@ export async function runServiceRequest(
 
 export function buildExecutableRequest(service: ProjectService, environment: ProjectEnvironment, settings?: ProjectSettings): ExecutableRequest {
   const authHeader = buildRuntimeAuthHeader(service, environment);
+  const body = buildRequestBody(service, environment);
+  const generatedContentType = service.body.contentType === "application/x-www-form-urlencoded" || service.body.contentType === "multipart/form-data";
   const userHeaders = Object.fromEntries(
     service.headers
-      .filter((row) => row.enabled && row.name.trim())
+      .filter((row) => row.enabled && row.name.trim() && !(generatedContentType && row.name.toLowerCase() === "content-type"))
       .map((row) => [row.name, resolveTemplate(row.value, environment, false)])
   );
   const headers = {
     ...userHeaders,
+    ...(body.contentType && !hasHeader(userHeaders, "content-type") ? { "Content-Type": body.contentType } : {}),
     ...(authHeader ? { [authHeader.name]: authHeader.value } : {})
   };
   const redactedHeaders = redactRecord(headers);
@@ -172,9 +175,7 @@ export function buildExecutableRequest(service: ProjectService, environment: Pro
     url: buildUrl(service, environment),
     headers,
     redactedHeaders,
-    body: service.body.contentType !== "none" && service.body.raw.trim()
-      ? resolveTemplate(service.body.raw, environment, false)
-      : null,
+    body: body.value,
     timeoutMs: settings?.requestTimeoutMs ?? service.timeoutMs,
     httpVersion: settings?.httpVersion ?? "auto",
     sslCertificateVerification: settings?.sslCertificateVerification ?? true,
@@ -194,6 +195,51 @@ export function buildExecutableRequest(service: ProjectService, environment: Pro
       bypassList: "localhost,127.0.0.1"
     }
   };
+}
+
+function buildRequestBody(service: ProjectService, environment: ProjectEnvironment): { value: string | null; contentType: string | null } {
+  const body = service.body;
+  if (body.contentType === "none") return { value: null, contentType: null };
+  if (body.contentType === "application/json" || body.contentType === "text/plain") {
+    return {
+      value: body.raw.trim() ? resolveTemplate(body.raw, environment, false) : null,
+      contentType: body.contentType
+    };
+  }
+  const fields = (body.fields ?? []).filter((field) => field.enabled);
+  if (fields.some((field) => !field.name.trim())) throw new Error("Enabled form fields require a name.");
+  const resolved = fields.map((field) => ({
+    name: field.name,
+    value: resolveTemplate(field.value, environment, false)
+  }));
+  if (body.contentType === "application/x-www-form-urlencoded") {
+    const params = new URLSearchParams();
+    resolved.forEach((field) => params.append(field.name, field.value));
+    return { value: params.toString() || null, contentType: body.contentType };
+  }
+  const boundary = `relay-studio-${stableBoundary(resolved)}`;
+  const value = resolved.length
+    ? `${resolved.map((field) => `--${boundary}\r\nContent-Disposition: form-data; name="${escapeMultipartName(field.name)}"\r\n\r\n${field.value}\r\n`).join("")}--${boundary}--\r\n`
+    : null;
+  return { value, contentType: `${body.contentType}; boundary=${boundary}` };
+}
+
+function stableBoundary(fields: Array<{ name: string; value: string }>): string {
+  let hash = 2166136261;
+  for (const character of JSON.stringify(fields)) {
+    hash ^= character.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+function escapeMultipartName(value: string): string {
+  if (/\r|\n/.test(value)) throw new Error("Multipart field names cannot contain line breaks.");
+  return value.replace(/\\/g, "\\\\").replace(/"/g, "\\\"");
+}
+
+function hasHeader(headers: Record<string, string>, name: string): boolean {
+  return Object.keys(headers).some((headerName) => headerName.toLowerCase() === name.toLowerCase());
 }
 
 export function normalizeResponse(service: ProjectService, response: TransportResponse, responseFormatDetection: ResponseFormatDetection = "auto"): ExecutedResponse {

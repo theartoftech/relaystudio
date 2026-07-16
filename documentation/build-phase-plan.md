@@ -622,13 +622,22 @@ Implemented. See the Sprint Portfolio for the delivery summary.
 - Continue learning and validating AI-driven software development practices.
 - Keep unsigned personal-use builds reproducible without paid platform verification.
 
-### Candidate Scope
+### Implemented Scope
 
-- External OpenAPI reference resolution.
-- Form, multipart, and additional HTTP method support.
-- Saved-response comparison.
-- Beta defect fixes driven by personal use.
-- Developer diagnostics and organization improvements.
+- Bounded same-origin external OpenAPI reference resolution with explicit unsafe-graph failures.
+- Safe composed/format schema examples with credential placeholders.
+- PATCH, HEAD, OPTIONS, URL-encoded forms, and text-only multipart forms across model, UI, persistence, importer, and transport.
+- Two-artifact redacted saved-response comparison for metadata, JSON paths, and raw lines.
+- Import review metrics and redacted diagnostic request inventory.
+- Direct Add and Save from OpenAPI review so confirmed endpoints can be persisted immediately as a local `.restproj` project.
+- Body-panel clipping fix discovered during live developer workflow verification.
+
+### Remaining Deferrals
+
+- Cross-origin reference opt-in or allowlisting.
+- Binary and file-path multipart upload.
+- TRACE and CONNECT methods.
+- Additional beta defects not yet reproduced through personal use.
 
 ### Non-Goals
 

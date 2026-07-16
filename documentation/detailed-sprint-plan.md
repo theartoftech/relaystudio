@@ -810,6 +810,14 @@ Improve Relay Studio as a practical personal developer tool while continuing the
 
 ### Acceptance Criteria
 
+- Same-origin external JSON/YAML `$ref` documents resolve relative to their owning document; cross-origin, circular, malformed, unreachable, excessive-depth, and excessive-document graphs fail explicitly without partial import.
+- Safe JSON examples cover composition and common formats while credential-like fields use variable placeholders.
+- PATCH, HEAD, and OPTIONS persist and execute through browser and native transports; TRACE and CONNECT remain unsupported.
+- URL-encoded and multipart text fields are editable, persisted, imported, variable-resolved, and encoded at send time; binary/file-path multipart upload remains explicitly unsupported.
+- Exactly two redacted saved responses can be compared for metadata plus structured JSON or raw-line changes, with actionable missing-artifact errors.
+- Import review shows operation, external-document, form-body, and deprecated counts without weakening explicit operation selection.
+- Import review provides both Add Selected and Add and Save Selected actions; the latter opens project persistence immediately and saves only the confirmed operations.
+- Diagnostics include a redacted request inventory by method, body type, and folder.
 - Each selected feature solves a demonstrated personal developer workflow.
 - Automated coverage and security gates remain above Sprint 13 thresholds.
 - Changed behavior is verified interactively in Relay Studio.

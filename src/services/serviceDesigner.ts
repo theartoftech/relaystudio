@@ -1,7 +1,7 @@
 import type { AuthMode, HttpMethod, KeyValueRow, ProjectEnvironment, ProjectService } from "../project/projectModel";
 import { redactValue } from "../lib/redaction";
 
-export const HTTP_METHODS: HttpMethod[] = ["GET", "POST", "PUT", "DELETE"];
+export const HTTP_METHODS: HttpMethod[] = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
 export const AUTH_MODES: AuthMode[] = ["none", "bearer", "apiKey", "basic", "oauthClientCredentials", "customHeader"];
 
 export interface ValidationIssue {
@@ -119,7 +119,9 @@ export function buildRequestPreview(service: ProjectService, environment: Projec
   const headers = service.headers.filter((row) => row.enabled);
   const queryParams = service.queryParams.filter((row) => row.enabled);
   const pathParams = service.pathParams.filter((row) => row.enabled);
-  const body = service.body.contentType !== "none" && service.body.raw.trim() ? service.body.raw : null;
+  const body = service.body.contentType !== "none" && (service.body.raw.trim() || service.body.fields?.some((field) => field.enabled))
+    ? service.body.raw
+    : null;
 
   return {
     method: service.method,
@@ -193,6 +195,13 @@ function validatePathParams(service: ProjectService): ValidationIssue[] {
 }
 
 function validateBody(service: ProjectService): ValidationIssue[] {
+  if (["application/x-www-form-urlencoded", "multipart/form-data"].includes(service.body.contentType)) {
+    const fields = service.body.fields ?? [];
+    if (fields.some((field) => field.enabled && !field.name.trim())) {
+      return [{ field: "body.fields", message: "Enabled form fields require a name.", severity: "error" }];
+    }
+    return validateDuplicateNames("formFields", fields);
+  }
   if (service.body.contentType !== "application/json" || !service.body.raw.trim()) {
     return [];
   }
