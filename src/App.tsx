@@ -3111,7 +3111,7 @@ function AuthorizationPanel(props: {
   );
 }
 
-function RowsPanel({ title, rows, onChange }: { title: string; rows: KeyValueRow[]; onChange: (rows: KeyValueRow[]) => void }) {
+function RowsPanel({ title, rows, onChange, allowFiles = false }: { title: string; rows: KeyValueRow[]; onChange: (rows: KeyValueRow[]) => void; allowFiles?: boolean }) {
   function updateRow(row: KeyValueRow) {
     onChange(upsertRow(rows, row));
   }
@@ -3120,18 +3120,36 @@ function RowsPanel({ title, rows, onChange }: { title: string; rows: KeyValueRow
     <section className="rows-panel" aria-label={title}>
       <header>
         <strong>{title}</strong>
-        <button type="button" onClick={() => onChange([...rows, { id: `${title}-${rows.length + 1}`, name: "", value: "", enabled: true }])}>
-          Add {title === "Headers" ? "Header" : "Param"}
+        <button type="button" onClick={() => onChange([...rows, { id: `${title}-${rows.length + 1}`, name: "", value: "", enabled: true, ...(allowFiles ? { valueType: "text" as const } : {}) }])}>
+          Add {title === "Headers" ? "Header" : title === "Form Fields" ? "Field" : "Param"}
         </button>
       </header>
-      {rows.length ? rows.map((row) => (
-        <div className="kv-row" key={row.id}>
+      {rows.length ? rows.map((row, index) => {
+        const fieldLabel = row.name || `field ${index + 1}`;
+        return (
+        <div className={allowFiles ? "kv-row form-field-row" : "kv-row"} key={row.id}>
           <label><input aria-label={`${row.name || title} enabled`} type="checkbox" checked={row.enabled} onChange={(event) => updateRow({ ...row, enabled: event.target.checked })} /></label>
           <input aria-label={`${title} name`} value={row.name} placeholder="Name" onChange={(event) => updateRow({ ...row, name: event.target.value })} />
-          <input aria-label={`${title} value`} value={row.value} placeholder="Value" onChange={(event) => updateRow({ ...row, value: event.target.value })} />
+          {allowFiles ? (
+            <select
+              aria-label={`${title} ${fieldLabel} type`}
+              value={row.valueType ?? "text"}
+              onChange={(event) => {
+                const valueType = event.target.value as "text" | "file";
+                updateRow({ ...row, valueType, contentType: valueType === "file" ? row.contentType || "application/octet-stream" : undefined });
+              }}
+            >
+              <option value="text">Text</option>
+              <option value="file">File</option>
+            </select>
+          ) : null}
+          <input aria-label={allowFiles ? `${title} ${fieldLabel} value` : `${title} value`} value={row.value} placeholder={row.valueType === "file" ? "Local file path" : "Value"} onChange={(event) => updateRow({ ...row, value: event.target.value })} />
+          {allowFiles ? row.valueType === "file" ? (
+            <input aria-label={`${title} ${fieldLabel} content type`} value={row.contentType ?? "application/octet-stream"} placeholder="Content type" onChange={(event) => updateRow({ ...row, contentType: event.target.value })} />
+          ) : <span className="form-content-type-spacer" aria-hidden="true" /> : null}
           <button type="button" onClick={() => onChange(removeRow(rows, row.id))}>Remove</button>
         </div>
-      )) : <p className="empty-inline">No {title.toLowerCase()} configured.</p>}
+      ); }) : <p className="empty-inline">No {title.toLowerCase()} configured.</p>}
     </section>
   );
 }
@@ -3174,8 +3192,8 @@ function BodyPanel({ service, onUpdate }: { service: ProjectService; onUpdate: (
       </header>
       {["application/x-www-form-urlencoded", "multipart/form-data"].includes(service.body.contentType) ? (
         <>
-          <p className="body-editor-note">Text form fields are encoded at send time. File-path uploads are not supported.</p>
-          <RowsPanel title="Form Fields" rows={service.body.fields ?? []} onChange={(fields) => onUpdate({ body: { ...service.body, fields } }, "Request form fields updated.")} />
+          <p className="body-editor-note">Text fields are encoded at send time. Multipart file paths are read locally only by Relay Studio desktop.</p>
+          <RowsPanel title="Form Fields" rows={service.body.fields ?? []} allowFiles={service.body.contentType === "multipart/form-data"} onChange={(fields) => onUpdate({ body: { ...service.body, fields } }, "Request form fields updated.")} />
         </>
       ) : (
         <textarea aria-label="Request body" value={service.body.raw} onChange={(event) => updateBody(event.target.value)} />

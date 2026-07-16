@@ -263,12 +263,20 @@ function requestBody(body: JsonObject | undefined, root: JsonObject): ProjectSer
   const media = optionalObject(content?.[formType]) ?? {};
   const schema = optionalObject(resolveReference(media.schema, root));
   const properties = optionalObject(schema?.properties) ?? {};
-  const fields = Object.entries(properties).map(([name, property], index) => ({
-    id: `import-form-${index}`,
-    name,
-    value: exampleValue(schemaExample(optionalObject(resolveReference(property, root)), name), name),
-    enabled: true
-  }));
+  const encoding = optionalObject(media.encoding) ?? {};
+  const fields = Object.entries(properties).map(([name, property], index) => {
+    const propertySchema = optionalObject(resolveReference(property, root));
+    const isFile = formType === "multipart/form-data" && string(propertySchema?.type) === "string" && string(propertySchema?.format) === "binary";
+    const encoded = optionalObject(encoding[name]);
+    return {
+      id: `import-form-${index}`,
+      name,
+      value: isFile ? "" : exampleValue(schemaExample(propertySchema, name), name),
+      enabled: true,
+      valueType: isFile ? "file" as const : "text" as const,
+      ...(isFile ? { contentType: string(encoded?.contentType) || string(propertySchema?.contentMediaType) || "application/octet-stream" } : {})
+    };
+  });
   return { contentType: formType, raw: "", fields };
 }
 

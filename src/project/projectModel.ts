@@ -21,6 +21,8 @@ export interface KeyValueRow {
   name: string;
   value: string;
   enabled: boolean;
+  valueType?: "text" | "file";
+  contentType?: string;
 }
 
 export interface RequestBodyDefinition {

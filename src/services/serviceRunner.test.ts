@@ -78,6 +78,42 @@ describe("service runner", () => {
     expect(multipart.body).toContain("hello qa_user");
   });
 
+  it("builds structured mixed multipart parts without reading local files in the frontend", () => {
+    const request = buildExecutableRequest({
+      ...createOrder,
+      headers: [{ id: "manual", name: "Content-Type", value: "multipart/form-data", enabled: true }],
+      body: {
+        contentType: "multipart/form-data",
+        raw: "",
+        fields: [
+          { id: "note", name: "note", value: "hello {{username}}", enabled: true, valueType: "text" },
+          { id: "attachment", name: "attachment", value: "/private/tmp/{{productId}}.png", enabled: true, valueType: "file", contentType: "image/png" }
+        ]
+      }
+    }, qa);
+
+    expect(request.body).toBeNull();
+    expect(request.headers).not.toHaveProperty("Content-Type");
+    expect(request.multipartParts).toEqual([
+      { name: "note", value: "hello qa_user", kind: "text", contentType: null },
+      { name: "attachment", value: "/private/tmp/prod-1001.png", kind: "file", contentType: "image/png" }
+    ]);
+  });
+
+  it("rejects file-backed multipart requests in browser development mode", async () => {
+    const request = buildExecutableRequest({
+      ...createOrder,
+      headers: [],
+      body: {
+        contentType: "multipart/form-data",
+        raw: "",
+        fields: [{ id: "attachment", name: "attachment", value: "/private/tmp/report.pdf", enabled: true, valueType: "file" }]
+      }
+    }, qa);
+
+    await expect(fetchHttpTransport(request)).rejects.toThrow("Multipart file uploads require Relay Studio desktop mode");
+  });
+
   it("rejects malformed form rows instead of silently dropping them", () => {
     expect(() => buildExecutableRequest({
       ...createOrder,

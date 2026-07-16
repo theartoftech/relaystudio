@@ -200,7 +200,14 @@ function validateBody(service: ProjectService): ValidationIssue[] {
     if (fields.some((field) => field.enabled && !field.name.trim())) {
       return [{ field: "body.fields", message: "Enabled form fields require a name.", severity: "error" }];
     }
-    return validateDuplicateNames("formFields", fields);
+    const issues: ValidationIssue[] = [];
+    if (service.body.contentType !== "multipart/form-data" && fields.some((field) => field.enabled && field.valueType === "file")) {
+      issues.push({ field: "body.fields", message: "File fields require a multipart/form-data body.", severity: "error" });
+    }
+    if (service.body.contentType === "multipart/form-data" && fields.some((field) => field.enabled && field.valueType === "file" && !field.value.trim())) {
+      issues.push({ field: "body.fields", message: "Enabled multipart file fields require a local file path.", severity: "error" });
+    }
+    return [...issues, ...validateDuplicateNames("formFields", fields)];
   }
   if (service.body.contentType !== "application/json" || !service.body.raw.trim()) {
     return [];

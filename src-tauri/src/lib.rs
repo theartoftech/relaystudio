@@ -14,6 +14,7 @@ const PROJECT_FORMAT: &str = "relay-studio-restproj";
 const PROJECT_SCHEMA_VERSION: u16 = 1;
 const SAVED_RESPONSE_FORMAT: &str = "relay-studio-response";
 const SAVED_RESPONSE_SCHEMA_VERSION: u16 = 1;
+const MAX_MULTIPART_FILE_BYTES: u64 = 25 * 1024 * 1024;
 const MENU_APP_SEARCH_COMMANDS: &str = "app.search_commands";
 const MENU_APP_OPEN_SETTINGS: &str = "app.open_settings";
 const MENU_APP_OPEN_HELP: &str = "app.open_help";
@@ -50,12 +51,23 @@ struct HttpRequestInput {
     url: String,
     headers: HashMap<String, String>,
     body: Option<String>,
+    #[serde(default)]
+    multipart_parts: Option<Vec<MultipartPartInput>>,
     timeout_ms: u64,
     http_version: Option<String>,
     ssl_certificate_verification: Option<bool>,
     ssl_tls_key_log: Option<bool>,
     disable_cookies: Option<bool>,
     proxy: Option<ProxySettingsInput>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MultipartPartInput {
+    name: String,
+    value: String,
+    kind: String,
+    content_type: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -318,12 +330,11 @@ fn set_app_menu(app: &tauri::AppHandle, state: &ShellMenuState) -> Result<(), St
         .enabled(state.can_run_flow)
         .build(app)
         .map_err(|error| format!("Could not build run flow menu item: {error}"))?;
-    let close_active_tab =
-        MenuItemBuilder::with_id(MENU_WINDOW_CLOSE_ACTIVE_TAB, "Close Tab")
-            .accelerator("CmdOrCtrl+W")
-            .enabled(state.can_close_active_tab)
-            .build(app)
-            .map_err(|error| format!("Could not build close tab menu item: {error}"))?;
+    let close_active_tab = MenuItemBuilder::with_id(MENU_WINDOW_CLOSE_ACTIVE_TAB, "Close Tab")
+        .accelerator("CmdOrCtrl+W")
+        .enabled(state.can_close_active_tab)
+        .build(app)
+        .map_err(|error| format!("Could not build close tab menu item: {error}"))?;
     let close_window = MenuItemBuilder::with_id(MENU_WINDOW_CLOSE_WINDOW, "Close Window")
         .accelerator("CmdOrCtrl+Shift+W")
         .build(app)
@@ -340,24 +351,20 @@ fn set_app_menu(app: &tauri::AppHandle, state: &ShellMenuState) -> Result<(), St
             .checked(state.inspector_open)
             .build(app)
             .map_err(|error| format!("Could not build inspector toggle menu item: {error}"))?;
-    let toggle_response_dock = CheckMenuItemBuilder::with_id(
-        MENU_VIEW_TOGGLE_RESPONSE_DOCK,
-        "Toggle Response Dock",
-    )
-    .accelerator("CmdOrCtrl+Alt+3")
-    .enabled(shell_menu_supports_response_dock(state))
-    .checked(state.response_dock_open)
-    .build(app)
-    .map_err(|error| format!("Could not build response dock toggle menu item: {error}"))?;
-    let toggle_flow_details = CheckMenuItemBuilder::with_id(
-        MENU_VIEW_TOGGLE_FLOW_DETAILS,
-        "Toggle Flow Details",
-    )
-    .accelerator("CmdOrCtrl+Alt+4")
-    .enabled(shell_menu_supports_flow_details(state))
-    .checked(state.flow_details_open)
-    .build(app)
-    .map_err(|error| format!("Could not build flow details toggle menu item: {error}"))?;
+    let toggle_response_dock =
+        CheckMenuItemBuilder::with_id(MENU_VIEW_TOGGLE_RESPONSE_DOCK, "Toggle Response Dock")
+            .accelerator("CmdOrCtrl+Alt+3")
+            .enabled(shell_menu_supports_response_dock(state))
+            .checked(state.response_dock_open)
+            .build(app)
+            .map_err(|error| format!("Could not build response dock toggle menu item: {error}"))?;
+    let toggle_flow_details =
+        CheckMenuItemBuilder::with_id(MENU_VIEW_TOGGLE_FLOW_DETAILS, "Toggle Flow Details")
+            .accelerator("CmdOrCtrl+Alt+4")
+            .enabled(shell_menu_supports_flow_details(state))
+            .checked(state.flow_details_open)
+            .build(app)
+            .map_err(|error| format!("Could not build flow details toggle menu item: {error}"))?;
 
     let mut file_menu_builder = SubmenuBuilder::new(app, "File")
         .item(&new_project)
@@ -463,11 +470,7 @@ fn handle_app_menu_event(app: &tauri::AppHandle, id: &str) {
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn checked_state_for_menu_id(app: &tauri::AppHandle, id: &str) -> Option<bool> {
-    app.menu()?
-        .get(id)?
-        .as_check_menuitem()?
-        .is_checked()
-        .ok()
+    app.menu()?.get(id)?.as_check_menuitem()?.is_checked().ok()
 }
 
 fn shell_command_payload_for_menu_id(
@@ -585,8 +588,8 @@ async fn execute_http_request_impl(
 
     let method = reqwest::Method::from_bytes(request.method.as_bytes())
         .map_err(|_| format!("Unsupported HTTP method: {}", request.method))?;
-    let mut client_builder = reqwest::Client::builder()
-        .timeout(Duration::from_millis(request.timeout_ms));
+    let mut client_builder =
+        reqwest::Client::builder().timeout(Duration::from_millis(request.timeout_ms));
     if request.ssl_certificate_verification == Some(false) {
         client_builder = client_builder.danger_accept_invalid_certs(true);
     }
@@ -602,7 +605,13 @@ async fn execute_http_request_impl(
     for (name, value) in &request.headers {
         builder = builder.header(name, value);
     }
-    if let Some(body) = request.body {
+    if let Some(parts) = request
+        .multipart_parts
+        .as_ref()
+        .filter(|parts| !parts.is_empty())
+    {
+        builder = builder.multipart(build_multipart_form(parts)?);
+    } else if let Some(body) = request.body {
         builder = builder.body(body);
     }
 
@@ -653,7 +662,102 @@ fn validate_http_request(request: &HttpRequestInput) -> Result<(), String> {
     if request.timeout_ms == 0 || request.timeout_ms > 300_000 {
         return Err("Request timeout must be between 1 ms and 300000 ms.".to_string());
     }
+    if let Some(parts) = request
+        .multipart_parts
+        .as_ref()
+        .filter(|parts| !parts.is_empty())
+    {
+        if request.body.is_some() {
+            return Err(
+                "Multipart requests cannot include both a raw body and structured parts."
+                    .to_string(),
+            );
+        }
+        if request
+            .headers
+            .keys()
+            .any(|name| name.eq_ignore_ascii_case("content-type"))
+        {
+            return Err("Do not set Content-Type manually for multipart file uploads; Relay Studio generates the boundary.".to_string());
+        }
+        validate_multipart_parts(parts)?;
+    }
     Ok(())
+}
+
+fn validate_multipart_parts(parts: &[MultipartPartInput]) -> Result<(), String> {
+    for part in parts {
+        if part.name.trim().is_empty() {
+            return Err("Multipart part names are required.".to_string());
+        }
+        if part.name.contains(['\r', '\n']) {
+            return Err("Multipart part names cannot contain line breaks.".to_string());
+        }
+        match part.kind.as_str() {
+            "text" => {}
+            "file" if part.value.trim().is_empty() => {
+                return Err(format!(
+                    "Multipart file field '{}' requires a local file path.",
+                    part.name
+                ));
+            }
+            "file" => {}
+            kind => return Err(format!("Unsupported multipart part kind: {kind}.")),
+        }
+    }
+    Ok(())
+}
+
+fn build_multipart_form(parts: &[MultipartPartInput]) -> Result<reqwest::multipart::Form, String> {
+    validate_multipart_parts(parts)?;
+    let mut form = reqwest::multipart::Form::new();
+    for part in parts {
+        if part.kind == "text" {
+            form = form.text(part.name.clone(), part.value.clone());
+            continue;
+        }
+        let path = Path::new(&part.value);
+        let metadata = fs::metadata(path).map_err(|error| {
+            format!(
+                "Could not access multipart file {}: {error}",
+                path.display()
+            )
+        })?;
+        if !metadata.is_file() {
+            return Err(format!(
+                "Multipart file path is not a file: {}",
+                path.display()
+            ));
+        }
+        if metadata.len() > MAX_MULTIPART_FILE_BYTES {
+            return Err(format!(
+                "Multipart file {} exceeds the 25 MB limit.",
+                path.display()
+            ));
+        }
+        let bytes = fs::read(path).map_err(|error| {
+            format!("Could not read multipart file {}: {error}", path.display())
+        })?;
+        let file_name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| format!("Multipart file name is not valid UTF-8: {}", path.display()))?;
+        let mut file_part = reqwest::multipart::Part::bytes(bytes).file_name(file_name.to_string());
+        if let Some(content_type) = part
+            .content_type
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+        {
+            file_part = file_part.mime_str(content_type).map_err(|error| {
+                format!(
+                    "Invalid multipart content type for '{}': {error}",
+                    part.name
+                )
+            })?;
+        }
+        form = form.part(part.name.clone(), file_part);
+    }
+    Ok(form)
 }
 
 fn save_project_file_impl(path: &Path, project: &Value) -> Result<(), String> {
@@ -890,9 +994,7 @@ fn response_temp_path_for(path: &Path) -> PathBuf {
 fn recent_projects_path() -> Result<PathBuf, String> {
     let home = home_directory_from(|name| std::env::var_os(name))
         .ok_or_else(|| "The user home directory is not available.".to_string())?;
-    Ok(home
-        .join(".relaystudio")
-        .join("recent-projects.json"))
+    Ok(home.join(".relaystudio").join("recent-projects.json"))
 }
 
 fn home_directory_from(get_env: impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
@@ -1009,18 +1111,19 @@ mod tests {
 
     #[test]
     fn default_capabilities_allow_window_close_lifecycle() {
-        let capabilities: Value = serde_json::from_str(include_str!("../capabilities/default.json"))
-            .expect("default capabilities should be valid json");
+        let capabilities: Value =
+            serde_json::from_str(include_str!("../capabilities/default.json"))
+                .expect("default capabilities should be valid json");
         let permissions = capabilities["permissions"]
             .as_array()
             .expect("default capabilities should include permissions");
 
-        assert!(permissions.iter().any(|permission| {
-            permission.as_str() == Some("core:window:allow-close")
-        }));
-        assert!(permissions.iter().any(|permission| {
-            permission.as_str() == Some("core:window:allow-destroy")
-        }));
+        assert!(permissions
+            .iter()
+            .any(|permission| { permission.as_str() == Some("core:window:allow-close") }));
+        assert!(permissions
+            .iter()
+            .any(|permission| { permission.as_str() == Some("core:window:allow-destroy") }));
     }
 
     #[test]
@@ -1061,7 +1164,10 @@ mod tests {
         save_project_file_impl(&path, &updated).expect("save updated");
         restore_project_backup_impl(&path).expect("restore backup");
 
-        assert_eq!(open_project_file_impl(&path).expect("open restored"), original);
+        assert_eq!(
+            open_project_file_impl(&path).expect("open restored"),
+            original
+        );
     }
 
     #[test]
@@ -1156,7 +1262,205 @@ mod tests {
         assert_eq!(response.status, 200);
         assert_eq!(response.status_text, "OK");
         assert_eq!(response.body, "{\"ok\":true}");
-        assert_eq!(response.headers.get("x-relay-test"), Some(&"covered".to_string()));
+        assert_eq!(
+            response.headers.get("x-relay-test"),
+            Some(&"covered".to_string())
+        );
+    }
+
+    #[test]
+    fn native_http_request_sends_text_and_file_multipart_parts() {
+        let directory = tempdir().expect("tempdir");
+        let file_path = directory.path().join("asset.png");
+        fs::write(&file_path, b"relay-file-bytes").expect("write multipart fixture");
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind local server");
+        let address = listener.local_addr().expect("local address");
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept request");
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 4096];
+            loop {
+                let bytes_read = stream.read(&mut buffer).expect("read multipart request");
+                if bytes_read == 0 {
+                    break;
+                }
+                request.extend_from_slice(&buffer[..bytes_read]);
+                let Some(header_end) = request
+                    .windows(4)
+                    .position(|window| window == b"\r\n\r\n")
+                    .map(|index| index + 4)
+                else {
+                    continue;
+                };
+                let headers = String::from_utf8_lossy(&request[..header_end]);
+                let content_length = headers.lines().find_map(|line| {
+                    line.to_ascii_lowercase()
+                        .strip_prefix("content-length: ")
+                        .and_then(|value| value.trim().parse::<usize>().ok())
+                });
+                if content_length.is_some_and(|length| request.len() >= header_end + length) {
+                    break;
+                }
+            }
+            let request_text = String::from_utf8_lossy(&request);
+            assert!(request_text.starts_with("POST /upload HTTP/1.1"));
+            assert!(request_text.contains("multipart/form-data; boundary="));
+            assert!(request_text.contains("name=\"description\""));
+            assert!(request_text.contains("Profile image"));
+            assert!(request_text.contains("name=\"asset\""));
+            assert!(request_text.contains("filename=\"asset.png\""));
+            assert!(request_text.contains("Content-Type: image/png"));
+            assert!(request_text.contains("relay-file-bytes"));
+            stream
+                .write_all(
+                    b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                )
+                .expect("write response");
+        });
+        let mut request = test_http_request("POST", &format!("http://{address}/upload"));
+        request.multipart_parts = Some(vec![
+            MultipartPartInput {
+                name: "description".to_string(),
+                value: "Profile image".to_string(),
+                kind: "text".to_string(),
+                content_type: None,
+            },
+            MultipartPartInput {
+                name: "asset".to_string(),
+                value: file_path.to_string_lossy().to_string(),
+                kind: "file".to_string(),
+                content_type: Some("image/png".to_string()),
+            },
+        ]);
+
+        let response = tauri::async_runtime::block_on(execute_http_request_impl(request))
+            .expect("execute multipart request");
+        server.join().expect("join local server");
+        assert_eq!(response.status, 204);
+    }
+
+    #[test]
+    fn multipart_file_validation_rejects_missing_and_oversized_files() {
+        let missing = vec![MultipartPartInput {
+            name: "asset".to_string(),
+            value: "/missing/relay-studio.bin".to_string(),
+            kind: "file".to_string(),
+            content_type: None,
+        }];
+        let missing_error = match build_multipart_form(&missing) {
+            Err(error) => error,
+            Ok(_) => panic!("missing file should fail"),
+        };
+        assert!(missing_error.contains("Could not access multipart file"));
+
+        let directory = tempdir().expect("tempdir");
+        let oversized_path = directory.path().join("oversized.bin");
+        fs::File::create(&oversized_path)
+            .expect("create oversized fixture")
+            .set_len(MAX_MULTIPART_FILE_BYTES + 1)
+            .expect("size fixture");
+        let oversized = vec![MultipartPartInput {
+            name: "asset".to_string(),
+            value: oversized_path.to_string_lossy().to_string(),
+            kind: "file".to_string(),
+            content_type: None,
+        }];
+        let oversized_error = match build_multipart_form(&oversized) {
+            Err(error) => error,
+            Ok(_) => panic!("oversized file should fail"),
+        };
+        assert!(oversized_error.contains("exceeds the 25 MB limit"));
+    }
+
+    #[test]
+    fn multipart_request_validation_rejects_conflicting_and_malformed_parts() {
+        let mut request = test_http_request("POST", "https://api.example.com/upload");
+        request.body = Some("raw body".to_string());
+        request.multipart_parts = Some(vec![MultipartPartInput {
+            name: "description".to_string(),
+            value: "Profile image".to_string(),
+            kind: "text".to_string(),
+            content_type: None,
+        }]);
+        assert!(validate_http_request(&request)
+            .expect_err("raw body conflict")
+            .contains("cannot include both a raw body and structured parts"));
+
+        request.body = None;
+        request.headers.insert(
+            "Content-Type".to_string(),
+            "multipart/form-data".to_string(),
+        );
+        assert!(validate_http_request(&request)
+            .expect_err("manual content type")
+            .contains("Relay Studio generates the boundary"));
+
+        assert_eq!(
+            validate_multipart_parts(&[MultipartPartInput {
+                name: "  ".to_string(),
+                value: "value".to_string(),
+                kind: "text".to_string(),
+                content_type: None,
+            }])
+            .expect_err("blank name"),
+            "Multipart part names are required."
+        );
+        assert!(validate_multipart_parts(&[MultipartPartInput {
+            name: "bad\nname".to_string(),
+            value: "value".to_string(),
+            kind: "text".to_string(),
+            content_type: None,
+        }])
+        .expect_err("line break")
+        .contains("cannot contain line breaks"));
+        assert!(validate_multipart_parts(&[MultipartPartInput {
+            name: "asset".to_string(),
+            value: String::new(),
+            kind: "file".to_string(),
+            content_type: None,
+        }])
+        .expect_err("empty file path")
+        .contains("requires a local file path"));
+        assert_eq!(
+            validate_multipart_parts(&[MultipartPartInput {
+                name: "asset".to_string(),
+                value: "value".to_string(),
+                kind: "stream".to_string(),
+                content_type: None,
+            }])
+            .expect_err("unsupported kind"),
+            "Unsupported multipart part kind: stream."
+        );
+    }
+
+    #[test]
+    fn multipart_file_validation_rejects_directories_and_invalid_content_types() {
+        let directory = tempdir().expect("tempdir");
+        let directory_part = vec![MultipartPartInput {
+            name: "asset".to_string(),
+            value: directory.path().to_string_lossy().to_string(),
+            kind: "file".to_string(),
+            content_type: None,
+        }];
+        assert!(match build_multipart_form(&directory_part) {
+            Err(error) => error,
+            Ok(_) => panic!("directory should fail"),
+        }
+        .contains("is not a file"));
+
+        let file_path = directory.path().join("asset.bin");
+        fs::write(&file_path, b"fixture").expect("write fixture");
+        let invalid_content_type = vec![MultipartPartInput {
+            name: "asset".to_string(),
+            value: file_path.to_string_lossy().to_string(),
+            kind: "file".to_string(),
+            content_type: Some("not a media type".to_string()),
+        }];
+        assert!(match build_multipart_form(&invalid_content_type) {
+            Err(error) => error,
+            Ok(_) => panic!("invalid content type should fail"),
+        }
+        .contains("Invalid multipart content type"));
     }
 
     #[test]
@@ -1192,17 +1496,27 @@ mod tests {
 
     #[test]
     fn project_paths_names_and_delete_failures_are_explicit() {
-        assert_eq!(validate_project_path(Path::new("")).unwrap_err(), "Project path is required.");
+        assert_eq!(
+            validate_project_path(Path::new("")).unwrap_err(),
+            "Project path is required."
+        );
         assert_eq!(
             validate_project_path(Path::new("project.json")).unwrap_err(),
             "Project file must use the .restproj extension."
         );
-        assert_eq!(validate_project_name("  ").unwrap_err(), "Project name is required.");
+        assert_eq!(
+            validate_project_name("  ").unwrap_err(),
+            "Project name is required."
+        );
 
         let dir = tempdir().expect("tempdir");
         let missing = dir.path().join("missing.restproj");
-        assert!(open_project_file_impl(&missing).unwrap_err().contains("was not found"));
-        assert!(delete_project_file_impl(&missing).unwrap_err().contains("was not found"));
+        assert!(open_project_file_impl(&missing)
+            .unwrap_err()
+            .contains("was not found"));
+        assert!(delete_project_file_impl(&missing)
+            .unwrap_err()
+            .contains("was not found"));
     }
 
     #[test]
@@ -1386,13 +1700,18 @@ mod tests {
             .expect("recent project payload");
         assert_eq!(payload.id, "file.open_recent.0");
         assert_eq!(payload.recent_project, Some(recent_projects[0].clone()));
-        assert!(shell_command_payload_for_menu_id("file.open_recent.1", &recent_projects).is_none());
-        assert!(shell_command_payload_for_menu_id("file.open_recent.foo", &recent_projects).is_none());
+        assert!(
+            shell_command_payload_for_menu_id("file.open_recent.1", &recent_projects).is_none()
+        );
+        assert!(
+            shell_command_payload_for_menu_id("file.open_recent.foo", &recent_projects).is_none()
+        );
     }
 
     #[test]
     fn default_project_directory_uses_relaystudio_under_documents() {
-        let directory = default_project_directory_for(Path::new("C:\\Users\\JeffHaynes\\Documents"));
+        let directory =
+            default_project_directory_for(Path::new("C:\\Users\\JeffHaynes\\Documents"));
         assert!(directory.ends_with("relaystudio"));
         assert!(directory.contains("Documents"));
     }
@@ -1403,6 +1722,7 @@ mod tests {
             url: url.to_string(),
             headers: HashMap::new(),
             body: None,
+            multipart_parts: None,
             timeout_ms: 30_000,
             http_version: None,
             ssl_certificate_verification: None,

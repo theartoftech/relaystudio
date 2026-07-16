@@ -145,6 +145,41 @@ requestBodies:
     fetchMock.mockRestore();
   });
 
+  it("imports binary multipart properties as empty local file fields", () => {
+    const parsed = parseOpenApiDocument({
+      openapi: "3.1.0",
+      info: { title: "Upload API" },
+      paths: {
+        "/assets": {
+          post: {
+            summary: "Upload asset",
+            requestBody: {
+              content: {
+                "multipart/form-data": {
+                  encoding: { asset: { contentType: "image/png" } },
+                  schema: {
+                    type: "object",
+                    properties: {
+                      description: { type: "string", example: "Profile image" },
+                      asset: { type: "string", format: "binary", example: "/Users/example/private.png" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }, "https://api.test/openapi.json");
+
+    const service = selectedOperationsToServices(parsed, ["post:/assets"], [])[0];
+    expect(service.body.fields).toEqual([
+      expect.objectContaining({ name: "description", value: "Profile image", valueType: "text" }),
+      expect.objectContaining({ name: "asset", value: "", valueType: "file", contentType: "image/png" })
+    ]);
+    expect(JSON.stringify(service)).not.toContain("private.png");
+  });
+
   it("rejects cross-origin, circular, and unreachable external references", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch");
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ openapi: "3.0.0", paths: { "/x": { get: { parameters: [{ $ref: "https://other.test/common.json#/id" }] } } } }), { status: 200 }));

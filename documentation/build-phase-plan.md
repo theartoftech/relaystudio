@@ -644,6 +644,42 @@ Implemented. See the Sprint Portfolio for the delivery summary.
 - Paid Apple or Microsoft signing/readiness programs.
 - Commercial store distribution or enterprise certification.
 
+## Sprint 17: Native Multipart File Workflows
+
+### Goals
+
+- Make imported multipart APIs usable for everyday developer file-upload workflows.
+- Keep file access explicit, local, bounded, and native-only.
+- Preserve existing `.restproj` compatibility and explicit OpenAPI operation selection.
+
+### Implemented Scope
+
+- Optional text/file kind and per-file media type on persisted form fields.
+- Safe OpenAPI binary-property mapping to empty file fields without imported local paths.
+- Mixed text/file multipart construction in the TypeScript request pipeline and Rust native transport.
+- Native local-file validation with a 25 MiB per-file limit, generated boundaries, and exact filename/media-type transmission.
+- Explicit browser-development guidance for local-file requests.
+- Unit, Playwright, persistence, and native wire coverage for the daily import-edit-save-reopen-send workflow.
+
+### Compatibility And Security
+
+- Optional field metadata preserves text-only form rows in existing projects.
+- Project files retain local paths, not file contents; enabled files are read only at send time.
+- URL-encoded file fields, empty or invalid paths, directories, oversized files, malformed parts, and manual multipart `Content-Type` headers fail actionably.
+- Credentials and local example paths remain excluded from imported definitions.
+- Tauri capabilities and CSP are unchanged.
+
+### Remaining Deferrals
+
+- Raw `application/octet-stream` and other binary request bodies.
+- Cross-origin external-reference opt-in or allowlisting.
+- File chooser and drag-and-drop affordances, streaming bodies, and configurable upload limits.
+- TRACE and CONNECT methods.
+
+### Non-Goals
+
+- Commercial signing, notarization, store submission, hosted collaboration, or backend persistence.
+
 ## Default Implementation Stack
 
 - Tauri desktop shell.

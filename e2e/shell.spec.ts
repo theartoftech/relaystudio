@@ -180,6 +180,72 @@ test("reviews external references and imports a PATCH form request", async ({ pa
   await expect(page.getByLabel("Form Fields value")).toHaveValue("Developer");
 });
 
+test("imports multipart file fields and explains the desktop send boundary", async ({ page }) => {
+  await page.route("https://swagger.test/upload-openapi.json", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({
+      openapi: "3.1.0",
+      info: { title: "Upload API" },
+      servers: [{ url: "https://upload.test" }],
+      paths: {
+        "/assets": {
+          post: {
+            summary: "Upload Asset",
+            requestBody: {
+              content: {
+                "multipart/form-data": {
+                  encoding: { asset: { contentType: "image/png" } },
+                  schema: {
+                    type: "object",
+                    properties: {
+                      description: { type: "string", example: "Profile image" },
+                      asset: { type: "string", format: "binary" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    })
+  }));
+  await page.goto("/");
+  await page.getByRole("button", { name: /Search commands/i }).click();
+  await page.getByRole("dialog", { name: "Command palette" }).getByRole("button", { name: "Import API Docs" }).click();
+  await page.getByLabel("Swagger UI or definition URL").fill("https://swagger.test/upload-openapi.json");
+  await page.getByRole("button", { name: "Inspect Definition" }).click();
+  await page.getByRole("button", { name: "Add and Save 1 Selected" }).click();
+  const saveDialog = page.getByRole("dialog", { name: "Save Project" });
+  await saveDialog.getByLabel("Project file path").fill("/private/tmp/e2e-multipart-upload.restproj");
+  await saveDialog.getByRole("button", { name: "Save Project" }).click();
+  await page.getByRole("button", { name: "Body" }).click();
+
+  await expect(page.getByLabel("Body content type")).toHaveValue("multipart/form-data");
+  await expect(page.getByLabel("Form Fields description type")).toHaveValue("text");
+  await expect(page.getByLabel("Form Fields asset type")).toHaveValue("file");
+  await expect(page.getByLabel("Form Fields asset content type")).toHaveValue("image/png");
+  await page.getByLabel("Form Fields asset value").fill("/private/tmp/profile.png");
+  await page.getByRole("button", { name: "Save *", exact: true }).click();
+  const updatedSaveDialog = page.getByRole("dialog", { name: "Save Project" });
+  await updatedSaveDialog.getByLabel("Project file path").fill("/private/tmp/e2e-multipart-upload.restproj");
+  await updatedSaveDialog.getByRole("button", { name: "Save Project" }).click();
+  await updatedSaveDialog.getByRole("button", { name: "Overwrite Project" }).click();
+  await expect(page.getByText("Project saved to /private/tmp/e2e-multipart-upload.restproj.")).toBeVisible();
+
+  await page.reload();
+  await page.getByRole("button", { name: /Search commands/i }).click();
+  await page.getByRole("dialog", { name: "Command palette" }).getByRole("button", { name: "Open Project" }).click();
+  const openDialog = page.getByRole("dialog", { name: "Open Project" });
+  await openDialog.getByLabel("Project file path").fill("/private/tmp/e2e-multipart-upload.restproj");
+  await openDialog.getByRole("button", { name: "Open Project" }).click();
+  await page.getByRole("button", { name: "POST Upload Asset" }).click();
+  await page.getByRole("button", { name: "Body" }).click();
+  await expect(page.getByLabel("Form Fields asset value")).toHaveValue("/private/tmp/profile.png");
+  await page.getByRole("button", { name: "Send Request" }).click();
+  await expect(page.getByLabel("Workbench").getByText(/Multipart file uploads require Relay Studio desktop mode/)).toBeVisible();
+});
+
 test("saves selected OpenAPI operations directly from import review", async ({ page }) => {
   await page.route("https://swagger.test/save-openapi.json", (route) => route.fulfill({
     contentType: "application/json",

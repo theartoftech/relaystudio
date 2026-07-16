@@ -823,6 +823,54 @@ Improve Relay Studio as a practical personal developer tool while continuing the
 - Changed behavior is verified interactively in Relay Studio.
 - Unsigned local installers remain reproducible when packaging changes are made.
 
+## Sprint 17: Native Multipart File Workflows
+
+### Objective
+
+Complete the multipart request workflow needed to import, organize, persist, and send APIs that combine ordinary form fields with local file parts, while preserving Relay Studio's local-first trust boundary.
+
+### Demonstrated Developer Workflow
+
+A developer imports an OpenAPI operation whose `multipart/form-data` schema includes text and binary properties, reviews the generated request, chooses local files, saves the project, reopens it, and sends the mixed multipart request from Relay Studio desktop.
+
+### Scope
+
+- Model multipart fields explicitly as text or file parts with an optional per-file media type.
+- Import OpenAPI `string` plus `binary` multipart properties as empty file fields without copying example filesystem paths.
+- Persist and reload typed multipart fields without invalidating projects created before Sprint 17.
+- Encode mixed text/file multipart requests in the Rust native transport.
+- Provide actionable validation for missing, invalid, directory, oversized, or malformed file parts and conflicting manual content-type headers.
+- Explain the browser-development boundary when a local file upload is attempted outside Tauri.
+- Cover import, editing, persistence, reload, browser failure, and native wire behavior with automated tests.
+
+### Safety Boundaries And Failure Modes
+
+- File contents are read only when the user sends an enabled multipart file part in desktop mode.
+- Individual local files are limited to 25 MiB before transmission.
+- Empty paths, missing files, directories, invalid media types, invalid part names or kinds, and simultaneous raw body plus multipart parts fail explicitly.
+- Relay Studio generates the multipart boundary; users cannot override `Content-Type` for generated multipart requests.
+- URL-encoded forms reject file fields, and browser mode rejects local-file multipart sends with desktop guidance.
+- Imported definitions never contribute example credentials or local file paths.
+
+### Explicit Non-Goals
+
+- Raw `application/octet-stream` or arbitrary binary request bodies.
+- Cross-origin OpenAPI `$ref` opt-in or allowlisting.
+- Persisting file contents inside `.restproj` files.
+- File pickers, drag-and-drop upload queues, streaming uploads, or configurable size limits.
+- Paid signing, notarization, marketplace submission, hosted persistence, or collaboration.
+
+### Acceptance Criteria
+
+- A mixed text/file multipart request persists and reloads with field kind, path, and media type intact.
+- An imported binary multipart property becomes an empty explicit file field and never adopts an example path from the definition.
+- Native execution sends the text value, filename, file media type, and exact file bytes to a controlled receiver.
+- Browser execution fails before Fetch with an actionable desktop-mode message.
+- Important malformed, missing, directory, and oversized file cases have typed Rust or TypeScript coverage.
+- Legacy text-only multipart projects continue to load and send unchanged.
+- TypeScript service coverage and Rust native coverage remain at least 90 percent.
+- The workflow is exercised in the running application and authoritative documentation is updated.
+
 ## Cross-Sprint Backlog
 
 ### Strategic OpenAPI Import Construction

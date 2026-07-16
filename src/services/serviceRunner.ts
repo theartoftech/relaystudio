@@ -27,6 +27,7 @@ export interface ExecutableRequest {
   headers: Record<string, string>;
   redactedHeaders: Record<string, string>;
   body: string | null;
+  multipartParts: MultipartPart[] | null;
   timeoutMs: number;
   httpVersion: HttpVersionPreference;
   sslCertificateVerification: boolean;
@@ -35,6 +36,13 @@ export interface ExecutableRequest {
   responseFormatDetection: ResponseFormatDetection;
   maxResponseTimeMs: number;
   proxy: ProjectSettings["proxy"];
+}
+
+export interface MultipartPart {
+  name: string;
+  value: string;
+  kind: "text" | "file";
+  contentType: string | null;
 }
 
 export interface TransportResponse {
@@ -176,6 +184,7 @@ export function buildExecutableRequest(service: ProjectService, environment: Pro
     headers,
     redactedHeaders,
     body: body.value,
+    multipartParts: body.multipartParts,
     timeoutMs: settings?.requestTimeoutMs ?? service.timeoutMs,
     httpVersion: settings?.httpVersion ?? "auto",
     sslCertificateVerification: settings?.sslCertificateVerification ?? true,
@@ -197,31 +206,40 @@ export function buildExecutableRequest(service: ProjectService, environment: Pro
   };
 }
 
-function buildRequestBody(service: ProjectService, environment: ProjectEnvironment): { value: string | null; contentType: string | null } {
+function buildRequestBody(service: ProjectService, environment: ProjectEnvironment): { value: string | null; contentType: string | null; multipartParts: MultipartPart[] | null } {
   const body = service.body;
-  if (body.contentType === "none") return { value: null, contentType: null };
+  if (body.contentType === "none") return { value: null, contentType: null, multipartParts: null };
   if (body.contentType === "application/json" || body.contentType === "text/plain") {
     return {
       value: body.raw.trim() ? resolveTemplate(body.raw, environment, false) : null,
-      contentType: body.contentType
+      contentType: body.contentType,
+      multipartParts: null
     };
   }
   const fields = (body.fields ?? []).filter((field) => field.enabled);
   if (fields.some((field) => !field.name.trim())) throw new Error("Enabled form fields require a name.");
   const resolved = fields.map((field) => ({
     name: field.name,
-    value: resolveTemplate(field.value, environment, false)
+    value: resolveTemplate(field.value, environment, false),
+    kind: field.valueType === "file" ? "file" as const : "text" as const,
+    contentType: field.contentType?.trim() || null
   }));
   if (body.contentType === "application/x-www-form-urlencoded") {
+    if (resolved.some((field) => field.kind === "file")) throw new Error("File fields require a multipart/form-data body.");
     const params = new URLSearchParams();
     resolved.forEach((field) => params.append(field.name, field.value));
-    return { value: params.toString() || null, contentType: body.contentType };
+    return { value: params.toString() || null, contentType: body.contentType, multipartParts: null };
   }
-  const boundary = `relay-studio-${stableBoundary(resolved)}`;
+  if (resolved.some((field) => field.kind === "file")) {
+    if (resolved.some((field) => field.kind === "file" && !field.value.trim())) throw new Error("Enabled multipart file fields require a local file path.");
+    resolved.forEach((field) => escapeMultipartName(field.name));
+    return { value: null, contentType: null, multipartParts: resolved };
+  }
+  const boundary = `relay-studio-${stableBoundary(resolved.map(({ name, value }) => ({ name, value })))}`;
   const value = resolved.length
     ? `${resolved.map((field) => `--${boundary}\r\nContent-Disposition: form-data; name="${escapeMultipartName(field.name)}"\r\n\r\n${field.value}\r\n`).join("")}--${boundary}--\r\n`
     : null;
-  return { value, contentType: `${body.contentType}; boundary=${boundary}` };
+  return { value, contentType: `${body.contentType}; boundary=${boundary}`, multipartParts: null };
 }
 
 function stableBoundary(fields: Array<{ name: string; value: string }>): string {
@@ -293,6 +311,9 @@ export async function defaultHttpTransport(request: ExecutableRequest, signal?: 
 }
 
 export async function fetchHttpTransport(request: ExecutableRequest, signal?: AbortSignal): Promise<TransportResponse> {
+  if (request.multipartParts) {
+    throw new Error("Multipart file uploads require Relay Studio desktop mode. Open this project in the desktop app to send local files.");
+  }
   const controller = new AbortController();
   const started = performance.now();
   const timeout = window.setTimeout(() => controller.abort(), request.timeoutMs);

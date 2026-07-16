@@ -11,12 +11,16 @@ describe("project model", () => {
       body: {
         contentType: "multipart/form-data" as const,
         raw: "",
-        fields: [{ id: "description", name: "description", value: "sample", enabled: true }]
+        fields: [
+          { id: "description", name: "description", value: "sample", enabled: true, valueType: "text" as const },
+          { id: "asset", name: "asset", value: "/private/tmp/asset.png", enabled: true, valueType: "file" as const, contentType: "image/png" }
+        ]
       }
     };
 
     expect(patched.method).toBe("PATCH");
-    expect(patched.body.fields).toHaveLength(1);
+    expect(patched.body.fields).toHaveLength(2);
+    expect(patched.body.fields[1]).toMatchObject({ valueType: "file", contentType: "image/png" });
   });
   it("creates a versioned sample project with REST request designer fields", () => {
     const project = createSampleProject("2026-06-21T00:00:00.000Z");

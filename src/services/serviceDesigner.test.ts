@@ -179,6 +179,30 @@ describe("service designer helpers", () => {
     ]);
   });
 
+  it("validates multipart file paths and rejects file fields in URL-encoded bodies", () => {
+    const missingPath = createService({
+      body: {
+        contentType: "multipart/form-data",
+        raw: "",
+        fields: [{ id: "upload", name: "upload", value: "", enabled: true, valueType: "file" }]
+      }
+    });
+    const incompatible = createService({
+      body: {
+        contentType: "application/x-www-form-urlencoded",
+        raw: "",
+        fields: [{ id: "upload", name: "upload", value: "/private/tmp/file.txt", enabled: true, valueType: "file" }]
+      }
+    });
+
+    expect(validateService(missingPath, qa)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ field: "body.fields", message: "Enabled multipart file fields require a local file path." })
+    ]));
+    expect(validateService(incompatible, qa)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ field: "body.fields", message: "File fields require a multipart/form-data body." })
+    ]));
+  });
+
   it("formats and minifies JSON bodies", () => {
     expect(formatJsonBody(`{"a":1}`)).toBe("{\n  \"a\": 1\n}");
     expect(minifyJsonBody(`{\n  "a": 1\n}`)).toBe("{\"a\":1}");

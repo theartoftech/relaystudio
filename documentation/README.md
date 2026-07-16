@@ -2,7 +2,7 @@
 
 Relay Studio uses a curated documentation library instead of preserving every historical sprint file. Word documents are authoritative for onboarding, architecture narrative, product handoff, UML guidance, sprint summaries, consolidated QA, and release operations. Markdown remains authoritative for build criteria, engineering policy, design constraints, and operative test procedures.
 
-The library reflects Sprint 16 import hardening, form bodies, additional developer HTTP methods, saved-response comparison, and expanded diagnostics. Multipart support is intentionally limited to text fields.
+The library reflects Sprint 17 native multipart file workflows in addition to Sprint 16 import hardening, expanded HTTP methods, saved-response comparison, and diagnostics. Relay Studio now imports, persists, and sends mixed text/file multipart requests in desktop mode; raw binary bodies remain deferred.
 
 ## Word Library
 

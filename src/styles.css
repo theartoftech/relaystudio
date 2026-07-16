@@ -1050,6 +1050,12 @@ kbd {
   align-items: center;
 }
 
+.form-field-row {
+  grid-template-columns: 28px minmax(110px, 0.65fr) 76px minmax(170px, 1fr) minmax(150px, 0.7fr) auto;
+}
+
+.form-content-type-spacer { min-width: 0; }
+
 .kv-row input[type="checkbox"] {
   width: 16px;
   height: 16px;
