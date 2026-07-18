@@ -680,6 +680,49 @@ Implemented. See the Sprint Portfolio for the delivery summary.
 
 - Commercial signing, notarization, store submission, hosted collaboration, or backend persistence.
 
+## Sprint 18: Code, Architecture, And Security Review
+
+### Goals
+
+- Establish a reproducible quality and security baseline for the completed personal developer tool.
+- Validate code and architectural conformance across the React/TypeScript, Rust, persistence, import, execution, CI, and packaging boundaries.
+- Remediate confirmed high-value findings without broadening product scope or weakening existing controls.
+
+### Review Scope
+
+- Code correctness, strict typing, explicit errors, maintainability, duplication, dead paths, test quality, and coverage integrity.
+- Architecture ownership, dependency direction, trust boundaries, native command registration, schema compatibility, and documented-versus-implemented deviations.
+- Threat model, untrusted inputs, filesystem and HTTP access, redaction, diagnostics, secrets, dependencies, CI, Tauri capabilities, CSP, and packaged resources.
+- Static, automated, interactive, live REST, and packaged-platform evidence applicable to the reviewed commit.
+
+### Deliverables
+
+- Redacted code/architecture/security review report with exact scope, commit, methods, tools, environments, exclusions, and limitations.
+- Validated finding register with severity, evidence, impact, disposition, owner, target milestone, and retest trigger.
+- Regression tests and targeted fixes for confirmed defects selected for remediation.
+- Updated threat model, architecture narrative/UML where material deviations are found, and final readiness decision.
+
+### Exit Criteria
+
+- No unresolved critical or high findings.
+- Scanner candidates are validated before being reported as defects; false positives and accepted lower-risk items have evidence-based dispositions.
+- Every remediated application defect has a failing-before/passing-after regression test and passes representative automated and interactive verification.
+- TypeScript service and Rust native coverage remain at least 90 percent, and all existing quality, security, dependency, license, secret, build, and packaging gates applicable to the reviewed commit pass.
+- The committed report and evidence contain no credentials, local acceptance configuration, sensitive response bodies, or unsafe proof-of-concept data.
+
+### Important Failure Modes
+
+- Reviewing only the frontend or relying on scanner output without tracing source to user impact.
+- Hiding findings through broad refactors, silent fallbacks, exclusions, reduced coverage, or weakened CSP/capabilities.
+- Treating unavailable protected or platform-specific tests as passing evidence.
+- Claiming certification or vulnerability-free status from an internal review.
+
+### Non-Goals
+
+- New product features unrelated to a confirmed finding.
+- Paid penetration testing, compliance certification, commercial signing, notarization, marketplace submission, hosted persistence, or collaboration.
+- Large architectural rewrites without separate approval and migration planning.
+
 ## Default Implementation Stack
 
 - Tauri desktop shell.

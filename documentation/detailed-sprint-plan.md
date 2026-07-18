@@ -20,6 +20,7 @@
 | Platform Compliance | 9A-10B | Shared, macOS, and Windows shell work to meet platform design guidance, simplify command surfaces, and add platform-specific verification |
 | Enterprise Readiness | 11-13 | Role/error coverage, hardening, coverage gates, security checks, and live REST validation |
 | Beta Packaging | 14 | Installable macOS, Windows, and Linux beta builds |
+| Product Maturity | 15-18 | Authoritative documentation, developer workflow improvements, native multipart uploads, and evidence-backed code, architecture, and security review |
 
 ## Sprint 0: UX Intent And Mockup Review
 
@@ -870,6 +871,65 @@ A developer imports an OpenAPI operation whose `multipart/form-data` schema incl
 - Legacy text-only multipart projects continue to load and send unchanged.
 - TypeScript service coverage and Rust native coverage remain at least 90 percent.
 - The workflow is exercised in the running application and authoritative documentation is updated.
+
+## Sprint 18: Code, Architecture, And Security Review
+
+### Objective
+
+Establish an evidence-backed quality and security baseline for the completed personal developer tool, remediate confirmed high-value findings, and leave a prioritized, reproducible record for future maintenance. This sprint reviews the current product; it does not expand Relay Studio into a commercial or hosted offering.
+
+### Demonstrated Maintainer Workflow
+
+A maintainer checks out the reviewed commit, runs the documented automated and interactive review procedures, traces every confirmed finding to code and an affected trust boundary, reproduces it with the smallest useful test, verifies the remediation, and records any accepted deferral with severity, rationale, owner, and retest condition.
+
+### Scope
+
+- Review TypeScript, React, and Rust code for correctness, strict typing, error handling, maintainability, duplication, dead paths, boundary validation, and test quality.
+- Review component ownership, service boundaries, native command boundaries, persistence/schema compatibility, request execution, OpenAPI import, flow execution, and packaging architecture against the documented design.
+- Update the system threat model and inspect untrusted OpenAPI/project/response inputs, filesystem access, native HTTP, secret handling, redaction, diagnostics, dependencies, CI secrets, Tauri capabilities, CSP, and packaged resources.
+- Run static analysis, dependency and license checks, secret scanning, coverage gates, browser/native tests, live REST acceptance, and packaged-platform checks applicable to the reviewed commit.
+- Validate candidate findings before remediation; add a failing regression test for confirmed application defects, implement the smallest typed fix, and repeat the relevant verification loop.
+- Produce a final review report and prioritized remediation register containing evidence, severity, affected files/components, disposition, and verification results.
+
+### Review Method And Evidence
+
+1. Freeze and record the commit, toolchain versions, operating systems, configurations, exclusions, and review scope.
+2. Map entry points, data flows, trust boundaries, privileged native commands, persistence formats, and security controls before judging findings.
+3. Perform separate code, architecture, and security discovery passes so one perspective does not substitute for another.
+4. Reproduce and validate each candidate; discard false positives with a concise evidence-based explanation.
+5. Classify confirmed findings as critical, high, medium, low, or informational and record user impact plus exploitability or failure likelihood.
+6. Remediate critical and high findings before sprint closure. Defer lower-severity findings only with rationale, owner, target milestone, and a condition that triggers reassessment.
+7. Re-run targeted tests, representative suites, coverage/security gates, the running application workflow, runtime-log inspection, and relevant packaged-platform checks.
+8. Publish a redacted final report that contains no credentials, local secrets, sensitive response bodies, or unsafe proof-of-concept material.
+
+### Important Failure Modes
+
+- Treating scanner output or speculative concerns as confirmed defects without source-to-impact validation.
+- Reviewing only frontend code while ignoring Rust commands, CI, installers, project files, and external input boundaries.
+- Refactoring broadly during review and obscuring whether a security or correctness fix actually works.
+- Reducing coverage, weakening CSP/capabilities, bypassing redaction, or adding silent fallback to make a finding disappear.
+- Logging secrets or committing local acceptance configuration, response data, proof-of-concept credentials, or generated reports containing sensitive paths.
+- Declaring success while critical/high findings, unexplained architecture deviations, failing gates, or untested remediations remain.
+
+### Explicit Non-Goals
+
+- Paid penetration testing, formal certification, compliance attestation, or a claim that Relay Studio is vulnerability-free.
+- Commercial signing, notarization, marketplace submission, enterprise deployment certification, or public update infrastructure.
+- Hosted collaboration, cloud persistence, a backend service, or feature work unrelated to a confirmed review finding.
+- Large architectural rewrites without a separately approved product decision and migration plan.
+
+### Acceptance Criteria
+
+- The review records the exact commit, scope, tools, environments, trust boundaries, exclusions, and limitations needed for another maintainer to reproduce it.
+- Code review covers TypeScript/React and Rust production paths plus tests, build scripts, and error/redaction behavior; actionable findings include file-level evidence.
+- Architecture review reconciles implemented dependencies and data flows with the architecture manual and UML, documenting every material deviation and its disposition.
+- Security review updates the threat model and covers untrusted inputs, filesystem/network/native boundaries, secrets/redaction, persistence, CI, dependencies, Tauri capabilities, CSP, and packaging.
+- Every confirmed remediated application defect begins with a failing regression test that fails for the intended reason and passes after the smallest correct fix.
+- No unresolved critical or high finding remains. Any lower-severity deferral has severity, impact, rationale, owner, target milestone, and retest trigger.
+- TypeScript service and Rust native coverage remain at least 90 percent; type checking, lint, tests, builds, dependency/license checks, secret scanning, Clippy, and cargo-deny pass.
+- Live REST acceptance and packaged-platform checks are run when their protected configuration and platform are applicable; skips and limitations are explicit and are not represented as passing evidence.
+- Changed behavior is exercised interactively in Relay Studio, relevant edge cases are attempted, and browser/Rust runtime logs contain no unexplained errors or secret leakage.
+- The redacted final report, remediation register, updated architecture/security documentation, and final readiness decision are committed without credentials or local-only data.
 
 ## Cross-Sprint Backlog
 

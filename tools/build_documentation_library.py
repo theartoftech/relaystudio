@@ -507,7 +507,7 @@ def configure_document(doc: Document, short_title: str) -> None:
     core.keywords = "Relay Studio, documentation, developer tooling"
 
 
-def add_cover(doc: Document, title: str, subtitle: str, audience: str) -> None:
+def add_cover(doc: Document, title: str, subtitle: str, audience: str, version_line: str = "Version 1.2 | Sprint 17 | July 2026") -> None:
     doc.add_paragraph("RELAY STUDIO", style="Heading 3").alignment = WD_ALIGN_PARAGRAPH.CENTER
     for _ in range(4):
         doc.add_paragraph()
@@ -519,7 +519,7 @@ def add_cover(doc: Document, title: str, subtitle: str, audience: str) -> None:
     p = doc.add_paragraph(f"Audience: {audience}")
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p.runs[0].font.color.rgb = RGBColor.from_string(MUTED)
-    p = doc.add_paragraph("Version 1.2 | Sprint 17 | July 2026")
+    p = doc.add_paragraph(version_line)
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p.runs[0].font.color.rgb = RGBColor.from_string(MUTED)
     doc.add_page_break()
@@ -541,12 +541,12 @@ def add_callout(doc: Document, label: str, text: str, fill: str = LIGHT_BLUE) ->
     p.add_run(text)
 
 
-def add_bullets(doc: Document, items: Iterable[str]) -> None:
+def add_bullets(doc: Document, items: Iterable[str], space_after: float = 4) -> None:
     for item in items:
         p = doc.add_paragraph(style="List Bullet")
         p.paragraph_format.left_indent = Inches(0.375)
         p.paragraph_format.first_line_indent = Inches(-0.188)
-        p.paragraph_format.space_after = Pt(4)
+        p.paragraph_format.space_after = Pt(space_after)
         p.add_run(item)
 
 
@@ -663,13 +663,15 @@ def add_table(doc: Document, headers: Sequence[str], rows: Sequence[Sequence[str
     doc.add_paragraph().paragraph_format.space_after = Pt(2)
 
 
-def build_manual(filename: str, title: str, subtitle: str, audience: str, sections: Sequence[SectionSpec], callout: str) -> Path:
+def build_manual(filename: str, title: str, subtitle: str, audience: str, sections: Sequence[SectionSpec], callout: str, version_line: str = "Version 1.2 | Sprint 17 | July 2026", page_break_after_contents: bool = False, contents_space_after: float = 4) -> Path:
     doc = Document()
     configure_document(doc, title)
-    add_cover(doc, title, subtitle, audience)
+    add_cover(doc, title, subtitle, audience, version_line)
     add_callout(doc, "How to use this guide", callout)
     doc.add_heading("Contents", level=1)
-    add_bullets(doc, (section.heading for section in sections))
+    add_bullets(doc, (section.heading for section in sections), space_after=contents_space_after)
+    if page_break_after_contents:
+        doc.add_page_break()
     for section in sections:
         add_section(doc, section)
     path = WORD_DIR / filename
@@ -941,12 +943,13 @@ def sprint_sections() -> tuple[SectionSpec, ...]:
         ("Sprint 15", "Creates the authoritative Word library, editable Visio UML atlas, onboarding/debugging guide, and curated documentation migration."),
         ("Sprint 16", "Implemented bounded external references, safe examples, additional HTTP methods and form bodies, saved-response comparison, import review, diagnostic inventory, and a Body-panel layout fix."),
         ("Sprint\u00a017", "Completed native multipart file workflows: safe OpenAPI binary-field import, typed text/file form rows, project persistence, browser boundary guidance, bounded local-file validation, and exact mixed-part transmission."),
+        ("Sprint\u00a018 (planned)", "Review code quality, architectural conformance, and security across frontend, native, persistence, import, execution, CI, and packaging boundaries; validate findings before remediation and publish a redacted readiness record."),
     )
     for name, summary in sprint_summaries:
         bullets = (
             ("Status: planned; no implementation evidence is claimed.", "Detailed objectives and acceptance criteria remain in the retained sprint plans.")
             if "(planned)" in name
-            else ("Status and detailed acceptance evidence are summarized from the former sprint-specific records.", "Current behavior must be verified through the Test and QA Manual and retained directives.")
+            else ()
         )
         sections.append(SectionSpec(name, (summary,), bullets=bullets))
     sections.append(SectionSpec("Standing Product Decisions", bullets=("Local-first developer tool; no hosted account required.", "Explicit operation selection during API import.", "Strict typing, explicit errors, test-driven changes, and at least 90 percent native/server coverage.", "No committed secrets and shared redaction across every output surface.", "Unsigned personal-use packages; no paid Apple or Microsoft readiness programs.", "Every application change requires automated and interactive verification.")))
@@ -1063,6 +1066,9 @@ def main() -> None:
         "Product managers, maintainers, and technical leadership",
         sprint_sections(),
         "This is a curated history. Git retains deleted detail; active criteria live in the retained Markdown directives and current manuals.",
+        "Version 1.3 | Sprint 18 Plan | July 2026",
+        True,
+        2,
     )
     build_manual(
         "Relay-Studio-Test-and-QA-Manual.docx",
