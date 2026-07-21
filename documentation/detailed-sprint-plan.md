@@ -917,6 +917,8 @@ Status: Completed July 20, 2026. See the [Sprint 18C closure report](reviews/spr
 
 #### Sprint 18D: Execution Integrity And Resource Bounds
 
+Status: Completed July 21, 2026. See the [Sprint 18D closure report](reviews/sprint-18d/closure-report.md) and updated [remediation register](reviews/sprint-18a/remediation-register.md). All six assigned findings are fixed and regression-tested with bounded native HTTP/project reads, bounded OpenAPI graph resolution and saved-response comparison, explicit success/failure branch semantics, and runtime-only flow captures.
+
 - Prevent flow response mappings from silently changing later credential destinations and prevent secret captures from entering persistable project state.
 - Validate and correct success/failure edge semantics.
 - Enforce explicit byte, document, depth, breadth, and output limits for OpenAPI graphs and saved-response comparison.

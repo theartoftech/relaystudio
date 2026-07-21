@@ -1,5 +1,6 @@
 import { compareSavedResponses, comparisonToExecutedResponse } from "./responseComparison";
 import type { SavedResponseArtifact } from "./savedResponses";
+import { MAX_COMPARISON_BODY_BYTES, MAX_COMPARISON_DIFF_ENTRIES } from "./resourceLimits";
 
 function artifact(id: string, body: string, contentType = "application/json", status = 200): SavedResponseArtifact {
   return {
@@ -66,5 +67,28 @@ describe("saved response comparison", () => {
     expect(compareSavedResponses(artifact("before", "{bad"), artifact("after", "{}"))).toMatchObject({ kind: "raw" });
     expect(compareSavedResponses(artifact("before", "one", "text/plain"), artifact("after", "one\ntwo", "text/plain")).bodyChanges[0]).toMatchObject({ type: "added" });
     expect(compareSavedResponses(artifact("before", "one\ntwo", "text/plain"), artifact("after", "one", "text/plain")).bodyChanges[0]).toMatchObject({ type: "removed" });
+  });
+
+  it("rejects oversized bodies and diff amplification before comparison", () => {
+    const boundary = "x".repeat(MAX_COMPARISON_BODY_BYTES);
+    expect(() => compareSavedResponses(artifact("before", boundary, "text/plain"), artifact("after", boundary, "text/plain"))).not.toThrow();
+    expect(() => compareSavedResponses(artifact("before", `${boundary}x`, "text/plain"), artifact("after", "ok", "text/plain"))).toThrow("Saved response comparison body exceeds");
+
+    const manyLines = Array.from({ length: MAX_COMPARISON_DIFF_ENTRIES + 1 }, (_, index) => `line-${index}`).join("\n");
+    expect(() => compareSavedResponses(artifact("before", manyLines, "text/plain"), artifact("after", "", "text/plain"))).toThrow("diff output exceeds");
+
+    const manyChangesBefore = Object.fromEntries(Array.from({ length: MAX_COMPARISON_DIFF_ENTRIES + 1 }, (_, index) => [`field${index}`, index]));
+    const manyChangesAfter = Object.fromEntries(Array.from({ length: MAX_COMPARISON_DIFF_ENTRIES + 1 }, (_, index) => [`field${index}`, index + 1]));
+    expect(() => compareSavedResponses(artifact("before", JSON.stringify(manyChangesBefore)), artifact("after", JSON.stringify(manyChangesAfter)))).toThrow("diff output exceeds");
+  });
+
+  it("rejects deeply nested JSON before recursive comparison", () => {
+    let before = "0";
+    let after = "1";
+    for (let index = 0; index < 65; index += 1) {
+      before = `{"nested":${before}}`;
+      after = `{"nested":${after}}`;
+    }
+    expect(() => compareSavedResponses(artifact("before", before), artifact("after", after))).toThrow("JSON depth exceeds");
   });
 });

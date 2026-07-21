@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { createSampleProject } from "./projectModel";
 import { createProjectPersistence } from "./projectPersistence";
 import { prepareProjectForExport } from "./projectSchema";
+import { MAX_PROJECT_FILE_BYTES } from "../services/resourceLimits";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn()
@@ -123,6 +124,13 @@ describe("browser fallback project persistence", () => {
     await expect(persistence.renameProject({ path: "/tmp/project.restproj", name: "" })).rejects.toThrow("Project name is required.");
     await expect(persistence.openProject({ path: "/tmp/missing.restproj" })).rejects.toThrow("Project file was not found");
     await expect(persistence.projectExists("/tmp/missing.restproj")).resolves.toBe(false);
+  });
+
+  it("rejects oversized browser project records before JSON parsing", async () => {
+    const persistence = await createProjectPersistence();
+    const path = "/tmp/oversized.restproj";
+    localStorage.setItem(`relay-studio:project:${path}`, "x".repeat(MAX_PROJECT_FILE_BYTES + 1));
+    await expect(persistence.openProject({ path })).rejects.toThrow("Project file exceeds");
   });
 });
 

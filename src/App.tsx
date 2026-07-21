@@ -1255,9 +1255,10 @@ export function App() {
       flows: current.flows.map((flow) => (
         flow.id === activeFlow.id ? result.flow : flow
       )),
-      environments: current.environments.map((item) => (
-        item.id === activeEnvironment.id ? result.environment : item
-      ))
+      // Flow mappings live only in the cloned runtime environment. Persisting
+      // result.environment here would write captured credentials into the
+      // project file after a run.
+      environments: current.environments
     }));
     setProjectDirty(true);
     setTabs((current) => current.map((tab) => (tab.id === activeTabId ? { ...tab, dirty: true } : tab)));

@@ -754,6 +754,8 @@ Status: Completed July 20, 2026. Eight assigned findings are closed. Persisted m
 
 ## Sprint 18D: Execution Integrity And Resource Bounds
 
+Status: Completed July 21, 2026. RS18A-002, RS18A-009, RS18A-016, RS18A-018, RS18A-022, and RS18A-023 are fixed and verified. Native and browser response bodies, project reads, OpenAPI documents/graphs, and saved-response comparisons fail early at documented byte/node/depth/breadth/output limits; flow success/failure edges follow predecessor outcomes; and flow runtime captures are excluded from persistable project environments.
+
 ### Goals
 
 - Prevent response mappings or captured values from silently changing later credential destinations or persisting runtime secrets.

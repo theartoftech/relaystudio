@@ -2,11 +2,18 @@ import { parse as parseYaml } from "yaml";
 import type { AuthProfile, HttpMethod, KeyValueRow, ProjectService } from "../project/projectModel";
 import { isSecretKey } from "../lib/redaction";
 import { createService } from "./serviceDesigner";
+import {
+  assertUtf8ByteLimit,
+  MAX_OPENAPI_DOCUMENT_BYTES,
+  MAX_OPENAPI_EXTERNAL_DOCUMENTS,
+  MAX_OPENAPI_GRAPH_NODES,
+  MAX_OPENAPI_OBJECT_KEYS,
+  MAX_OPENAPI_REFERENCE_DEPTH,
+  MAX_OPENAPI_TOTAL_BYTES
+} from "./resourceLimits";
 
 type JsonObject = Record<string, unknown>;
 const methods = ["get", "post", "put", "patch", "delete", "head", "options"] as const;
-const MAX_EXTERNAL_DOCUMENTS = 20;
-const MAX_REFERENCE_DEPTH = 32;
 
 export interface OpenApiOperation {
   id: string;
@@ -66,6 +73,7 @@ export function discoverDefinitionUrl(html: string, pageUrl: string): string {
 }
 
 export function parseOpenApiText(text: string, definitionUrl: string): ParsedOpenApi {
+  assertUtf8ByteLimit(text, MAX_OPENAPI_DOCUMENT_BYTES, "OpenAPI definition");
   return parseOpenApiDocument(parseDocumentText(text), definitionUrl);
 }
 
@@ -84,6 +92,7 @@ function parseDocumentText(text: string): unknown {
 }
 
 export function parseOpenApiDocument(value: unknown, definitionUrl: string, externalDocumentCount = 0): ParsedOpenApi {
+  assertOpenApiGraphLimits(value);
   const root = object(value, "OpenAPI definition must be an object.");
   const paths = object(root.paths, "OpenAPI definition is missing paths.");
   const operations: OpenApiOperation[] = [];
@@ -187,12 +196,14 @@ export async function loadDiscoveredOpenApiDefinition(discovery: SwaggerUiDefini
 }
 
 async function loadResolvedDocument(text: string, definitionUrl: string): Promise<ParsedOpenApi> {
+  assertUtf8ByteLimit(text, MAX_OPENAPI_DOCUMENT_BYTES, "OpenAPI definition");
+  const state: OpenApiResolutionState = { totalBytes: new TextEncoder().encode(text).byteLength, nodes: 0 };
   const root = object(parseDocumentText(text), "OpenAPI definition must be an object.");
   const documents = new Map<string, LoadedOpenApiDocument>([[withoutFragment(definitionUrl), {
     document: root,
     finalUrl: withoutFragment(definitionUrl)
   }]]);
-  const resolved = await resolveDocumentValue(root, withoutFragment(definitionUrl), definitionUrl, documents, [], 0);
+  const resolved = await resolveDocumentValue(root, withoutFragment(definitionUrl), definitionUrl, documents, [], 0, state);
   return parseOpenApiDocument(resolved, definitionUrl, documents.size - 1);
 }
 
@@ -202,11 +213,15 @@ async function resolveDocumentValue(
   rootDefinitionUrl: string,
   documents: Map<string, LoadedOpenApiDocument>,
   stack: string[],
-  depth: number
+  depth: number,
+  state: OpenApiResolutionState
 ): Promise<unknown> {
-  if (depth > MAX_REFERENCE_DEPTH) throw new Error(`OpenAPI reference depth exceeds the safe limit of ${MAX_REFERENCE_DEPTH}.`);
+  if (depth > MAX_OPENAPI_REFERENCE_DEPTH) throw new Error(`OpenAPI reference depth exceeds the safe limit of ${MAX_OPENAPI_REFERENCE_DEPTH}.`);
+  state.nodes += 1;
+  if (state.nodes > MAX_OPENAPI_GRAPH_NODES) throw new Error(`OpenAPI graph node limit of ${MAX_OPENAPI_GRAPH_NODES} was exceeded. Reduce the definition or split it into smaller documents.`);
   if (Array.isArray(value)) {
-    return Promise.all(value.map((item) => resolveDocumentValue(item, documentUrl, rootDefinitionUrl, documents, stack, depth + 1)));
+    if (value.length > MAX_OPENAPI_OBJECT_KEYS) throw new Error(`OpenAPI graph breadth exceeds the safe limit of ${MAX_OPENAPI_OBJECT_KEYS} entries.`);
+    return Promise.all(value.map((item) => resolveDocumentValue(item, documentUrl, rootDefinitionUrl, documents, stack, depth + 1, state)));
   }
   const item = optionalObject(value);
   if (!item) return value;
@@ -221,8 +236,12 @@ async function resolveDocumentValue(
     if (stack.includes(referenceKey)) throw new Error(`Circular OpenAPI reference detected at ${referenceKey}.`);
     let targetDocument = documents.get(targetDocumentUrl);
     if (!targetDocument) {
-      if (documents.size >= MAX_EXTERNAL_DOCUMENTS) throw new Error(`OpenAPI import exceeds the safe limit of ${MAX_EXTERNAL_DOCUMENTS} referenced documents.`);
+      if (documents.size >= MAX_OPENAPI_EXTERNAL_DOCUMENTS) throw new Error(`OpenAPI import exceeds the safe limit of ${MAX_OPENAPI_EXTERNAL_DOCUMENTS} referenced documents.`);
       const external = await fetchText(targetDocumentUrl);
+      const externalBytes = new TextEncoder().encode(external.body).byteLength;
+      assertUtf8ByteLimit(external.body, MAX_OPENAPI_DOCUMENT_BYTES, `Referenced OpenAPI document ${targetDocumentUrl}`);
+      state.totalBytes += externalBytes;
+      if (state.totalBytes > MAX_OPENAPI_TOTAL_BYTES) throw new Error(`OpenAPI import exceeds the aggregate safe limit of ${Math.round(MAX_OPENAPI_TOTAL_BYTES / (1024 * 1024))} MiB. Reduce the definition or split it into smaller documents.`);
       targetDocument = {
         document: object(parseDocumentText(external.body), `Referenced OpenAPI document must be an object: ${targetDocumentUrl}.`),
         finalUrl: withoutFragment(external.finalUrl)
@@ -230,16 +249,42 @@ async function resolveDocumentValue(
       documents.set(targetDocumentUrl, targetDocument);
     }
     const target = resolveJsonPointer(targetDocument.document, targetUrl.hash, referenceKey);
-    const resolvedTarget = await resolveDocumentValue(target, targetDocument.finalUrl, rootDefinitionUrl, documents, [...stack, referenceKey], depth + 1);
+    const resolvedTarget = await resolveDocumentValue(target, targetDocument.finalUrl, rootDefinitionUrl, documents, [...stack, referenceKey], depth + 1, state);
     const siblings = Object.fromEntries(Object.entries(item).filter(([key]) => key !== "$ref"));
     return optionalObject(resolvedTarget)
-      ? resolveDocumentValue({ ...resolvedTarget as JsonObject, ...siblings }, targetDocumentUrl, rootDefinitionUrl, documents, [...stack, referenceKey], depth + 1)
+      ? resolveDocumentValue({ ...resolvedTarget as JsonObject, ...siblings }, targetDocumentUrl, rootDefinitionUrl, documents, [...stack, referenceKey], depth + 1, state)
       : resolvedTarget;
   }
-  return Object.fromEntries(await Promise.all(Object.entries(item).map(async ([key, nested]) => [
+  const entries = Object.entries(item);
+  if (entries.length > MAX_OPENAPI_OBJECT_KEYS) throw new Error(`OpenAPI graph breadth exceeds the safe limit of ${MAX_OPENAPI_OBJECT_KEYS} entries.`);
+  return Object.fromEntries(await Promise.all(entries.map(async ([key, nested]) => [
     key,
-    await resolveDocumentValue(nested, documentUrl, rootDefinitionUrl, documents, stack, depth + 1)
+    await resolveDocumentValue(nested, documentUrl, rootDefinitionUrl, documents, stack, depth + 1, state)
   ])));
+}
+
+interface OpenApiResolutionState {
+  totalBytes: number;
+  nodes: number;
+}
+
+function assertOpenApiGraphLimits(value: unknown): void {
+  const stack: Array<{ value: unknown; depth: number }> = [{ value, depth: 0 }];
+  let nodes = 0;
+  while (stack.length) {
+    const current = stack.pop() as { value: unknown; depth: number };
+    nodes += 1;
+    if (nodes > MAX_OPENAPI_GRAPH_NODES) throw new Error(`OpenAPI graph node limit of ${MAX_OPENAPI_GRAPH_NODES} was exceeded. Reduce the definition or split it into smaller documents.`);
+    if (current.depth > MAX_OPENAPI_REFERENCE_DEPTH) throw new Error(`OpenAPI graph depth exceeds the safe limit of ${MAX_OPENAPI_REFERENCE_DEPTH}. Reduce the definition or split it into smaller documents.`);
+    if (Array.isArray(current.value)) {
+      if (current.value.length > MAX_OPENAPI_OBJECT_KEYS) throw new Error(`OpenAPI graph breadth exceeds the safe limit of ${MAX_OPENAPI_OBJECT_KEYS} entries.`);
+      current.value.forEach((item) => stack.push({ value: item, depth: current.depth + 1 }));
+    } else if (current.value !== null && typeof current.value === "object") {
+      const entries = Object.entries(current.value as JsonObject);
+      if (entries.length > MAX_OPENAPI_OBJECT_KEYS) throw new Error(`OpenAPI graph breadth exceeds the safe limit of ${MAX_OPENAPI_OBJECT_KEYS} entries.`);
+      entries.forEach(([, item]) => stack.push({ value: item, depth: current.depth + 1 }));
+    }
+  }
 }
 
 function resolveJsonPointer(document: JsonObject, hash: string, reference: string): unknown {
@@ -264,6 +309,7 @@ async function fetchText(url: string): Promise<{ body: string; contentType: stri
     });
     if (response.status < 200 || response.status >= 300) throw new Error(`OpenAPI URL returned HTTP ${response.status} ${response.statusText}.`);
     assertOpenApiFinalOrigin(url, response.finalUrl);
+    assertUtf8ByteLimit(response.body, MAX_OPENAPI_DOCUMENT_BYTES, "OpenAPI document");
     return { body: response.body, contentType: header(response.headers, "content-type"), finalUrl: response.finalUrl };
   }
   const response = await fetch(url, {
@@ -276,7 +322,40 @@ async function fetchText(url: string): Promise<{ body: string; contentType: stri
   if (!response.ok) throw new Error(`OpenAPI URL returned HTTP ${response.status} ${response.statusText}.`);
   const finalUrl = response.url || url;
   assertOpenApiFinalOrigin(url, finalUrl);
-  return { body: await response.text(), contentType: response.headers.get("content-type") ?? "", finalUrl };
+  return { body: await readOpenApiText(response), contentType: response.headers.get("content-type") ?? "", finalUrl };
+}
+
+async function readOpenApiText(response: Response): Promise<string> {
+  const contentLength = Number(response.headers.get("content-length"));
+  if (Number.isFinite(contentLength) && contentLength > MAX_OPENAPI_DOCUMENT_BYTES) {
+    throw new Error(`OpenAPI document exceeds the safe limit of ${Math.round(MAX_OPENAPI_DOCUMENT_BYTES / (1024 * 1024))} MiB. Reduce the definition before importing it.`);
+  }
+  if (!response.body) {
+    const body = await response.text();
+    assertUtf8ByteLimit(body, MAX_OPENAPI_DOCUMENT_BYTES, "OpenAPI document");
+    return body;
+  }
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const next = await reader.read();
+      if (next.done) break;
+      total += next.value.byteLength;
+      if (total > MAX_OPENAPI_DOCUMENT_BYTES) {
+        await reader.cancel();
+        throw new Error(`OpenAPI document exceeds the safe limit of ${Math.round(MAX_OPENAPI_DOCUMENT_BYTES / (1024 * 1024))} MiB. Reduce the definition before importing it.`);
+      }
+      chunks.push(next.value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  chunks.forEach((chunk) => { bytes.set(chunk, offset); offset += chunk.byteLength; });
+  return new TextDecoder().decode(bytes);
 }
 
 function assertOpenApiFinalOrigin(requestedUrl: string, finalUrl: string): void {

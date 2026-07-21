@@ -193,6 +193,23 @@ These sample services use placeholder endpoints unless you point the environment
    - Approval never survives a path, origin, project, or application-session change.
    - Browser mode still rejects local-file transmission after approval with the desktop-mode guidance.
 
+## Test 12B: Execution Resource Limits And Recovery
+
+1. Run a controlled endpoint that returns a response just below 5 MiB; confirm the response remains viewable.
+2. Repeat with a fixed-length and then a streamed/chunked response above 5 MiB.
+3. Expected result:
+   - The request fails before the full body is formatted or shown through IPC.
+   - The error says the response body exceeds the safe limit and suggests requesting a smaller response.
+   - No credential or response-body contents appear in the console.
+4. Compare saved responses just below the 1 MiB comparison limit, then try a larger body, deeply nested JSON, and a diff with excessive lines.
+5. Expected result:
+   - Boundary input compares normally.
+   - Excessive byte, depth, line, node, or diff output fails early with actionable guidance.
+6. Open a project just below the 4 MiB project limit, then try an oversized project and oversized recovery backup.
+7. Expected result:
+   - The boundary project opens and reloads.
+   - The oversized project/backup fails before schema parsing and offers recovery guidance.
+
 ## Test 13: Flow Builder Open
 
 1. In the project explorer, select `Authenticated Read` under `Flows`.
@@ -292,6 +309,9 @@ These sample services use placeholder endpoints unless you point the environment
    - Successful nodes show `success`.
    - Failed nodes show `failed`.
    - Downstream success-dependent nodes show `skipped` after an upstream failure.
+   - A failure edge runs only when its predecessor fails; it does not run after success, and a success edge does not run after failure.
+   - With multiple incoming links, every link condition must match before the target runs.
+   - Captured values remain available to later steps during the run but are not written into the saved project environment after the run.
    - Missing dependencies block execution before requests are sent.
 
 ## Test 18: Project Save And Reopen

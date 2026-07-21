@@ -1,5 +1,13 @@
 import type { ExecutedResponse } from "./serviceRunner";
 import { canonicalizeSavedResponseArtifact, type SavedResponseArtifact } from "./savedResponses";
+import {
+  assertUtf8ByteLimit,
+  MAX_COMPARISON_BODY_BYTES,
+  MAX_COMPARISON_DIFF_ENTRIES,
+  MAX_COMPARISON_JSON_DEPTH,
+  MAX_COMPARISON_JSON_NODES,
+  MAX_COMPARISON_RAW_LINES
+} from "./resourceLimits";
 
 export type ResponseChangeType = "added" | "removed" | "changed" | "unchanged";
 
@@ -26,13 +34,15 @@ export interface SavedResponseComparison {
 }
 
 export function compareSavedResponses(before: SavedResponseArtifact, after: SavedResponseArtifact): SavedResponseComparison {
+  assertUtf8ByteLimit(before.body, MAX_COMPARISON_BODY_BYTES, "Saved response comparison body");
+  assertUtf8ByteLimit(after.body, MAX_COMPARISON_BODY_BYTES, "Saved response comparison body");
   before = canonicalizeSavedResponseArtifact(before);
   after = canonicalizeSavedResponseArtifact(after);
   const beforeJson = parseJson(before);
   const afterJson = parseJson(after);
   const kind = beforeJson.valid && afterJson.valid ? "json" : "raw";
   const bodyChanges = kind === "json"
-    ? compareJson(beforeJson.value, afterJson.value, "$")
+    ? compareJson(beforeJson.value, afterJson.value, "$", { count: 0 })
     : compareRaw(before.body, after.body);
   const summary = bodyChanges.reduce<Record<ResponseChangeType, number>>((counts, change) => ({
     ...counts,
@@ -77,14 +87,21 @@ function metadataChanges(before: SavedResponseArtifact, after: SavedResponseArti
 
 function parseJson(artifact: SavedResponseArtifact): { valid: boolean; value: unknown } {
   if (!artifact.metadata.contentType.toLowerCase().includes("json")) return { valid: false, value: undefined };
+  let value: unknown;
   try {
-    return { valid: true, value: JSON.parse(artifact.body) };
+    value = JSON.parse(artifact.body) as unknown;
   } catch {
     return { valid: false, value: undefined };
   }
+  validateJsonShape(value);
+  return { valid: true, value };
 }
 
-function compareJson(before: unknown, after: unknown, path: string): ResponseBodyChange[] {
+function compareJson(before: unknown, after: unknown, path: string, budget: { count: number }): ResponseBodyChange[] {
+  budget.count += 1;
+  if (budget.count > MAX_COMPARISON_DIFF_ENTRIES) {
+    throw new Error(`Saved response comparison diff output exceeds the safe limit of ${MAX_COMPARISON_DIFF_ENTRIES} entries. Narrow the responses before comparing.`);
+  }
   if (Object.is(before, after)) return [{ path, type: "unchanged", before, after }];
   const beforeObject = record(before);
   const afterObject = record(after);
@@ -94,7 +111,7 @@ function compareJson(before: unknown, after: unknown, path: string): ResponseBod
       const nextPath = Array.isArray(before) || Array.isArray(after) ? `${path}[${key}]` : `${path}.${key}`;
       if (!(key in beforeObject)) return [{ path: nextPath, type: "added" as const, after: afterObject[key] }];
       if (!(key in afterObject)) return [{ path: nextPath, type: "removed" as const, before: beforeObject[key] }];
-      return compareJson(beforeObject[key], afterObject[key], nextPath);
+      return compareJson(beforeObject[key], afterObject[key], nextPath, budget);
     });
   }
   return [{ path, type: "changed", before, after }];
@@ -103,6 +120,9 @@ function compareJson(before: unknown, after: unknown, path: string): ResponseBod
 function compareRaw(before: string, after: string): ResponseBodyChange[] {
   const beforeLines = before.split("\n");
   const afterLines = after.split("\n");
+  if (Math.max(beforeLines.length, afterLines.length) > MAX_COMPARISON_RAW_LINES) {
+    throw new Error(`Saved response comparison diff output exceeds the safe limit of ${MAX_COMPARISON_RAW_LINES} lines. Narrow the responses before comparing.`);
+  }
   const length = Math.max(beforeLines.length, afterLines.length);
   return Array.from({ length }, (_, index): ResponseBodyChange => {
     const path = `line ${index + 1}`;
@@ -112,6 +132,27 @@ function compareRaw(before: string, after: string): ResponseBodyChange[] {
       ? { path, type: "unchanged", before: beforeLines[index], after: afterLines[index] }
       : { path, type: "changed", before: beforeLines[index], after: afterLines[index] };
   }).filter((change) => change.type !== "unchanged");
+}
+
+function validateJsonShape(value: unknown): void {
+  const stack: Array<{ value: unknown; depth: number }> = [{ value, depth: 0 }];
+  let nodes = 0;
+  while (stack.length) {
+    const current = stack.pop() as { value: unknown; depth: number };
+    nodes += 1;
+    if (nodes > MAX_COMPARISON_JSON_NODES) {
+      throw new Error(`Saved response comparison JSON node count exceeds the safe limit of ${MAX_COMPARISON_JSON_NODES}. Narrow the responses before comparing.`);
+    }
+    if (current.depth > MAX_COMPARISON_JSON_DEPTH) {
+      throw new Error(`Saved response comparison JSON depth exceeds the safe limit of ${MAX_COMPARISON_JSON_DEPTH}. Narrow the responses before comparing.`);
+    }
+    if (Array.isArray(current.value)) {
+      current.value.forEach((item) => stack.push({ value: item, depth: current.depth + 1 }));
+    } else if (current.value !== null && typeof current.value === "object") {
+      const entries = Object.entries(current.value as Record<string, unknown>);
+      entries.forEach(([, item]) => stack.push({ value: item, depth: current.depth + 1 }));
+    }
+  }
 }
 
 function record(value: unknown): Record<string, unknown> | undefined {

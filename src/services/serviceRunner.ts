@@ -3,6 +3,7 @@ import type { HttpVersionPreference, KeyValueRow, ProjectEnvironment, ProjectSer
 import { redactRecord, redactValue } from "../lib/redaction";
 import { AppError, normalizeAppError } from "../lib/appError";
 import { buildUrl, resolveTemplate, validateService, type ValidationIssue } from "./serviceDesigner";
+import { MAX_RESPONSE_BODY_BYTES, utf8ByteLength } from "./resourceLimits";
 
 export type ConsolePhase =
   | "prepare"
@@ -268,6 +269,7 @@ export function normalizeResponse(
   responseFormatDetection: ResponseFormatDetection = "auto",
   requestedUrl = ""
 ): ExecutedResponse {
+  assertResponseBodyLimit(response.body);
   const contentType = findHeader(response.headers, "content-type");
   const parsed = parseResponseBody(response.body, responseFormatDetection === "json" ? "application/json" : contentType);
   return {
@@ -283,6 +285,7 @@ export function normalizeResponse(
 }
 
 export function parseResponseBody(body: string, contentType: string): { prettyBody: string; parseError: string | null } {
+  assertResponseBodyLimit(body);
   if (!body.trim()) {
     return { prettyBody: "", parseError: null };
   }
@@ -293,6 +296,12 @@ export function parseResponseBody(body: string, contentType: string): { prettyBo
     return { prettyBody: JSON.stringify(JSON.parse(body), null, 2), parseError: null };
   } catch {
     return { prettyBody: body, parseError: "Response body is not valid JSON." };
+  }
+}
+
+function assertResponseBodyLimit(body: string): void {
+  if (utf8ByteLength(body) > MAX_RESPONSE_BODY_BYTES) {
+    throw new AppError("validation", "RESPONSE_BODY_TOO_LARGE", `Response body exceeds the safe limit of ${Math.round(MAX_RESPONSE_BODY_BYTES / (1024 * 1024))} MiB. Reduce the response or request a smaller page.`);
   }
 }
 
@@ -339,7 +348,7 @@ export async function fetchHttpTransport(request: ExecutableRequest, signal?: Ab
     if (response.type === "opaqueredirect" || (response.status >= 300 && response.status < 400)) {
       throw new Error("Browser development mode blocked an HTTP redirect before replaying the request. Enter the final URL explicitly or use Relay Studio desktop mode for validated same-origin redirects.");
     }
-    const body = await response.text();
+    const body = await readResponseBodyWithLimit(response, MAX_RESPONSE_BODY_BYTES);
     return {
       status: response.status,
       statusText: response.statusText,
@@ -352,6 +361,41 @@ export async function fetchHttpTransport(request: ExecutableRequest, signal?: Ab
     window.clearTimeout(timeout);
     signal?.removeEventListener("abort", cancel);
   }
+}
+
+async function readResponseBodyWithLimit(response: Response, limit: number): Promise<string> {
+  const contentLength = response.headers.get("content-length");
+  const declaredLength = contentLength ? Number(contentLength) : NaN;
+  if (Number.isFinite(declaredLength) && declaredLength > limit) {
+    throw new AppError("validation", "RESPONSE_BODY_TOO_LARGE", `Response body exceeds the safe limit of ${Math.round(limit / (1024 * 1024))} MiB. Reduce the response or request a smaller page.`);
+  }
+  if (!response.body) {
+    const body = await response.text();
+    assertResponseBodyLimit(body);
+    return body;
+  }
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const next = await reader.read();
+      if (next.done) break;
+      const chunk = next.value;
+      total += chunk.byteLength;
+      if (total > limit) {
+        await reader.cancel();
+        throw new AppError("validation", "RESPONSE_BODY_TOO_LARGE", `Response body exceeds the safe limit of ${Math.round(limit / (1024 * 1024))} MiB. Reduce the response or request a smaller page.`);
+      }
+      chunks.push(chunk);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  chunks.forEach((chunk) => { bytes.set(chunk, offset); offset += chunk.byteLength; });
+  return new TextDecoder().decode(bytes);
 }
 
 function buildRuntimeAuthHeader(service: ProjectService, environment: ProjectEnvironment): KeyValueRow | null {

@@ -494,6 +494,43 @@ describe("flow builder", () => {
     expect(result.events.map((event) => event.message)).toContain("[List Products] skipped because a dependency did not succeed.");
   });
 
+  it("runs failure edges only after a failed predecessor and skips the opposite branch", async () => {
+    const branch = {
+      ...flow,
+      nodes: flow.nodes.slice(0, 3),
+      steps: ["login", "current-user", "list-products"],
+      edges: [
+        { id: `${flow.nodes[0].id}-success-${flow.nodes[1].id}`, source: flow.nodes[0].id, target: flow.nodes[1].id, condition: "success" as const },
+        { id: `${flow.nodes[0].id}-failure-${flow.nodes[2].id}`, source: flow.nodes[0].id, target: flow.nodes[2].id, condition: "failure" as const }
+      ],
+      mappings: []
+    };
+    const transport = vi.fn().mockResolvedValueOnce({ status: 500, statusText: "Server Error", headers: {}, body: "failed", durationMs: 1 }).mockResolvedValueOnce({ status: 200, statusText: "OK", headers: {}, body: "ok", durationMs: 1 });
+
+    const result = await runFlow(branch, services, qa, transport);
+
+    expect(result.steps.map((step) => step.status)).toEqual(["failed", "skipped", "success"]);
+    expect(transport).toHaveBeenCalledTimes(2);
+  });
+
+  it("requires every incoming branch condition to be satisfied", async () => {
+    const multi = {
+      ...flow,
+      nodes: flow.nodes.slice(0, 3),
+      steps: ["login", "current-user", "list-products"],
+      edges: [
+        { id: `${flow.nodes[0].id}-success-${flow.nodes[2].id}`, source: flow.nodes[0].id, target: flow.nodes[2].id, condition: "success" as const },
+        { id: `${flow.nodes[1].id}-failure-${flow.nodes[2].id}`, source: flow.nodes[1].id, target: flow.nodes[2].id, condition: "failure" as const }
+      ],
+      mappings: []
+    };
+    const transport = vi.fn().mockResolvedValue({ status: 200, statusText: "OK", headers: {}, body: "ok", durationMs: 1 });
+
+    const result = await runFlow(multi, services, qa, transport);
+
+    expect(result.steps.map((step) => step.status)).toEqual(["success", "success", "skipped"]);
+  });
+
   it("blocks execution before sending when validation fails", async () => {
     const transport = vi.fn();
     const invalid = {

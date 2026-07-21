@@ -330,12 +330,14 @@ export async function runFlow(
       latestError = "Flow cancelled.";
       break;
     }
-    const dependencyFailed = normalized.edges
-      .filter((edge) => edge.target === node.id && edge.condition === "success")
-      .some((edge) => nodeStatuses.get(edge.source) !== "success");
-    if (dependencyFailed) {
+    const dependencyDecision = evaluateFlowDependencies(node.id, normalized.edges, nodeStatuses);
+    if (dependencyDecision === "skip") {
       nodeStatuses.set(node.id, "skipped");
-      events.push("success", `[${node.label}] skipped because a dependency did not succeed.`);
+      const incoming = normalized.edges.filter((edge) => edge.target === node.id);
+      const reason = incoming.length > 0 && incoming.every((edge) => edge.condition === "success")
+        ? "a dependency did not succeed"
+        : "the dependency conditions were not met";
+      events.push("success", `[${node.label}] skipped because ${reason}.`);
       stepResults.push({ nodeId: node.id, serviceId: node.serviceId, status: "skipped", events: [] });
       continue;
     }
@@ -395,6 +397,19 @@ export async function runFlow(
     response: latestResponse,
     error: latestError
   };
+}
+
+function evaluateFlowDependencies(
+  nodeId: string,
+  edges: FlowEdge[],
+  statuses: Map<string, FlowNodeStatus>
+): "run" | "skip" {
+  const incoming = edges.filter((edge) => edge.target === nodeId);
+  if (!incoming.length) return "run";
+  return incoming.every((edge) => {
+    const status = statuses.get(edge.source);
+    return edge.condition === "success" ? status === "success" : status === "failed";
+  }) ? "run" : "skip";
 }
 
 export function evaluateJsonPath(body: string, jsonPath: string): unknown {

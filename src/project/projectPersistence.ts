@@ -1,6 +1,7 @@
 import type { RecentProject, RelayProject } from "./projectModel";
 import { AppError } from "../lib/appError";
 import { parseProjectImport, prepareProjectForExport } from "./projectSchema";
+import { assertUtf8ByteLimit, MAX_PROJECT_FILE_BYTES } from "../services/resourceLimits";
 
 export interface SaveProjectInput {
   path: string;
@@ -75,7 +76,9 @@ class BrowserFallbackPersistence implements ProjectPersistence {
       const key = fallbackProjectKey(path);
       const existing = localStorage.getItem(key);
       if (existing) localStorage.setItem(`${key}:backup`, existing);
-      localStorage.setItem(key, JSON.stringify(prepareProjectForExport(project)));
+      const serialized = JSON.stringify(prepareProjectForExport(project));
+      assertUtf8ByteLimit(serialized, MAX_PROJECT_FILE_BYTES, "Project file");
+      localStorage.setItem(key, serialized);
     });
   }
 
@@ -85,6 +88,7 @@ class BrowserFallbackPersistence implements ProjectPersistence {
     if (!raw) {
       throw new Error(`Project file was not found: ${path}`);
     }
+    assertUtf8ByteLimit(raw, MAX_PROJECT_FILE_BYTES, "Project file");
     const parsed = JSON.parse(raw) as RelayProject | { project: RelayProject };
     return parseProjectImport("project" in parsed ? parsed.project : parsed);
   }
@@ -94,6 +98,7 @@ class BrowserFallbackPersistence implements ProjectPersistence {
     const key = fallbackProjectKey(path);
     const backup = localStorage.getItem(`${key}:backup`);
     if (!backup) throw new AppError("filesystem", "PROJECT_BACKUP_MISSING", `Project recovery backup was not found: ${path}`);
+    assertUtf8ByteLimit(backup, MAX_PROJECT_FILE_BYTES, "Project recovery backup");
     parseProjectImport(JSON.parse(backup) as unknown);
     localStorage.setItem(key, backup);
   }

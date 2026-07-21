@@ -7,6 +7,7 @@ import {
   parseOpenApiText,
   selectedOperationsToServices
 } from "./openApiImporter";
+import { MAX_OPENAPI_OBJECT_KEYS } from "./resourceLimits";
 
 const document = {
   openapi: "3.0.4",
@@ -355,5 +356,40 @@ requestBodies:
     expect(() => parseOpenApiDocument(null, "https://example.com/spec.json")).toThrow("must be an object");
     expect(() => parseOpenApiDocument({ openapi: "3.0.0" }, "https://example.com/spec.json")).toThrow("missing paths");
     expect(() => discoverDefinitionUrl("<html>Swagger UI</html>", "https://example.com/docs")).toThrow("does not expose");
+  });
+
+  it("rejects OpenAPI graph breadth and expansion beyond the safe bounds", () => {
+    const broadProperties = Object.fromEntries(Array.from({ length: MAX_OPENAPI_OBJECT_KEYS + 1 }, (_, index) => [`field${index}`, { type: "string" }]));
+    expect(() => parseOpenApiDocument({ openapi: "3.0.0", paths: { "/x": { post: { requestBody: { content: { "application/json": { schema: { type: "object", properties: broadProperties } } } } } } } }, "https://api.test/spec.json")).toThrow("breadth exceeds");
+
+    const manyNodes = Object.fromEntries(Array.from({ length: MAX_OPENAPI_OBJECT_KEYS }, (_, index) => [
+      `/x${index}`,
+      {
+        get: {
+          responses: {
+            200: {
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: Object.fromEntries(Array.from({ length: 25 }, (_, property) => [`field${property}`, { type: "string" }]))
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    ]));
+    expect(() => parseOpenApiDocument({ openapi: "3.0.0", paths: manyNodes }, "https://api.test/spec.json")).toThrow("node limit");
+
+    let deep: Record<string, unknown> = { type: "string" };
+    for (let index = 0; index < 34; index += 1) deep = { nested: deep };
+    expect(() => parseOpenApiDocument({ openapi: "3.0.0", paths: { "/x": { get: {} } }, components: deep }, "https://api.test/spec.json")).toThrow("graph depth exceeds");
+  });
+
+  it("rejects an oversized definition before parsing YAML or JSON", () => {
+    const oversized = `openapi: 3.0.0\npaths:\n  /health:\n    get: {}\n# ${"x".repeat(2 * 1024 * 1024)}`;
+    expect(() => parseOpenApiText(oversized, "https://api.test/spec.yaml")).toThrow("OpenAPI definition exceeds");
   });
 });

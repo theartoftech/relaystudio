@@ -15,6 +15,8 @@ const PROJECT_SCHEMA_VERSION: u16 = 1;
 const SAVED_RESPONSE_FORMAT: &str = "relay-studio-response";
 const SAVED_RESPONSE_SCHEMA_VERSION: u16 = 1;
 const MAX_MULTIPART_FILE_BYTES: u64 = 25 * 1024 * 1024;
+const MAX_HTTP_RESPONSE_BODY_BYTES: u64 = 5 * 1024 * 1024;
+const MAX_PROJECT_FILE_BYTES: u64 = 4 * 1024 * 1024;
 const MENU_APP_SEARCH_COMMANDS: &str = "app.search_commands";
 const MENU_APP_OPEN_SETTINGS: &str = "app.open_settings";
 const MENU_APP_OPEN_HELP: &str = "app.open_help";
@@ -719,10 +721,31 @@ async fn execute_http_request_impl(
             )
         })
         .collect();
-    let body = response
-        .text()
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_HTTP_RESPONSE_BODY_BYTES)
+    {
+        return Err(format!(
+            "HTTP response body exceeds the safe limit of {} MiB. Request a smaller response.",
+            MAX_HTTP_RESPONSE_BODY_BYTES / (1024 * 1024)
+        ));
+    }
+    let mut response = response;
+    let mut body_bytes = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
         .await
-        .map_err(|error| format!("Could not read response body: {error}"))?;
+        .map_err(|error| format!("Could not read response body: {error}"))?
+    {
+        if body_bytes.len() as u64 + chunk.len() as u64 > MAX_HTTP_RESPONSE_BODY_BYTES {
+            return Err(format!(
+                "HTTP response body exceeds the safe limit of {} MiB. Request a smaller response.",
+                MAX_HTTP_RESPONSE_BODY_BYTES / (1024 * 1024)
+            ));
+        }
+        body_bytes.extend_from_slice(&chunk);
+    }
+    let body = String::from_utf8_lossy(&body_bytes).into_owned();
 
     Ok(HttpResponseOutput {
         status: status.as_u16(),
@@ -895,6 +918,12 @@ fn save_project_file_impl(path: &Path, project: &Value) -> Result<(), String> {
 
     let serialized = serde_json::to_vec_pretty(project)
         .map_err(|error| format!("Project serialization failed: {error}"))?;
+    if serialized.len() as u64 > MAX_PROJECT_FILE_BYTES {
+        return Err(format!(
+            "Project file exceeds the safe limit of {} MiB. Remove oversized response data before saving.",
+            MAX_PROJECT_FILE_BYTES / (1024 * 1024)
+        ));
+    }
 
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
@@ -919,13 +948,14 @@ fn save_project_file_impl(path: &Path, project: &Value) -> Result<(), String> {
 fn open_project_file_impl(path: &Path) -> Result<Value, String> {
     validate_project_path(path)?;
 
-    let raw = fs::read(path).map_err(|error| {
-        if error.kind() == std::io::ErrorKind::NotFound {
-            format!("Project file was not found: {}", path.display())
-        } else {
-            format!("Could not read project file: {error}")
-        }
-    })?;
+    let raw =
+        read_file_with_limit(path, MAX_PROJECT_FILE_BYTES, "project file").map_err(|error| {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                format!("Project file was not found: {}", path.display())
+            } else {
+                format!("Could not read project file: {error}")
+            }
+        })?;
     let project: Value = serde_json::from_slice(&raw)
         .map_err(|error| format!("Project file is corrupted or unsupported: {error}"))?;
     if project.get("encryption").is_some() && project.get("ciphertext").is_some() {
@@ -939,7 +969,7 @@ fn open_project_file_impl(path: &Path) -> Result<Value, String> {
 fn restore_project_backup_impl(path: &Path) -> Result<(), String> {
     validate_project_path(path)?;
     let backup_path = backup_path_for(path);
-    let raw = fs::read(&backup_path)
+    let raw = read_file_with_limit(&backup_path, MAX_PROJECT_FILE_BYTES, "project backup")
         .map_err(|error| format!("Could not restore project backup: {error}"))?;
     let project: Value = serde_json::from_slice(&raw)
         .map_err(|error| format!("Could not restore project backup: invalid JSON: {error}"))?;
@@ -949,6 +979,17 @@ fn restore_project_backup_impl(path: &Path) -> Result<(), String> {
         .map_err(|error| format!("Could not write restored project: {error}"))?;
     fs::rename(&temp_path, path)
         .map_err(|error| format!("Could not finalize project restore: {error}"))
+}
+
+fn read_file_with_limit(path: &Path, limit: u64, label: &str) -> Result<Vec<u8>, std::io::Error> {
+    let metadata = fs::metadata(path)?;
+    if metadata.len() > limit {
+        return Err(std::io::Error::other(format!(
+            "{label} exceeds the safe limit of {} MiB",
+            limit / (1024 * 1024)
+        )));
+    }
+    fs::read(path)
 }
 
 fn rename_project_file_impl(path: &Path, name: &str) -> Result<(), String> {
@@ -1335,6 +1376,22 @@ mod tests {
     }
 
     #[test]
+    fn project_open_and_backup_restore_reject_oversized_files_before_parsing() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("oversized.restproj");
+        fs::write(&path, vec![b'{'; (MAX_PROJECT_FILE_BYTES + 1) as usize])
+            .expect("write oversized project");
+        let error = open_project_file_impl(&path).expect_err("oversized project");
+        assert!(error.contains("safe limit"));
+
+        let backup = backup_path_for(&path);
+        fs::write(&backup, vec![b'{'; (MAX_PROJECT_FILE_BYTES + 1) as usize])
+            .expect("write oversized backup");
+        let restore_error = restore_project_backup_impl(&path).expect_err("oversized backup");
+        assert!(restore_error.contains("safe limit"));
+    }
+
+    #[test]
     fn http_request_validation_accepts_supported_requests() {
         let request = test_http_request("GET", "https://api.example.com/api/health");
 
@@ -1399,6 +1456,42 @@ mod tests {
             Some(&"covered".to_string())
         );
         assert_eq!(response.final_url, format!("http://{address}/health"));
+    }
+
+    #[test]
+    fn native_http_request_rejects_content_length_over_limit_before_body_read() {
+        let body_length = MAX_HTTP_RESPONSE_BODY_BYTES + 1;
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {body_length}\r\nConnection: close\r\n\r\n"
+        );
+        let (address, requests, server) = spawn_test_server(response.into_bytes());
+        let request = test_http_request("GET", &format!("http://{address}/oversized"));
+
+        let error = tauri::async_runtime::block_on(execute_http_request_impl(request))
+            .expect_err("declared oversized response");
+        server.join().expect("join oversized server");
+        assert!(requests.recv().expect("request result").is_some());
+        assert!(error.contains("safe limit"));
+    }
+
+    #[test]
+    fn native_http_request_rejects_chunked_body_after_streaming_limit() {
+        let body = vec![b'x'; (MAX_HTTP_RESPONSE_BODY_BYTES + 1) as usize];
+        let mut response = format!(
+            "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n{:x}\r\n",
+            body.len()
+        )
+        .into_bytes();
+        response.extend_from_slice(&body);
+        response.extend_from_slice(b"\r\n0\r\n\r\n");
+        let (address, requests, server) = spawn_test_server(response);
+        let request = test_http_request("GET", &format!("http://{address}/chunked"));
+
+        let error = tauri::async_runtime::block_on(execute_http_request_impl(request))
+            .expect_err("chunked oversized response");
+        server.join().expect("join chunked server");
+        assert!(requests.recv().expect("request result").is_some());
+        assert!(error.contains("safe limit"));
     }
 
     #[test]
@@ -2105,9 +2198,12 @@ mod tests {
             loop {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
+                        stream
+                            .set_nonblocking(false)
+                            .expect("configure blocking test stream");
                         let mut request = [0_u8; 4096];
                         let length = stream.read(&mut request).expect("read test request");
-                        stream.write_all(&response).expect("write test response");
+                        let _ = stream.write_all(&response);
                         sender
                             .send(Some(
                                 String::from_utf8_lossy(&request[..length]).to_string(),

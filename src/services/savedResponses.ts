@@ -155,6 +155,7 @@ export function responseWarning(metadata: SavedResponseMetadata): string | null 
 
 export function redactResponseBody(body: string, contentType: string): string {
   if (!body.trim()) return body;
+  if (!/(https?:\/\/|authorization|password|passphrase|token|secret|api.?key|cookie|credential)/i.test(body)) return body;
   if (contentType.toLowerCase().includes("json")) {
     try {
       return JSON.stringify(redactJsonValue(JSON.parse(body)), null, 2);

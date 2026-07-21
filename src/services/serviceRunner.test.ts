@@ -11,6 +11,7 @@ import {
   runServiceRequest,
   type HttpTransport
 } from "./serviceRunner";
+import { MAX_RESPONSE_BODY_BYTES } from "./resourceLimits";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn()
@@ -274,6 +275,16 @@ describe("service runner", () => {
     expect(parseResponseBody("", "application/json")).toEqual({ prettyBody: "", parseError: null });
   });
 
+  it("rejects response bodies larger than the execution limit before formatting", () => {
+    expect(() => normalizeResponse(createOrder, {
+      status: 200,
+      statusText: "OK",
+      headers: { "content-type": "application/json" },
+      body: "x".repeat(MAX_RESPONSE_BODY_BYTES + 1),
+      durationMs: 1
+    })).toThrow("Response body exceeds");
+  });
+
   it("ignores token capture for non-login, non-json, invalid, or tokenless responses", () => {
     expect(extractCapturedVariables(createOrder, `{"accessToken":"ignored"}`, "application/json")).toEqual([]);
     expect(extractCapturedVariables(login, "not-json", "application/json")).toEqual([]);
@@ -461,6 +472,63 @@ describe("service runner", () => {
       "https://api.example.com/api/health",
       expect.objectContaining({ redirect: "manual" })
     );
+    window.fetch = originalFetch;
+  });
+
+  it("rejects browser responses whose declared body exceeds the limit", async () => {
+    const originalFetch = window.fetch;
+    window.fetch = vi.fn().mockResolvedValue({
+      status: 200,
+      statusText: "OK",
+      url: "https://api.example.com/api/health",
+      headers: new Headers({ "content-length": String(MAX_RESPONSE_BODY_BYTES + 1) }),
+      text: () => Promise.resolve("not-read")
+    });
+
+    await expect(fetchHttpTransport(buildExecutableRequest(health, qa))).rejects.toThrow("Response body exceeds");
+    expect(window.fetch).toHaveBeenCalledTimes(1);
+    window.fetch = originalFetch;
+  });
+
+  it("reads browser response streams within the byte limit", async () => {
+    const originalFetch = window.fetch;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"ok":true}'));
+        controller.close();
+      }
+    });
+    window.fetch = vi.fn().mockResolvedValue({
+      status: 200,
+      statusText: "OK",
+      url: "https://api.example.com/api/health",
+      headers: new Headers({ "content-type": "application/json" }),
+      body: stream
+    });
+
+    await expect(fetchHttpTransport(buildExecutableRequest(health, qa))).resolves.toMatchObject({ body: '{"ok":true}' });
+    window.fetch = originalFetch;
+  });
+
+  it("cancels a browser response stream after the byte limit", async () => {
+    const originalFetch = window.fetch;
+    const cancel = vi.fn().mockResolvedValue(undefined);
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(new Uint8Array(MAX_RESPONSE_BODY_BYTES + 1));
+      },
+      cancel
+    });
+    window.fetch = vi.fn().mockResolvedValue({
+      status: 200,
+      statusText: "OK",
+      url: "https://api.example.com/api/health",
+      headers: new Headers(),
+      body: stream
+    });
+
+    await expect(fetchHttpTransport(buildExecutableRequest(health, qa))).rejects.toThrow("Response body exceeds");
+    expect(cancel).toHaveBeenCalled();
     window.fetch = originalFetch;
   });
 });
