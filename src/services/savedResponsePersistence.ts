@@ -1,5 +1,5 @@
 import type { SavedResponseMetadata } from "../project/projectModel";
-import { SAVED_RESPONSE_FORMAT, SAVED_RESPONSE_SCHEMA_VERSION, assertSavedResponsePath, validateSavedResponseArtifact, type SavedResponseArtifact } from "./savedResponses";
+import { assertSavedResponsePath, canonicalizeSavedResponseArtifact, type SavedResponseArtifact } from "./savedResponses";
 
 export interface SaveResponseFileInput {
   path: string;
@@ -31,12 +31,13 @@ function fallbackResponseKey(path: string): string {
 class BrowserFallbackSavedResponsePersistence implements SavedResponsePersistence {
   async saveResponse(input: SaveResponseFileInput): Promise<void> {
     assertSavedResponsePath(input.path);
-    validateSavedResponseArtifact(input.artifact);
+    const artifact = canonicalizeSavedResponseArtifact(input.artifact);
+    assertArtifactPath(input.path, artifact);
     const key = fallbackResponseKey(input.path);
     if (!input.overwrite && localStorage.getItem(key) !== null) {
       throw new Error("Saved response already exists at this path.");
     }
-    localStorage.setItem(key, input.path.endsWith(".txt") ? input.artifact.body : JSON.stringify(input.artifact));
+    localStorage.setItem(key, JSON.stringify(artifact));
   }
 
   async readResponse(metadata: SavedResponseMetadata): Promise<SavedResponseArtifact> {
@@ -45,10 +46,14 @@ class BrowserFallbackSavedResponsePersistence implements SavedResponsePersistenc
     if (!raw) {
       throw new Error(`Saved response was not found: ${metadata.filePath}`);
     }
-    const artifact = metadata.filePath.endsWith(".txt")
-      ? artifactFromRawBody(metadata, raw)
-      : JSON.parse(raw) as SavedResponseArtifact;
-    validateSavedResponseArtifact(artifact);
+    let parsed: SavedResponseArtifact;
+    try {
+      parsed = JSON.parse(raw) as SavedResponseArtifact;
+    } catch {
+      throw new Error("Legacy raw .txt response artifacts cannot be reopened safely. Re-send the request and save a new response artifact.");
+    }
+    const artifact = canonicalizeSavedResponseArtifact(parsed);
+    assertArtifactPath(metadata.filePath, artifact);
     return artifact;
   }
 
@@ -61,18 +66,19 @@ class BrowserFallbackSavedResponsePersistence implements SavedResponsePersistenc
 class TauriSavedResponsePersistence implements SavedResponsePersistence {
   async saveResponse(input: SaveResponseFileInput): Promise<void> {
     assertSavedResponsePath(input.path);
-    validateSavedResponseArtifact(input.artifact);
+    const artifact = canonicalizeSavedResponseArtifact(input.artifact);
+    assertArtifactPath(input.path, artifact);
     await invokeTauri("save_response_file", {
       path: input.path,
       overwrite: input.overwrite,
-      artifact: input.artifact
+      artifact
     });
   }
 
   async readResponse(metadata: SavedResponseMetadata): Promise<SavedResponseArtifact> {
     assertSavedResponsePath(metadata.filePath);
-    const artifact = await invokeTauri<SavedResponseArtifact>("read_response_file", { metadata });
-    validateSavedResponseArtifact(artifact);
+    const artifact = canonicalizeSavedResponseArtifact(await invokeTauri<SavedResponseArtifact>("read_response_file", { metadata }));
+    assertArtifactPath(metadata.filePath, artifact);
     return artifact;
   }
 
@@ -89,11 +95,8 @@ export async function createSavedResponsePersistence(): Promise<SavedResponsePer
   return new BrowserFallbackSavedResponsePersistence();
 }
 
-function artifactFromRawBody(metadata: SavedResponseMetadata, body: string): SavedResponseArtifact {
-  return {
-    format: SAVED_RESPONSE_FORMAT,
-    schemaVersion: SAVED_RESPONSE_SCHEMA_VERSION,
-    metadata,
-    body
-  };
+function assertArtifactPath(requestedPath: string, artifact: SavedResponseArtifact): void {
+  if (artifact.metadata.filePath !== requestedPath) {
+    throw new Error("Saved response artifact path does not match the approved project metadata. Re-send the request and save a new response artifact.");
+  }
 }

@@ -411,10 +411,14 @@ describe("service runner", () => {
       statusText: "OK",
       headers: {},
       body: "",
-      durationMs: 1
+      durationMs: 1,
+      finalUrl: "https://api.example.com/api/health/final"
     });
 
-    await expect(defaultHttpTransport(buildExecutableRequest(health, qa))).resolves.toMatchObject({ status: 200 });
+    await expect(defaultHttpTransport(buildExecutableRequest(health, qa))).resolves.toMatchObject({
+      status: 200,
+      finalUrl: "https://api.example.com/api/health/final"
+    });
     expect(invoke).toHaveBeenCalledWith("execute_http_request", { request: buildExecutableRequest(health, qa) });
     delete window.__TAURI_INTERNALS__;
   });
@@ -425,6 +429,7 @@ describe("service runner", () => {
     window.fetch = vi.fn().mockResolvedValue({
       status: 200,
       statusText: "OK",
+      url: "https://api.example.com/api/health/final",
       headers: new Headers({ "content-type": "application/json" }),
       text: () => Promise.resolve(`{"ok":true}`)
     });
@@ -432,8 +437,30 @@ describe("service runner", () => {
     await expect(fetchHttpTransport(buildExecutableRequest(health, qa))).resolves.toMatchObject({
       status: 200,
       durationMs: 15,
+      finalUrl: "https://api.example.com/api/health/final",
       body: `{"ok":true}`
     });
+    expect(window.fetch).toHaveBeenCalledWith(
+      "https://api.example.com/api/health",
+      expect.objectContaining({ redirect: "manual" })
+    );
+    window.fetch = originalFetch;
+  });
+
+  it("blocks redirects in browser development mode before Fetch can replay request credentials", async () => {
+    const originalFetch = window.fetch;
+    window.fetch = vi.fn().mockResolvedValue(new Response(null, {
+      status: 302,
+      headers: { Location: "https://other.example.com/collect" }
+    }));
+
+    await expect(fetchHttpTransport(buildExecutableRequest(health, qa))).rejects.toThrow(
+      "Browser development mode blocked an HTTP redirect"
+    );
+    expect(window.fetch).toHaveBeenCalledWith(
+      "https://api.example.com/api/health",
+      expect.objectContaining({ redirect: "manual" })
+    );
     window.fetch = originalFetch;
   });
 });

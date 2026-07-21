@@ -1,4 +1,12 @@
-import { discoverDefinitionUrl, loadOpenApiFromUrl, parseOpenApiDocument, parseOpenApiText, selectedOperationsToServices } from "./openApiImporter";
+import {
+  discoverDefinitionUrl,
+  inspectOpenApiUrl,
+  loadDiscoveredOpenApiDefinition,
+  loadOpenApiFromUrl,
+  parseOpenApiDocument,
+  parseOpenApiText,
+  selectedOperationsToServices
+} from "./openApiImporter";
 
 const document = {
   openapi: "3.0.4",
@@ -92,15 +100,104 @@ paths:
     expect(service.authProfile.type).toBe("none");
   });
 
-  it("loads direct definitions and Swagger pages and reports HTTP failures", async () => {
+  it("loads direct definitions but requires explicit review before fetching a Swagger UI destination", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch");
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(document), { status: 200, headers: { "content-type": "application/json" } }));
     expect((await loadOpenApiFromUrl("https://example.com/openapi.json")).operations).toHaveLength(2);
     fetchMock.mockResolvedValueOnce(new Response('<script>url: "./spec.yaml"</script>', { status: 200, headers: { "content-type": "text/html" } }));
     fetchMock.mockResolvedValueOnce(new Response("openapi: 3.0.0\npaths:\n  /health:\n    get: {}", { status: 200 }));
-    expect((await loadOpenApiFromUrl("https://example.com/docs/")).definitionUrl).toBe("https://example.com/docs/spec.yaml");
+    const inspection = await inspectOpenApiUrl("https://example.com/docs/");
+    expect(inspection).toEqual({
+      kind: "swagger-ui",
+      pageUrl: "https://example.com/docs/",
+      definitionUrl: "https://example.com/docs/spec.yaml"
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    if (inspection.kind !== "swagger-ui") throw new Error("Expected Swagger UI discovery.");
+    expect((await loadDiscoveredOpenApiDefinition(inspection)).definitionUrl).toBe("https://example.com/docs/spec.yaml");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     fetchMock.mockResolvedValueOnce(new Response("missing", { status: 404, statusText: "Not Found" }));
     await expect(loadOpenApiFromUrl("https://example.com/missing")).rejects.toThrow("HTTP 404");
+    fetchMock.mockRestore();
+  });
+
+  it("rejects a final fetch origin that differs from the reviewed URL", async () => {
+    const redirected = new Response(JSON.stringify(document), { status: 200, headers: { "content-type": "application/json" } });
+    Object.defineProperty(redirected, "url", { value: "https://internal.test/openapi.json" });
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(redirected);
+
+    await expect(loadOpenApiFromUrl("https://api.test/openapi.json")).rejects.toThrow(
+      "OpenAPI redirect changed origin from https://api.test to https://internal.test"
+    );
+    fetchMock.mockRestore();
+  });
+
+  it("blocks browser-development redirects before loading an unreviewed OpenAPI destination", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(null, {
+      status: 302,
+      headers: { Location: "https://other.test/openapi.json" }
+    }));
+
+    await expect(loadOpenApiFromUrl("https://api.test/openapi.json")).rejects.toThrow(
+      "Browser development mode blocked an OpenAPI redirect"
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.test/openapi.json",
+      expect.objectContaining({ redirect: "manual" })
+    );
+    fetchMock.mockRestore();
+  });
+
+  it("rejects an external reference whose fetch finishes on another origin", async () => {
+    const root = new Response(JSON.stringify({
+      openapi: "3.0.0",
+      paths: { "/profiles": { get: { parameters: [{ $ref: "./common.json#/profileId" }] } } }
+    }), { status: 200, headers: { "content-type": "application/json" } });
+    Object.defineProperty(root, "url", { value: "https://api.test/openapi.json" });
+    const redirectedReference = new Response(JSON.stringify({
+      profileId: { name: "id", in: "query", schema: { type: "string" } }
+    }), { status: 200, headers: { "content-type": "application/json" } });
+    Object.defineProperty(redirectedReference, "url", { value: "https://internal.test/common.json" });
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(root)
+      .mockResolvedValueOnce(redirectedReference);
+
+    await expect(loadOpenApiFromUrl("https://api.test/openapi.json")).rejects.toThrow(
+      "OpenAPI redirect changed origin from https://api.test to https://internal.test"
+    );
+    fetchMock.mockRestore();
+  });
+
+  it("rejects credential-bearing definition URLs before requesting them", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+
+    await expect(loadOpenApiFromUrl("https://developer:password@api.test/openapi.json")).rejects.toThrow(
+      "OpenAPI URL cannot include credentials"
+    );
+    await expect(loadOpenApiFromUrl("https://api.test/openapi.json?apiKey=synthetic-secret")).rejects.toThrow(
+      "OpenAPI URL cannot include credentials"
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    fetchMock.mockResolvedValueOnce(new Response(
+      '<script>SwaggerUIBundle({ url: "./openapi.json?token=synthetic-secret" })</script>',
+      { status: 200, headers: { "content-type": "text/html" } }
+    ));
+    await expect(inspectOpenApiUrl("https://api.test/docs/")).rejects.toThrow(
+      "OpenAPI URL cannot include credentials"
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    fetchMock.mockRestore();
+  });
+
+  it("allows a credential variable placeholder in an OpenAPI query parameter", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify(document), { status: 200, headers: { "content-type": "application/json" } })
+    );
+
+    await expect(loadOpenApiFromUrl("https://api.test/openapi.json?apiKey={{openApiKey}}"))
+      .resolves.toMatchObject({ title: "Orders API" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     fetchMock.mockRestore();
   });
 

@@ -17,4 +17,11 @@ describe("typed app errors", () => {
     expect(normalizeAppError(new Error("Bearer token variable is empty."))).toMatchObject({ category: "auth", retryable: false });
     expect(normalizeAppError("unexpected")).toMatchObject({ category: "unknown", message: "unexpected" });
   });
+
+  it("canonically redacts error text before it reaches diagnostics or display", () => {
+    const normalized = normalizeAppError(new Error("Request failed at https://u:p@example.test/items?api_key=url-secret token=body-secret"));
+
+    expect(normalized.message).toContain("https://example.test/items?api_key=********");
+    expect(normalized.message).not.toMatch(/url-secret|body-secret|u:p/);
+  });
 });

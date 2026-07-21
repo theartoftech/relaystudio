@@ -872,17 +872,66 @@ A developer imports an OpenAPI operation whose `multipart/form-data` schema incl
 - TypeScript service coverage and Rust native coverage remain at least 90 percent.
 - The workflow is exercised in the running application and authoritative documentation is updated.
 
-## Sprint 18: Code, Architecture, And Security Review
+## Sprint 18A-18E: Code, Architecture, And Security Review Program
 
 ### Objective
 
-Establish an evidence-backed quality and security baseline for the completed personal developer tool, remediate confirmed high-value findings, and leave a prioritized, reproducible record for future maintenance. This sprint reviews the current product; it does not expand Relay Studio into a commercial or hosted offering.
+Establish an evidence-backed quality and security baseline for the completed personal developer tool, remediate confirmed high-value findings through bounded dependency-ordered increments, and leave a prioritized, reproducible record for future maintenance. This program reviews and hardens the current product; it does not expand Relay Studio into a commercial or hosted offering.
 
 ### Demonstrated Maintainer Workflow
 
 A maintainer checks out the reviewed commit, runs the documented automated and interactive review procedures, traces every confirmed finding to code and an affected trust boundary, reproduces it with the smallest useful test, verifies the remediation, and records any accepted deferral with severity, rationale, owner, and retest condition.
 
-### Scope
+### Program Sequence
+
+#### Sprint 18A: Review Baseline And Finding Validation
+
+Status: Completed July 20, 2026. See the [review report](reviews/sprint-18a/review-report.md) and [remediation register](reviews/sprint-18a/remediation-register.md). The bounded review validated 26 distinct instances (0 critical, 10 high, 14 medium, 2 low), recorded architecture and code-quality deviations, and assigned every row to Sprints 18B-18E.
+
+- Freeze and record the reviewed commit, toolchain, operating systems, configurations, exclusions, source coverage, and limitations.
+- Complete distinct code-quality, architecture-conformance, and security review passes across React/TypeScript, Rust, persistence, import, execution, CI, and packaging.
+- Validate every retained candidate from source to user impact using synthetic data and loopback systems; reject false positives explicitly.
+- Assign severity only after validation and publish a redacted register with owner, target sprint, and retest trigger.
+- Exit when every retained candidate is confirmed, rejected, or explicitly recorded as unvalidated and no credential-bearing evidence has entered the repository.
+- Completion note: repeated discovery was stopped after six shards converged on the same paths; duplicate IDs were reconciled, each distinct control was validated once, and no retained row remains unvalidated.
+
+#### Sprint 18B: Network And Import Boundary Hardening
+
+Status: Completed July 20, 2026. See the [Sprint 18B closure report](reviews/sprint-18b/closure-report.md) and the updated [remediation register](reviews/sprint-18a/remediation-register.md). All six assigned findings are fixed and regression-tested without changing the project schema, Tauri capabilities, or CSP.
+
+- Prevent cross-origin redirects from forwarding Authorization, cookies, API keys, or custom credential headers.
+- Return final response identity from native HTTP and reapply same-origin policy after external OpenAPI-reference redirects.
+- Expose Swagger UI secondary destinations before retrieval and validate that proxy bypass rules match their documented behavior.
+- Cover same-origin success, cross-origin rejection, redirect loops, malformed locations, proxy bypass, and redacted failures with failing-first TypeScript/Rust tests, controlled loopback receivers, and interactive verification.
+- Exit when no network or import transition can cross an unreviewed origin with credentials or trusted imported content.
+
+#### Sprint 18C: Local File, Persistence, And Redaction Safety
+
+Status: Completed July 20, 2026. See the [Sprint 18C closure report](reviews/sprint-18c/closure-report.md) and updated [remediation register](reviews/sprint-18a/remediation-register.md). All eight assigned findings are fixed with schema-v1 compatibility, default migration for settings added after older schema-v1 files were created, explicit legacy raw-response recovery guidance, and no Tauri capability or CSP expansion.
+
+- Treat multipart file paths loaded from a project as unarmed until the user reselects or explicitly approves the local file and destination for the current session.
+- Centralize URL and value redaction across saved-response bodies, metadata, artifacts, project persistence, diagnostics, and errors.
+- Remove URL userinfo and sensitive query values and cover common API-key spellings case-insensitively before declaring an artifact redacted.
+- Validate and harden saved-response path ownership plus nested project state, retaining compatibility or providing explicit migration/recovery guidance.
+- Exit when synthetic secret canaries cannot survive persistence and a reopened project cannot read or transmit an unapproved local file.
+
+#### Sprint 18D: Execution Integrity And Resource Bounds
+
+- Prevent flow response mappings from silently changing later credential destinations and prevent secret captures from entering persistable project state.
+- Validate and correct success/failure edge semantics.
+- Enforce explicit byte, document, depth, breadth, and output limits for OpenAPI graphs and saved-response comparison.
+- Cover boundary limits, malformed/cyclic inputs, secret persistence, branch outcomes, cancellation, and interactive failure recovery with failing-first tests.
+- Exit when execution state cannot silently widen its trust boundary and excessive inputs fail early with typed, actionable, redacted errors.
+
+#### Sprint 18E: Delivery Hardening And Final Readiness Review
+
+- Restrict protected CI configuration to the exact step that needs it and use immutable action revisions where practical.
+- Expand secret inspection for modern token formats, unpacked installer content, and relevant OOXML parts and relationships; report skipped content as a limitation rather than a pass.
+- Re-run all applicable quality, security, coverage, live REST, interactive, runtime-log, build, and packaged-platform gates.
+- Update the threat model, architecture material, final report, remediation register, and readiness decision from verified evidence.
+- Exit only when no unresolved critical/high finding remains and every lower-severity deferral records impact, rationale, owner, target milestone, and retest trigger.
+
+### Shared Scope
 
 - Review TypeScript, React, and Rust code for correctness, strict typing, error handling, maintainability, duplication, dead paths, boundary validation, and test quality.
 - Review component ownership, service boundaries, native command boundaries, persistence/schema compatibility, request execution, OpenAPI import, flow execution, and packaging architecture against the documented design.
@@ -898,7 +947,7 @@ A maintainer checks out the reviewed commit, runs the documented automated and i
 3. Perform separate code, architecture, and security discovery passes so one perspective does not substitute for another.
 4. Reproduce and validate each candidate; discard false positives with a concise evidence-based explanation.
 5. Classify confirmed findings as critical, high, medium, low, or informational and record user impact plus exploitability or failure likelihood.
-6. Remediate critical and high findings before sprint closure. Defer lower-severity findings only with rationale, owner, target milestone, and a condition that triggers reassessment.
+6. Assign each confirmed finding to Sprint 18B, 18C, 18D, or 18E. Remediate critical and high findings before program closure; defer lower-severity findings only with rationale, owner, target milestone, and a condition that triggers reassessment.
 7. Re-run targeted tests, representative suites, coverage/security gates, the running application workflow, runtime-log inspection, and relevant packaged-platform checks.
 8. Publish a redacted final report that contains no credentials, local secrets, sensitive response bodies, or unsafe proof-of-concept material.
 
@@ -909,7 +958,7 @@ A maintainer checks out the reviewed commit, runs the documented automated and i
 - Refactoring broadly during review and obscuring whether a security or correctness fix actually works.
 - Reducing coverage, weakening CSP/capabilities, bypassing redaction, or adding silent fallback to make a finding disappear.
 - Logging secrets or committing local acceptance configuration, response data, proof-of-concept credentials, or generated reports containing sensitive paths.
-- Declaring success while critical/high findings, unexplained architecture deviations, failing gates, or untested remediations remain.
+- Declaring an increment or the program successful while its exit criteria, critical/high findings, unexplained architecture deviations, failing gates, or remediation tests remain incomplete.
 
 ### Explicit Non-Goals
 
@@ -929,6 +978,7 @@ A maintainer checks out the reviewed commit, runs the documented automated and i
 - TypeScript service and Rust native coverage remain at least 90 percent; type checking, lint, tests, builds, dependency/license checks, secret scanning, Clippy, and cargo-deny pass.
 - Live REST acceptance and packaged-platform checks are run when their protected configuration and platform are applicable; skips and limitations are explicit and are not represented as passing evidence.
 - Changed behavior is exercised interactively in Relay Studio, relevant edge cases are attempted, and browser/Rust runtime logs contain no unexplained errors or secret leakage.
+- Sprint 18A produces the validated baseline; Sprints 18B-18D remediate their assigned boundaries; Sprint 18E produces the final readiness decision.
 - The redacted final report, remediation register, updated architecture/security documentation, and final readiness decision are committed without credentials or local-only data.
 
 ## Cross-Sprint Backlog

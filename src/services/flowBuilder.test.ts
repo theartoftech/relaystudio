@@ -118,6 +118,23 @@ describe("flow builder", () => {
     expect(messages).toContain("Mapping (unnamed) has invalid JSONPath: JSONPath must start with $. or be exactly $.");
   });
 
+  it("rejects response mappings that can silently change the request destination", () => {
+    const destinationMapping = {
+      ...flow,
+      mappings: [{
+        id: "destination",
+        sourceNodeId: flow.nodes[0].id,
+        jsonPath: "$.nextOrigin",
+        variableName: "baseUrl",
+        secret: false
+      }]
+    };
+
+    expect(validateFlow(destinationMapping, services).map((issue) => issue.message)).toContain(
+      "Response mappings cannot change baseUrl. Edit the environment destination explicitly before running the flow."
+    );
+  });
+
   it("resolves generated requests by unique normalized request name", () => {
     const generatedLogin = {
       ...services[0],
@@ -318,6 +335,37 @@ describe("flow builder", () => {
     });
     expect(transport.mock.calls[1][0].headers.Authorization).toBe("Bearer mapped-token");
     expect(result.events.map((event) => event.message)).toContain("[Login] captured accessToken as a secret.");
+  });
+
+  it("forces credential-shaped response mappings to remain secret even when mislabeled", async () => {
+    const credentialFlow = {
+      ...flow,
+      nodes: flow.nodes.slice(0, 1),
+      edges: [],
+      steps: ["login"],
+      mappings: [{
+        id: "api-key",
+        sourceNodeId: flow.nodes[0].id,
+        jsonPath: "$.api_key",
+        variableName: "sessionValue",
+        secret: false
+      }]
+    };
+    const transport = vi.fn().mockResolvedValue({
+      status: 200,
+      statusText: "OK",
+      headers: { "content-type": "application/json" },
+      body: `{"api_key":"captured-secret"}`,
+      durationMs: 5
+    }) as HttpTransport & ReturnType<typeof vi.fn>;
+
+    const result = await runFlow(credentialFlow, services, qa, transport);
+
+    expect(result.environment.variables.find((variable) => variable.name === "sessionValue")).toMatchObject({
+      value: "captured-secret",
+      secret: true
+    });
+    expect(result.events.map((event) => event.message)).toContain("[Login] captured sessionValue as a secret.");
   });
 
   it("captures new and structured mapping values", async () => {

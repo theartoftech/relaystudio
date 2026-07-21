@@ -77,6 +77,26 @@
       "destination": "Retained authoritative Markdown; referenced by the Word library"
     },
     {
+      "source": "documentation/reviews/sprint-18a/remediation-register.md",
+      "action": "retain",
+      "destination": "Retained authoritative Markdown; referenced by the Word library"
+    },
+    {
+      "source": "documentation/reviews/sprint-18a/review-report.md",
+      "action": "retain",
+      "destination": "Retained authoritative Markdown; referenced by the Word library"
+    },
+    {
+      "source": "documentation/reviews/sprint-18b/closure-report.md",
+      "action": "retain",
+      "destination": "Retained authoritative Markdown; referenced by the Word library"
+    },
+    {
+      "source": "documentation/reviews/sprint-18c/closure-report.md",
+      "action": "retain",
+      "destination": "Retained authoritative Markdown; referenced by the Word library"
+    },
+    {
       "source": "documentation/sample-test-project-definition.md",
       "action": "retain",
       "destination": "Retained authoritative Markdown; referenced by the Word library"

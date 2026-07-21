@@ -1,5 +1,5 @@
 import type { SavedResponseMetadata } from "../project/projectModel";
-import { isSecretKey, redactValue } from "../lib/redaction";
+import { redactJsonValue, redactText, redactUrl } from "../lib/redaction";
 import type { ExecutableRequest, ExecutedResponse } from "./serviceRunner";
 import { parseResponseBody } from "./serviceRunner";
 import type { ProjectService } from "../project/projectModel";
@@ -35,13 +35,13 @@ export function buildSavedResponseDraft(input: {
   const metadata: SavedResponseMetadata = {
     id: savedResponseId(input.service.id, capturedAt),
     serviceId: input.service.id,
-    serviceName: input.service.name,
+    serviceName: redactText(input.service.name),
     fileName: fileNameFromPath(input.filePath),
     filePath: input.filePath,
     method: input.request.method,
-    url: input.request.url,
+    url: redactUrl(input.request.url),
     status: input.response.status,
-    statusText: input.response.statusText,
+    statusText: redactText(input.response.statusText),
     durationMs: input.response.durationMs,
     contentType: input.response.contentType,
     sizeBytes: redactedBody.length,
@@ -64,23 +64,24 @@ export function buildSavedResponseDraft(input: {
 }
 
 export function artifactToExecutedResponse(artifact: SavedResponseArtifact): ExecutedResponse {
-  validateSavedResponseArtifact(artifact);
-  const parsed = parseResponseBody(artifact.body, artifact.metadata.contentType);
+  const canonical = canonicalizeSavedResponseArtifact(artifact);
+  const parsed = parseResponseBody(canonical.body, canonical.metadata.contentType);
   return {
-    status: artifact.metadata.status,
-    statusText: artifact.metadata.statusText,
+    status: canonical.metadata.status,
+    statusText: canonical.metadata.statusText,
     headers: {
-      "content-type": artifact.metadata.contentType,
-      "x-relay-studio-saved-response": artifact.metadata.capturedAt
+      "content-type": canonical.metadata.contentType,
+      "x-relay-studio-saved-response": canonical.metadata.capturedAt
     },
-    body: artifact.body,
-    durationMs: artifact.metadata.durationMs,
-    ok: artifact.metadata.status >= 200 && artifact.metadata.status < 300,
-    contentType: artifact.metadata.contentType,
+    body: canonical.body,
+    durationMs: canonical.metadata.durationMs,
+    ok: canonical.metadata.status >= 200 && canonical.metadata.status < 300,
+    contentType: canonical.metadata.contentType,
     prettyBody: parsed.prettyBody,
-    rawBody: artifact.body,
+    rawBody: canonical.body,
     parseError: parsed.parseError,
-    capturedVariables: []
+    capturedVariables: [],
+    finalUrl: canonical.metadata.url
   };
 }
 
@@ -100,13 +101,46 @@ export function assertSavedResponsePath(path: string) {
 }
 
 export function validateSavedResponseArtifact(artifact: SavedResponseArtifact) {
-  if (artifact.format !== SAVED_RESPONSE_FORMAT) {
-    throw new Error("Unsupported saved response file format.");
-  }
-  if (artifact.schemaVersion !== SAVED_RESPONSE_SCHEMA_VERSION) {
-    throw new Error(`Unsupported saved response schema version: ${artifact.schemaVersion}`);
+  validateSavedResponseStructure(artifact);
+  if (artifact.metadata.redacted !== true) throw new Error("Saved response artifact must be redacted before use.");
+}
+
+export function canonicalizeSavedResponseArtifact(artifact: SavedResponseArtifact): SavedResponseArtifact {
+  validateSavedResponseStructure(artifact);
+  const body = redactResponseBody(artifact.body, artifact.metadata.contentType);
+  const canonical: SavedResponseArtifact = {
+    ...structuredClone(artifact),
+    metadata: {
+      ...structuredClone(artifact.metadata),
+      serviceName: redactText(artifact.metadata.serviceName),
+      fileName: redactText(artifact.metadata.fileName),
+      url: redactUrl(artifact.metadata.url),
+      statusText: redactText(artifact.metadata.statusText),
+      sizeBytes: body.length,
+      redacted: true
+    },
+    body
+  };
+  validateSavedResponseArtifact(canonical);
+  return canonical;
+}
+
+function validateSavedResponseStructure(artifact: SavedResponseArtifact): void {
+  if (!artifact || typeof artifact !== "object") throw new Error("Saved response artifact must be an object.");
+  if (artifact.format !== SAVED_RESPONSE_FORMAT) throw new Error("Unsupported saved response file format.");
+  if (artifact.schemaVersion !== SAVED_RESPONSE_SCHEMA_VERSION) throw new Error(`Unsupported saved response schema version: ${artifact.schemaVersion}`);
+  if (!artifact.metadata || typeof artifact.metadata !== "object") throw new Error("Saved response metadata is required.");
+  for (const [field, label] of [
+    ["id", "id"], ["serviceId", "service id"], ["serviceName", "service name"], ["fileName", "file name"],
+    ["filePath", "file path"], ["url", "URL"], ["statusText", "status text"], ["contentType", "content type"], ["capturedAt", "capture timestamp"]
+  ] as const) {
+    if (typeof artifact.metadata[field] !== "string" || !artifact.metadata[field].trim()) throw new Error(`Saved response ${label} metadata is required.`);
   }
   assertSavedResponsePath(artifact.metadata.filePath);
+  for (const field of ["status", "durationMs", "sizeBytes"] as const) {
+    if (typeof artifact.metadata[field] !== "number" || !Number.isFinite(artifact.metadata[field])) throw new Error(`Saved response ${field} metadata must be a finite number.`);
+  }
+  if (typeof artifact.body !== "string") throw new Error("Saved response body is required.");
 }
 
 export function responseWarning(metadata: SavedResponseMetadata): string | null {
@@ -125,31 +159,10 @@ export function redactResponseBody(body: string, contentType: string): string {
     try {
       return JSON.stringify(redactJsonValue(JSON.parse(body)), null, 2);
     } catch {
-      return redactRawBody(body);
+      return redactText(body);
     }
   }
-  return redactRawBody(body);
-}
-
-function redactJsonValue(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map(redactJsonValue);
-  }
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([key, nested]) => [
-        key,
-        isSecretKey(key) ? redactValue(key, String(nested ?? "")) : redactJsonValue(nested)
-      ])
-    );
-  }
-  return value;
-}
-
-function redactRawBody(body: string): string {
-  return body
-    .replace(/bearer\s+[a-z0-9._~+/-]+=*/gi, "Bearer ********")
-    .replace(/("?(?:accessToken|access_token|token|password|secret|clientSecret)"?\s*[:=]\s*)("[^"]+"|[^\s,}]+)/gi, "$1\"********\"");
+  return redactText(body);
 }
 
 function isJsonResponse(body: string, contentType: string): boolean {

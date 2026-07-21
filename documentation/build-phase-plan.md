@@ -680,46 +680,112 @@ Implemented. See the Sprint Portfolio for the delivery summary.
 
 - Commercial signing, notarization, store submission, hosted collaboration, or backend persistence.
 
-## Sprint 18: Code, Architecture, And Security Review
+## Sprint 18A: Review Baseline And Finding Validation
+
+Status: Completed July 20, 2026. The frozen review found no critical issue and validated 26 independently addressable instances: 10 high, 14 medium, and 2 low. The authoritative evidence is the [Sprint 18A review report](reviews/sprint-18a/review-report.md) and [remediation register](reviews/sprint-18a/remediation-register.md).
 
 ### Goals
 
-- Establish a reproducible quality and security baseline for the completed personal developer tool.
-- Validate code and architectural conformance across the React/TypeScript, Rust, persistence, import, execution, CI, and packaging boundaries.
-- Remediate confirmed high-value findings without broadening product scope or weakening existing controls.
-
-### Review Scope
-
-- Code correctness, strict typing, explicit errors, maintainability, duplication, dead paths, test quality, and coverage integrity.
-- Architecture ownership, dependency direction, trust boundaries, native command registration, schema compatibility, and documented-versus-implemented deviations.
-- Threat model, untrusted inputs, filesystem and HTTP access, redaction, diagnostics, secrets, dependencies, CI, Tauri capabilities, CSP, and packaged resources.
-- Static, automated, interactive, live REST, and packaged-platform evidence applicable to the reviewed commit.
-
-### Deliverables
-
-- Redacted code/architecture/security review report with exact scope, commit, methods, tools, environments, exclusions, and limitations.
-- Validated finding register with severity, evidence, impact, disposition, owner, target milestone, and retest trigger.
-- Regression tests and targeted fixes for confirmed defects selected for remediation.
-- Updated threat model, architecture narrative/UML where material deviations are found, and final readiness decision.
+- Freeze a reproducible review target and complete separate code, architecture, and security reviews.
+- Validate every retained candidate from source to user impact before assigning severity or remediation scope.
+- Publish a redacted finding register and dependency-aware remediation decision for Sprints 18B-18E.
 
 ### Exit Criteria
 
-- No unresolved critical or high findings.
-- Scanner candidates are validated before being reported as defects; false positives and accepted lower-risk items have evidence-based dispositions.
-- Every remediated application defect has a failing-before/passing-after regression test and passes representative automated and interactive verification.
-- TypeScript service and Rust native coverage remain at least 90 percent, and all existing quality, security, dependency, license, secret, build, and packaging gates applicable to the reviewed commit pass.
-- The committed report and evidence contain no credentials, local acceptance configuration, sensitive response bodies, or unsafe proof-of-concept data.
+- The reviewed commit, tools, environments, source coverage, exclusions, trust boundaries, and limitations are recorded.
+- Every retained candidate is confirmed, rejected, or explicitly marked unvalidated; confirmed findings have evidence, severity, affected boundary, owner, target sprint, and retest condition.
+- Architecture deviations and code-quality defects are reconciled with the documented design rather than inferred from scanner output.
+- Review evidence contains no credentials, local acceptance configuration, sensitive response bodies, or unsafe proof-of-concept data.
 
-### Important Failure Modes
+### Completion Evidence
 
-- Reviewing only the frontend or relying on scanner output without tracing source to user impact.
-- Hiding findings through broad refactors, silent fallbacks, exclusions, reduced coverage, or weakened CSP/capabilities.
-- Treating unavailable protected or platform-specific tests as passing evidence.
-- Claiming certification or vulnerability-free status from an internal review.
+- Duplicate discovery output was consolidated into stable per-instance rows; no additional repository-wide scan is required for this increment.
+- Five exact paths have direct synthetic/loopback reproductions and the remaining paths have complete source/control/sink traces plus focused test evidence.
+- The dependency-ordered queue assigns network/import work to 18B, local-file/persistence/redaction work to 18C, execution/resource work to 18D, and CI/artifact evidence work to 18E.
+- Focused closure verification passed 82 tests across the affected TypeScript service and gate-contract surfaces.
 
-### Non-Goals
+## Sprint 18B: Network And Import Boundary Hardening
 
-- New product features unrelated to a confirmed finding.
+Status: Completed July 20, 2026. RS18A-012, RS18A-013, RS18A-015, RS18A-020, RS18A-021, and RS18A-026 are fixed and verified. The native client follows only same-origin redirects, reports final response identity, applies validated proxy bypass rules, and returns actionable redirect failures. Swagger UI secondary definitions require a visible explicit Load action; OpenAPI final origins are revalidated; credential-bearing import URLs are rejected before display or retrieval; and flow mappings cannot write `baseUrl`.
+
+### Goals
+
+- Prevent credentials and imported content from crossing an unreviewed redirect or secondary-document origin.
+- Make native HTTP redirect behavior explicit and return enough response identity for callers to enforce origin policy.
+- Validate proxy bypass behavior and Swagger UI secondary-destination review.
+
+### Exit Criteria
+
+- Cross-origin redirects never forward Authorization, cookies, API keys, or configured custom credential headers.
+- External OpenAPI references revalidate the final response origin; a redirect outside the allowed origin fails with an actionable typed error.
+- Swagger UI `url` and `configUrl` discovery exposes the resolved destination before loading it, and proxy bypass behavior matches its documented contract.
+- Unit, Rust loopback, component, and meaningful interactive tests cover same-origin success, cross-origin rejection, redirect loops, malformed locations, and redacted errors.
+
+### Completion Evidence
+
+- Failing-first TypeScript and Rust regressions cover secondary-destination cancellation, credential-bearing URLs, external-reference final-origin changes, protected `baseUrl`, same-origin redirects, cross-origin rejection before header replay, missing locations, redirect limits, final identity, proxy bypass receivers, and malformed bypass entries.
+- The representative suites passed with 248 TypeScript tests, 33 Rust tests, and 56 Playwright tests across Chromium and WebKit; the live REST suite remained explicitly skipped when not configured.
+- The current unsigned macOS application bundle rebuilt successfully; CSP, Tauri capabilities, project schema, and installer inputs were unchanged.
+
+## Sprint 18C: Local File, Persistence, And Redaction Safety
+
+Status: Completed July 20, 2026. Eight assigned findings are closed. Persisted multipart paths are removed on save and any in-memory legacy path requires an exact path plus destination-origin approval for the current session. Saved responses use self-describing validated envelopes for both `.json` and `.txt`, nested schema-v1 project state is validated before use, missing legacy schema-v1 settings receive typed current defaults, credential-shaped response mappings are forced secret, and canonical redaction now covers URLs, values, project rows, form fields, artifacts, diagnostics, comparisons, and normalized errors.
+
+### Goals
+
+- Require an explicit current-session decision before a persisted multipart path can read and upload a local file.
+- Apply canonical redaction to response bodies, URLs, metadata, artifacts, project state, diagnostics, and errors.
+- Strengthen project and saved-response file boundaries without breaking compatible projects.
+
+### Exit Criteria
+
+- Reopened or imported multipart file fields are unarmed until the user reselects or explicitly approves the file and destination for the current session.
+- URL userinfo and sensitive query values are redacted before saved-response metadata or project persistence.
+- Common API-key spellings are redacted case-insensitively, and an artifact is marked redacted only after canonical redaction succeeds.
+- Arbitrary saved-response paths and malformed nested project state are rejected or safely migrated with actionable guidance.
+- Persistence/reload, redaction canaries, local-file negative paths, and the complete user workflow have automated and interactive coverage.
+
+### Completion Evidence
+
+- Failing-first tests cover approval binding and invalidation, missing/disabled files, credential-shaped mappings, userinfo and API-key query canaries, malformed nested project paths, project save/reload, imported artifacts, arbitrary `.txt` files, and response-path mismatches.
+- The representative suites passed with 263 TypeScript tests (one protected live suite skipped), 34 Rust tests, and 56 Playwright tests across Chromium and WebKit.
+- TypeScript coverage passed at 95.62% statements, 90.05% branches, 98.34% functions, and 97.13% lines; the current unsigned macOS application bundle rebuilt successfully.
+- Browser interactive verification confirmed readable approval states, destination invalidation, blocked unapproved sends, and clean runtime logs. Packaged native verification exercises the same UI plus Rust artifact and multipart boundaries.
+
+## Sprint 18D: Execution Integrity And Resource Bounds
+
+### Goals
+
+- Prevent response mappings or captured values from silently changing later credential destinations or persisting runtime secrets.
+- Correct flow branch semantics and place explicit bounds on imported documents and response comparisons.
+- Preserve useful developer workflows while failing early and actionably on excessive or malformed input.
+
+### Exit Criteria
+
+- Flow mappings cannot change a credentialed request origin without an explicit reviewed policy, and secret captures do not enter persistable project state.
+- Success and failure edges execute only under their documented predecessor outcomes.
+- OpenAPI graphs and response comparisons enforce documented byte, document, depth, breadth, and diff-output limits.
+- Boundary-limit, cycle, malformed-input, secret-persistence, branch, cancellation, and interactive regression tests pass without reducing coverage.
+
+## Sprint 18E: Delivery Hardening And Final Readiness Review
+
+### Goals
+
+- Minimize CI secret exposure and make secret-scanning coverage and exclusions explicit.
+- Strengthen installer, dependency-lockfile, and OOXML inspection where current gates have blind spots.
+- Re-run the complete quality, security, interactive, live, and packaged-platform evidence loop and publish the final decision.
+
+### Exit Criteria
+
+- Protected live-test configuration exists only in the exact step that requires it, and security-sensitive actions use immutable revisions where practical.
+- Modern token formats, unpacked installer contents, and relevant OOXML parts and relationships are scanned; skipped or unsupported content is reported as a limitation, not a pass.
+- No unresolved critical or high finding remains; lower-severity deferrals record impact, rationale, owner, milestone, and retest trigger.
+- TypeScript service and Rust native coverage remain at least 90 percent, and all applicable type, lint, test, build, dependency, license, secret, Clippy, cargo-deny, live REST, interactive, and package gates pass.
+- The threat model, architecture documentation, redacted review report, remediation register, and final readiness decision match the verified implementation.
+
+### Program Non-Goals
+
+- New product features unrelated to a validated finding.
 - Paid penetration testing, compliance certification, commercial signing, notarization, marketplace submission, hosted persistence, or collaboration.
 - Large architectural rewrites without separate approval and migration planning.
 

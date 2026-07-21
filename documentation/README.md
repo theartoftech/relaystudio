@@ -2,7 +2,7 @@
 
 Relay Studio uses a curated documentation library instead of preserving every historical sprint file. Word documents are authoritative for onboarding, architecture narrative, product handoff, UML guidance, sprint summaries, consolidated QA, and release operations. Markdown remains authoritative for build criteria, engineering policy, design constraints, and operative test procedures.
 
-The library reflects completed Sprint 17 native multipart file workflows and the planned Sprint 18 code, architecture, and security review. Relay Studio imports, persists, and sends mixed text/file multipart requests in desktop mode; Sprint 18 will establish a reproducible review baseline, validate findings, remediate confirmed high-value defects, and publish a redacted readiness record.
+The library reflects completed Sprint 17 native multipart file workflows, completed Sprint 18A review baseline and finding validation, completed Sprint 18B network/import boundary hardening, completed Sprint 18C local-file/persistence/redaction safety, and planned Sprints 18D-18E. Relay Studio now keeps redirects on the reviewed origin, requires review before retrieving a Swagger UI secondary destination, revalidates external-reference destinations, removes persisted multipart file authority, binds file approval to the current session and destination origin, rejects disguised response files, deeply validates project state, and applies canonical redaction across persistence and output boundaries.
 
 ## Word Library
 
@@ -33,6 +33,13 @@ The library reflects completed Sprint 17 native multipart file workflows and the
 - [UX Blueprint](sprint-1-ux-blueprint.md)
 - [Current Human Test Script](current-human-test-script.md)
 - [Packaged Windows QA Script](sprint-10b-3-windows-qa-script.md)
+
+## Sprint 18 Review Records
+
+- [Sprint 18A Review Baseline and Finding Validation](reviews/sprint-18a/review-report.md)
+- [Sprint 18A Remediation Register](reviews/sprint-18a/remediation-register.md)
+- [Sprint 18B Network and Import Boundary Closure](reviews/sprint-18b/closure-report.md)
+- [Sprint 18C Local File, Persistence, and Redaction Closure](reviews/sprint-18c/closure-report.md)
 
 ## Governance
 

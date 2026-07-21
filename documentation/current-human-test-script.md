@@ -176,6 +176,22 @@ These sample services use placeholder endpoints unless you point the environment
    - The saved response appears in the explorer.
    - Reopened response metadata and body match the saved run.
    - Saved artifacts do not expose credentials.
+   - Both `.json` and `.txt` files contain a validated Relay response envelope; a renamed arbitrary text file is rejected with recovery guidance.
+   - Moving or substituting an artifact so its embedded path differs from project metadata is rejected.
+
+## Test 12A: Multipart Current-Session File Approval
+
+1. Open or import a request with a `multipart/form-data` file field.
+2. Enter a synthetic local fixture path and click `Send Request` without approving it.
+3. Confirm the send is blocked before native file access and the status identifies the filename and destination origin.
+4. Click `Approve file` and confirm the control changes to `Approved for session`.
+5. Change the request to a different origin and confirm the control returns to `Approve file` and Send is blocked.
+6. Restore the original origin, approve, and send to a controlled loopback receiver; verify the exact fixture bytes arrive.
+7. Save and reopen the project.
+8. Expected result:
+   - The persisted file path is empty after reopen.
+   - Approval never survives a path, origin, project, or application-session change.
+   - Browser mode still rejects local-file transmission after approval with the desktop-mode guidance.
 
 ## Test 13: Flow Builder Open
 
@@ -289,6 +305,52 @@ These sample services use placeholder endpoints unless you point the environment
    - Saved response metadata survives round trip.
    - Secret-bearing values remain protected.
 
+## Test 19: Swagger UI Secondary Destination Review
+
+1. Use a controlled Swagger UI page whose `url` or `configUrl` points to a second OpenAPI document.
+2. Click `Inspect Definition`.
+3. Confirm the page URL and resolved definition destination are visible and the definition receiver has not been contacted.
+4. Click `Cancel`; confirm the review closes and the receiver remains untouched.
+5. Inspect again, click `Load Discovered Definition`, select a strict subset, and use `Add Selected`.
+6. Expected result:
+   - Inspection never retrieves the secondary document automatically.
+   - Cross-origin destinations are visibly identified but still require the explicit Load action.
+   - Credential userinfo or literal `token`, `apiKey`, password, cookie, or secret query values fail before display or retrieval.
+   - Selected requests are added; unselected requests are absent.
+
+## Test 20: Native Redirect Boundary
+
+1. Run Relay Studio natively against a controlled loopback receiver.
+2. Send a request with synthetic credential-class headers through a same-origin relative redirect.
+3. Confirm the response succeeds and `Final origin` matches the reviewed origin.
+4. Repeat with a redirect to a different host or port and inspect the second receiver.
+5. Repeat with a missing `Location` header and a redirect loop.
+6. Repeat a redirect in browser development mode.
+7. Expected result:
+   - Same-origin redirects complete and return final response identity.
+   - Cross-origin redirects fail before the second receiver is contacted or any header is replayed.
+   - Missing destinations and loops produce actionable errors without request paths or credentials.
+   - Browser development mode blocks the redirect and directs the developer to enter the final URL explicitly.
+
+## Test 21: Proxy Bypass Contract
+
+1. Configure a controlled proxy and direct loopback receiver.
+2. Add the direct host to `Proxy bypass list` and send a request.
+3. Confirm the direct receiver is contacted and the proxy is not.
+4. Enter a URL, port-specific entry, wildcard label, malformed domain, or invalid CIDR prefix.
+5. Expected result:
+   - Valid comma-separated domains, IP addresses, CIDR ranges, and `*` are accepted.
+   - Malformed entries fail explicitly; they are never ignored silently.
+
+## Test 22: Protected Flow Destination
+
+1. Add or edit a response mapping and enter `baseUrl` with different casing or surrounding whitespace.
+2. Validate or run the flow.
+3. Expected result:
+   - The flow is blocked before any request runs.
+   - The error instructs the developer to edit the environment destination explicitly.
+   - Ordinary non-destination mappings continue to work.
+
 ## Approval Criteria
 
 Approve check-in only if:
@@ -301,4 +363,5 @@ Approve check-in only if:
 6. Response, console, problems, and inspector are available without crowding the first screen.
 7. Major panes can be resized.
 8. Flow nodes stay attached to the pointer while dragging.
-9. No credentials or secret values are visible in logs, saved responses, or project artifacts.
+9. No credentials or secret values are visible in logs, saved responses, project artifacts, or OpenAPI destination review.
+10. Cross-origin redirects, malformed proxy bypass entries, and `baseUrl` response mappings fail before widening the network trust boundary.

@@ -1,5 +1,5 @@
 import type { ExecutedResponse } from "./serviceRunner";
-import { validateSavedResponseArtifact, type SavedResponseArtifact } from "./savedResponses";
+import { canonicalizeSavedResponseArtifact, type SavedResponseArtifact } from "./savedResponses";
 
 export type ResponseChangeType = "added" | "removed" | "changed" | "unchanged";
 
@@ -26,11 +26,8 @@ export interface SavedResponseComparison {
 }
 
 export function compareSavedResponses(before: SavedResponseArtifact, after: SavedResponseArtifact): SavedResponseComparison {
-  validateSavedResponseArtifact(before);
-  validateSavedResponseArtifact(after);
-  if (!before.metadata.redacted || !after.metadata.redacted) {
-    throw new Error("Response comparison requires redacted saved responses.");
-  }
+  before = canonicalizeSavedResponseArtifact(before);
+  after = canonicalizeSavedResponseArtifact(after);
   const beforeJson = parseJson(before);
   const afterJson = parseJson(after);
   const kind = beforeJson.valid && afterJson.valid ? "json" : "raw";
@@ -64,7 +61,8 @@ export function comparisonToExecutedResponse(comparison: SavedResponseComparison
     prettyBody: body,
     rawBody: body,
     parseError: null,
-    capturedVariables: []
+    capturedVariables: [],
+    finalUrl: ""
   };
 }
 

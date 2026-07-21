@@ -47,9 +47,9 @@ Required controls:
 | --- | --- |
 | Console dock | Never print secret values |
 | Response viewer | Redact secret response fields when mapped or classified as secret |
-| Saved response metadata | Never include project credentials |
-| Saved response body | Preserve server response by default, but redact known auth fields when saving from auth flows unless user explicitly exports raw with warning |
-| Project file | Encrypt secret values and never store plaintext |
+| Saved response metadata | Canonically remove URL userinfo and mask sensitive query values before marking the artifact redacted |
+| Saved response body | Canonically redact known secret keys and bearer values before every save, reopen, or comparison |
+| Project file | Remove secret-variable values, persisted multipart paths, and literal secrets from headers, URLs, parameters, JSON/form bodies, auth profiles, mappings, and proxy settings |
 | Diagnostics bundle | Redact secrets by default |
 | Error messages | Include context without secret values |
 | Request preview | Show generated secret headers as masked |
@@ -57,6 +57,7 @@ Required controls:
 | Variables inspector | Mask secret variables and vault values |
 | Flow mapping panel | Show secret mapping names, not values |
 | Test output | Fail if secret-like values appear |
+| OpenAPI destination review | Reject credential userinfo and literal sensitive query values before display or retrieval; allow only explicit `{{variable}}` placeholders |
 
 ## Redaction Format
 
@@ -82,6 +83,8 @@ Inputs must be classified as secret when:
 - The variable is stored in Vault.
 - The variable is explicitly marked secret.
 - The JSON field name matches common auth names such as `token`, `accessToken`, `refreshToken`, `password`, `clientSecret`, `apiKey`, or `secret`.
+- The normalized field name matches common API-key spellings such as `apiKey`, `api_key`, `api-key`, `x-api-key`, or case variants.
+- A response mapping selects a credential-shaped JSON path or credential-shaped destination variable, even if the mapping was labeled non-secret.
 - The auth mode generates the value.
 
 ## Test Requirements
@@ -93,6 +96,8 @@ Inputs must be classified as secret when:
 - Redaction utility masks known JSON auth field names.
 - Project serializer never emits plaintext secrets.
 - Diagnostics serializer never emits plaintext secrets.
+- URL redaction removes userinfo and masks sensitive query values while preserving non-secret routing context.
+- Saved-response reopen and comparison reapply canonical redaction instead of trusting persisted `redacted` metadata.
 
 ### Component Tests
 

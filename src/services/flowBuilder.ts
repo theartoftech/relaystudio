@@ -10,6 +10,7 @@ import type {
   ProjectService
 } from "../project/projectModel";
 import { runServiceRequest, type ExecutableRequest, type ExecutedResponse, type HttpTransport, type RunnerConsoleEvent } from "./serviceRunner";
+import { isSecretKey } from "../lib/redaction";
 
 export interface FlowValidationIssue {
   field: string;
@@ -237,6 +238,13 @@ export function validateFlow(flow: ProjectFlow, services: ProjectService[]): Flo
     }
     if (!mapping.variableName.trim()) {
       issues.push({ field: "mappings", message: "Mapping variable name is required.", severity: "error" });
+    }
+    if (mapping.variableName.trim().toLowerCase() === "baseurl") {
+      issues.push({
+        field: "mappings",
+        message: "Response mappings cannot change baseUrl. Edit the environment destination explicitly before running the flow.",
+        severity: "error"
+      });
     }
     try {
       parseJsonPath(mapping.jsonPath);
@@ -490,7 +498,7 @@ function applyResponseMappings(
       variables.push({
         name: mapping.variableName,
         value: stringifyMappedValue(value),
-        secret: mapping.secret
+        secret: mapping.secret || isSecretKey(mapping.variableName) || isSecretKey(mapping.jsonPath)
       });
     } catch (error) {
       issues.push({

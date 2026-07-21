@@ -67,7 +67,7 @@ describe("browser fallback saved response persistence", () => {
     await expect(persistence.readResponse({ ...saved.metadata, filePath: "/tmp/missing.json" })).rejects.toThrow("Saved response was not found");
   });
 
-  it("stores raw text files as redacted body content and rebuilds the artifact from metadata", async () => {
+  it("stores raw text files as self-describing Relay artifacts", async () => {
     const persistence = await createSavedResponsePersistence();
     const saved = {
       ...artifact(),
@@ -83,8 +83,25 @@ describe("browser fallback saved response persistence", () => {
 
     await persistence.saveResponse({ path: "/tmp/create-order.txt", artifact: saved, overwrite: false });
 
-    expect(localStorage.getItem("relay-studio:saved-response:/tmp/create-order.txt")).toBe("plain redacted body");
-    await expect(persistence.readResponse(saved.metadata)).resolves.toEqual(saved);
+    const stored = JSON.parse(localStorage.getItem("relay-studio:saved-response:/tmp/create-order.txt") ?? "{}");
+    expect(stored).toMatchObject({ body: "plain redacted body", metadata: { sizeBytes: 19, redacted: true } });
+    await expect(persistence.readResponse(saved.metadata)).resolves.toEqual(stored);
+  });
+
+  it("re-redacts imported artifacts instead of trusting their redacted flag", async () => {
+    const persistence = await createSavedResponsePersistence();
+    const saved = artifact();
+    const unsafe = {
+      ...saved,
+      metadata: { ...saved.metadata, url: "https://u:p@example.test/items?api_key=url-secret", redacted: true },
+      body: `{"api_key":"body-secret"}`
+    };
+    localStorage.setItem("relay-studio:saved-response:/tmp/create-order.json", JSON.stringify(unsafe));
+
+    const reopened = await persistence.readResponse(saved.metadata);
+
+    expect(JSON.stringify(reopened)).not.toMatch(/url-secret|body-secret|u:p/);
+    expect(reopened.metadata.redacted).toBe(true);
   });
 });
 

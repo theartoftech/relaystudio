@@ -132,19 +132,33 @@ test("opens command palette and import placeholder", async ({ page }) => {
 });
 
 test("inspects Swagger UI and imports only selected REST services", async ({ page }) => {
+  let definitionRequests = 0;
   await page.route("https://swagger.test/docs/", (route) => route.fulfill({ contentType: "text/html", body: '<script>SwaggerUIBundle({ url: "./openapi.json" })</script>' }));
-  await page.route("https://swagger.test/docs/openapi.json", (route) => route.fulfill({
-    contentType: "application/json",
-    body: JSON.stringify({ openapi: "3.0.4", info: { title: "Selection API" }, servers: [{ url: "https://api.test/v1" }], paths: {
-      "/orders": { get: { summary: "List Orders", responses: { "200": { description: "OK" } } }, post: { summary: "Create Order", responses: { "201": { description: "Created" } } } },
-      "/health": { get: { summary: "Health Check", responses: { "200": { description: "OK" } } } }
-    } })
-  }));
+  await page.route("https://swagger.test/docs/openapi.json", (route) => {
+    definitionRequests += 1;
+    return route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ openapi: "3.0.4", info: { title: "Selection API" }, servers: [{ url: "https://api.test/v1" }], paths: {
+        "/orders": { get: { summary: "List Orders", responses: { "200": { description: "OK" } } }, post: { summary: "Create Order", responses: { "201": { description: "Created" } } } },
+        "/health": { get: { summary: "Health Check", responses: { "200": { description: "OK" } } } }
+      } })
+    });
+  });
   await page.goto("/");
   await page.getByRole("button", { name: /Search commands/i }).click();
   await page.getByRole("dialog", { name: "Command palette" }).getByRole("button", { name: "Import API Docs" }).click();
   await page.getByLabel("Swagger UI or definition URL").fill("https://swagger.test/docs/");
   await page.getByRole("button", { name: "Inspect Definition" }).click();
+  const destinationReview = page.getByLabel("Swagger UI definition destination review");
+  await expect(destinationReview).toContainText("https://swagger.test/docs/openapi.json");
+  expect(definitionRequests).toBe(0);
+  await destinationReview.getByRole("button", { name: "Cancel" }).click();
+  await expect(destinationReview).toHaveCount(0);
+  expect(definitionRequests).toBe(0);
+  await page.getByRole("button", { name: "Inspect Definition" }).click();
+  await expect(destinationReview).toContainText("https://swagger.test/docs/openapi.json");
+  await destinationReview.getByRole("button", { name: "Load Discovered Definition" }).click();
+  expect(definitionRequests).toBe(1);
   await expect(page.getByText("3 of 3 selected")).toBeVisible();
   await page.getByLabel("Discovered REST services").getByText("Create Order").click();
   await expect(page.getByText("2 of 3 selected")).toBeVisible();
@@ -180,7 +194,7 @@ test("reviews external references and imports a PATCH form request", async ({ pa
   await expect(page.getByLabel("Form Fields value")).toHaveValue("Developer");
 });
 
-test("imports multipart file fields and explains the desktop send boundary", async ({ page }) => {
+test("reopened multipart files require current-session approval for the exact destination", async ({ page }) => {
   await page.route("https://swagger.test/upload-openapi.json", (route) => route.fulfill({
     contentType: "application/json",
     body: JSON.stringify({
@@ -241,7 +255,19 @@ test("imports multipart file fields and explains the desktop send boundary", asy
   await openDialog.getByRole("button", { name: "Open Project" }).click();
   await page.getByRole("button", { name: "POST Upload Asset" }).click();
   await page.getByRole("button", { name: "Body" }).click();
-  await expect(page.getByLabel("Form Fields asset value")).toHaveValue("/private/tmp/profile.png");
+  await expect(page.getByLabel("Form Fields asset value")).toHaveValue("");
+  await expect(page.getByRole("button", { name: "Approve asset file for this session" })).toBeDisabled();
+  await page.getByLabel("Form Fields asset value").fill("/private/tmp/profile.png");
+  await page.getByRole("button", { name: "Send Request" }).click();
+  await expect(page.getByLabel("Status bar")).toContainText("Approve local file 'profile.png' for https://upload.test before sending.");
+
+  await page.getByRole("button", { name: "Approve asset file for this session" }).click();
+  await expect(page.getByRole("button", { name: "Approved asset file for this session" })).toBeVisible();
+  await page.getByLabel("Request URL").fill("https://other-upload.test/assets");
+  await page.getByRole("button", { name: "Send Request" }).click();
+  await expect(page.getByLabel("Status bar")).toContainText("Approve local file 'profile.png' for https://other-upload.test before sending.");
+
+  await page.getByLabel("Request URL").fill("https://upload.test/assets");
   await page.getByRole("button", { name: "Send Request" }).click();
   await expect(page.getByLabel("Workbench").getByText(/Multipart file uploads require Relay Studio desktop mode/)).toBeVisible();
 });

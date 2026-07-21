@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatResponseSize } from "./responseFormatting";
+import { formatResponseDestination, formatResponseSize } from "./responseFormatting";
 
 describe("response formatting", () => {
   it("keeps small response bodies in bytes", () => {
@@ -17,5 +17,11 @@ describe("response formatting", () => {
 
   it("measures utf-8 bytes instead of JavaScript character count", () => {
     expect(formatResponseSize("é".repeat(512))).toBe("1 KB");
+  });
+
+  it("shows only a response origin so redirect credentials and query data stay hidden", () => {
+    expect(formatResponseDestination("https://developer:password@api.example.com/final?token=secret#result"))
+      .toBe("https://api.example.com");
+    expect(formatResponseDestination("not-a-url?token=secret")).toBe("Unavailable");
   });
 });

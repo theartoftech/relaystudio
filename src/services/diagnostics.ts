@@ -1,5 +1,6 @@
 import type { RelayProject } from "../project/projectModel";
 import type { RunnerConsoleEvent } from "./serviceRunner";
+import { redactText } from "../lib/redaction";
 
 export interface DiagnosticsBundleInput {
   appVersion: string;
@@ -55,7 +56,7 @@ export function createDiagnosticsBundle(input: DiagnosticsBundleInput): Diagnost
     },
     recentEvents: input.events.slice(-100).map((event) => ({
       ...event,
-      message: redactDiagnosticText(event.message)
+      message: redactText(event.message)
     }))
   };
 }
@@ -65,11 +66,4 @@ function countBy(values: string[]): Record<string, number> {
     ...counts,
     [value]: (counts[value] ?? 0) + 1
   }), {});
-}
-
-function redactDiagnosticText(value: string): string {
-  return value
-    .replace(/(Authorization\s*:\s*)Bearer\s+[^\s,;]+/gi, "$1Bearer ********")
-    .replace(/Bearer\s+[^\s,;]+/gi, "Bearer ********")
-    .replace(/((?:password|token|secret|api[-_]?key)\s*[:=]\s*)([^\s,;]+)/gi, "$1********");
 }

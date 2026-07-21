@@ -37,6 +37,21 @@ export interface ParsedOpenApi {
   };
 }
 
+export interface SwaggerUiDefinitionDiscovery {
+  kind: "swagger-ui";
+  pageUrl: string;
+  definitionUrl: string;
+}
+
+export type OpenApiUrlInspection =
+  | { kind: "definition"; parsed: ParsedOpenApi }
+  | SwaggerUiDefinitionDiscovery;
+
+interface LoadedOpenApiDocument {
+  document: JsonObject;
+  finalUrl: string;
+}
+
 export function discoverDefinitionUrl(html: string, pageUrl: string): string {
   const patterns = [
     /\burl\s*:\s*["']([^"']+)["']/i,
@@ -141,20 +156,42 @@ export function selectedOperationsToServices(parsed: ParsedOpenApi, selectedIds:
   });
 }
 
-export async function loadOpenApiFromUrl(inputUrl: string): Promise<ParsedOpenApi> {
+export async function inspectOpenApiUrl(inputUrl: string): Promise<OpenApiUrlInspection> {
   const url = validatedUrl(inputUrl);
   const first = await fetchText(url);
   const contentType = first.contentType.toLowerCase();
   const looksHtml = contentType.includes("text/html") || /^\s*<!doctype html|^\s*<html/i.test(first.body);
-  if (!looksHtml) return loadResolvedDocument(first.body, url);
-  const definitionUrl = discoverDefinitionUrl(first.body, url);
+  if (!looksHtml) {
+    return { kind: "definition", parsed: await loadResolvedDocument(first.body, first.finalUrl) };
+  }
+  return {
+    kind: "swagger-ui",
+    pageUrl: first.finalUrl,
+    definitionUrl: validatedUrl(discoverDefinitionUrl(first.body, first.finalUrl))
+  };
+}
+
+export async function loadOpenApiFromUrl(inputUrl: string): Promise<ParsedOpenApi> {
+  const inspection = await inspectOpenApiUrl(inputUrl);
+  if (inspection.kind === "swagger-ui") {
+    throw new Error("Swagger UI discovered a secondary OpenAPI destination that requires explicit review before it can be loaded.");
+  }
+  return inspection.parsed;
+}
+
+export async function loadDiscoveredOpenApiDefinition(discovery: SwaggerUiDefinitionDiscovery): Promise<ParsedOpenApi> {
+  validatedUrl(discovery.pageUrl);
+  const definitionUrl = validatedUrl(discovery.definitionUrl);
   const definition = await fetchText(definitionUrl);
-  return loadResolvedDocument(definition.body, definitionUrl);
+  return loadResolvedDocument(definition.body, definition.finalUrl);
 }
 
 async function loadResolvedDocument(text: string, definitionUrl: string): Promise<ParsedOpenApi> {
   const root = object(parseDocumentText(text), "OpenAPI definition must be an object.");
-  const documents = new Map<string, JsonObject>([[withoutFragment(definitionUrl), root]]);
+  const documents = new Map<string, LoadedOpenApiDocument>([[withoutFragment(definitionUrl), {
+    document: root,
+    finalUrl: withoutFragment(definitionUrl)
+  }]]);
   const resolved = await resolveDocumentValue(root, withoutFragment(definitionUrl), definitionUrl, documents, [], 0);
   return parseOpenApiDocument(resolved, definitionUrl, documents.size - 1);
 }
@@ -163,7 +200,7 @@ async function resolveDocumentValue(
   value: unknown,
   documentUrl: string,
   rootDefinitionUrl: string,
-  documents: Map<string, JsonObject>,
+  documents: Map<string, LoadedOpenApiDocument>,
   stack: string[],
   depth: number
 ): Promise<unknown> {
@@ -186,11 +223,14 @@ async function resolveDocumentValue(
     if (!targetDocument) {
       if (documents.size >= MAX_EXTERNAL_DOCUMENTS) throw new Error(`OpenAPI import exceeds the safe limit of ${MAX_EXTERNAL_DOCUMENTS} referenced documents.`);
       const external = await fetchText(targetDocumentUrl);
-      targetDocument = object(parseDocumentText(external.body), `Referenced OpenAPI document must be an object: ${targetDocumentUrl}.`);
+      targetDocument = {
+        document: object(parseDocumentText(external.body), `Referenced OpenAPI document must be an object: ${targetDocumentUrl}.`),
+        finalUrl: withoutFragment(external.finalUrl)
+      };
       documents.set(targetDocumentUrl, targetDocument);
     }
-    const target = resolveJsonPointer(targetDocument, targetUrl.hash, referenceKey);
-    const resolvedTarget = await resolveDocumentValue(target, targetDocumentUrl, rootDefinitionUrl, documents, [...stack, referenceKey], depth + 1);
+    const target = resolveJsonPointer(targetDocument.document, targetUrl.hash, referenceKey);
+    const resolvedTarget = await resolveDocumentValue(target, targetDocument.finalUrl, rootDefinitionUrl, documents, [...stack, referenceKey], depth + 1);
     const siblings = Object.fromEntries(Object.entries(item).filter(([key]) => key !== "$ref"));
     return optionalObject(resolvedTarget)
       ? resolveDocumentValue({ ...resolvedTarget as JsonObject, ...siblings }, targetDocumentUrl, rootDefinitionUrl, documents, [...stack, referenceKey], depth + 1)
@@ -216,18 +256,35 @@ function withoutFragment(url: string): string {
   return parsed.toString();
 }
 
-async function fetchText(url: string): Promise<{ body: string; contentType: string }> {
+async function fetchText(url: string): Promise<{ body: string; contentType: string; finalUrl: string }> {
   if ("__TAURI_INTERNALS__" in window) {
     const { invoke } = await import("@tauri-apps/api/core");
-    const response = await invoke<{ status: number; statusText: string; headers: Record<string, string>; body: string }>("execute_http_request", {
+    const response = await invoke<{ status: number; statusText: string; headers: Record<string, string>; body: string; finalUrl: string }>("execute_http_request", {
       request: { method: "GET", url, headers: { Accept: "application/json, application/yaml, text/yaml, text/html" }, body: null, timeoutMs: 30000 }
     });
     if (response.status < 200 || response.status >= 300) throw new Error(`OpenAPI URL returned HTTP ${response.status} ${response.statusText}.`);
-    return { body: response.body, contentType: header(response.headers, "content-type") };
+    assertOpenApiFinalOrigin(url, response.finalUrl);
+    return { body: response.body, contentType: header(response.headers, "content-type"), finalUrl: response.finalUrl };
   }
-  const response = await fetch(url, { headers: { Accept: "application/json, application/yaml, text/yaml, text/html" } });
+  const response = await fetch(url, {
+    headers: { Accept: "application/json, application/yaml, text/yaml, text/html" },
+    redirect: "manual"
+  });
+  if (response.type === "opaqueredirect" || (response.status >= 300 && response.status < 400)) {
+    throw new Error("Browser development mode blocked an OpenAPI redirect before loading an unreviewed destination. Enter the final definition URL explicitly or use Relay Studio desktop mode for validated same-origin redirects.");
+  }
   if (!response.ok) throw new Error(`OpenAPI URL returned HTTP ${response.status} ${response.statusText}.`);
-  return { body: await response.text(), contentType: response.headers.get("content-type") ?? "" };
+  const finalUrl = response.url || url;
+  assertOpenApiFinalOrigin(url, finalUrl);
+  return { body: await response.text(), contentType: response.headers.get("content-type") ?? "", finalUrl };
+}
+
+function assertOpenApiFinalOrigin(requestedUrl: string, finalUrl: string): void {
+  const requestedOrigin = new URL(requestedUrl).origin;
+  const finalOrigin = new URL(finalUrl).origin;
+  if (requestedOrigin !== finalOrigin) {
+    throw new Error(`OpenAPI redirect changed origin from ${requestedOrigin} to ${finalOrigin}. Review and enter the final destination explicitly.`);
+  }
 }
 
 function parameterRows(parameters: JsonObject[], root: JsonObject): { headers: KeyValueRow[]; query: KeyValueRow[]; path: KeyValueRow[] } {
@@ -332,7 +389,28 @@ function safeExample(value: unknown, propertyName = ""): unknown {
   const item = optionalObject(value);
   return item ? Object.fromEntries(Object.entries(item).map(([key, nested]) => [key, safeExample(nested, key)])) : value;
 }
-function validatedUrl(value: string): string { const trimmed = value.trim(); if (!trimmed) throw new Error("Swagger UI or OpenAPI URL is required."); const url = new URL(trimmed); if (!["http:", "https:"].includes(url.protocol)) throw new Error("Swagger UI or OpenAPI URL must use HTTP or HTTPS."); return url.toString(); }
+function validatedUrl(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) throw new Error("Swagger UI or OpenAPI URL is required.");
+  let url: URL;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    throw new Error("Swagger UI or OpenAPI URL is not a valid absolute URL.");
+  }
+  if (!["http:", "https:"].includes(url.protocol)) {
+    throw new Error("Swagger UI or OpenAPI URL must use HTTP or HTTPS.");
+  }
+  const containsQueryCredential = Array.from(url.searchParams.entries())
+    .some(([key, queryValue]) => isSecretKey(key) && !isCredentialPlaceholder(queryValue));
+  if (url.username || url.password || containsQueryCredential) {
+    throw new Error("OpenAPI URL cannot include credentials in user information or sensitive query parameters. Enter a credential-free URL.");
+  }
+  return url.toString();
+}
+function isCredentialPlaceholder(value: string): boolean {
+  return /^\{\{[A-Za-z_][A-Za-z0-9_.-]*\}\}$/.test(value.trim());
+}
 function header(headers: Record<string, string>, name: string): string { return Object.entries(headers).find(([key]) => key.toLowerCase() === name)?.[1] ?? ""; }
 function object(value: unknown, message: string): JsonObject { const result = optionalObject(value); if (!result) throw new Error(message); return result; }
 function optionalObject(value: unknown): JsonObject | undefined { return value !== null && typeof value === "object" && !Array.isArray(value) ? value as JsonObject : undefined; }

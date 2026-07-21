@@ -50,9 +50,10 @@ describe("saved response comparison", () => {
     expect(comparison.bodyChanges).toEqual([expect.objectContaining({ path: "line 2", type: "changed" })]);
     expect(comparisonToExecutedResponse(comparison).prettyBody).toContain('"kind": "raw"');
 
-    const invalid = artifact("after", "{}");
-    invalid.metadata.redacted = false;
-    expect(() => compareSavedResponses(artifact("before", "{}"), invalid)).toThrow("redacted saved responses");
+    const imported = artifact("after", `{"api_key":"comparison-secret"}`);
+    imported.metadata.redacted = false;
+    const importedComparison = compareSavedResponses(artifact("before", "{}"), imported);
+    expect(JSON.stringify(importedComparison)).not.toContain("comparison-secret");
   });
 
   it("compares arrays, identical JSON, malformed JSON, and raw added or removed lines", () => {

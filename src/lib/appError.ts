@@ -40,19 +40,29 @@ export class AppError extends Error {
 }
 
 export function normalizeAppError(error: unknown, abortKind?: "cancelled" | "timeout"): AppError {
-  if (error instanceof AppError) return error;
-  const message = error instanceof Error ? error.message : String(error);
+  if (error instanceof AppError) {
+    const redacted = redactText(error.message);
+    return redacted === error.message ? error : new AppError(error.category, error.code, redacted, {
+      retryable: error.retryable,
+      status: error.status,
+      guidance: error.guidance,
+      cause: (error as Error & { cause?: unknown }).cause
+    });
+  }
+  const rawMessage = error instanceof Error ? error.message : String(error);
+  const message = redactText(rawMessage);
 
   if (error instanceof DOMException && error.name === "AbortError") {
     return abortKind === "cancelled"
       ? new AppError("cancelled", "REQUEST_CANCELLED", "Request cancelled.", { cause: error })
       : new AppError("timeout", "REQUEST_TIMEOUT", "Request timed out.", { retryable: true, cause: error });
   }
-  if (/bearer token|unauthenticated|unauthorized|\b401\b|\b403\b/i.test(message)) {
+  if (/bearer token|unauthenticated|unauthorized|\b401\b|\b403\b/i.test(rawMessage)) {
     return new AppError("auth", "AUTH_FAILURE", message, { cause: error });
   }
-  if (/failed to fetch|network|connection|dns|certificate|tls/i.test(message)) {
+  if (/failed to fetch|network|connection|dns|certificate|tls/i.test(rawMessage)) {
     return new AppError("network", "NETWORK_FAILURE", message, { retryable: true, cause: error });
   }
   return new AppError("unknown", "UNEXPECTED_FAILURE", message, { cause: error });
 }
+import { redactText } from "./redaction";

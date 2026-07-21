@@ -51,9 +51,11 @@ export interface TransportResponse {
   headers: Record<string, string>;
   body: string;
   durationMs: number;
+  finalUrl?: string;
 }
 
 export interface ExecutedResponse extends TransportResponse {
+  finalUrl: string;
   ok: boolean;
   contentType: string;
   prettyBody: string;
@@ -135,7 +137,7 @@ export async function runServiceRequest(
     }
     events.push("parseResponse", "info", "Parsing response body.");
 
-    const response = normalizeResponse(service, transportResponse, request.responseFormatDetection);
+    const response = normalizeResponse(service, transportResponse, request.responseFormatDetection, request.url);
     if (response.parseError) {
       events.push("error", "error", response.parseError);
     } else if (response.ok) {
@@ -260,11 +262,17 @@ function hasHeader(headers: Record<string, string>, name: string): boolean {
   return Object.keys(headers).some((headerName) => headerName.toLowerCase() === name.toLowerCase());
 }
 
-export function normalizeResponse(service: ProjectService, response: TransportResponse, responseFormatDetection: ResponseFormatDetection = "auto"): ExecutedResponse {
+export function normalizeResponse(
+  service: ProjectService,
+  response: TransportResponse,
+  responseFormatDetection: ResponseFormatDetection = "auto",
+  requestedUrl = ""
+): ExecutedResponse {
   const contentType = findHeader(response.headers, "content-type");
   const parsed = parseResponseBody(response.body, responseFormatDetection === "json" ? "application/json" : contentType);
   return {
     ...response,
+    finalUrl: response.finalUrl ?? requestedUrl,
     ok: response.status >= 200 && response.status < 300,
     contentType,
     prettyBody: parsed.prettyBody,
@@ -323,17 +331,22 @@ export async function fetchHttpTransport(request: ExecutableRequest, signal?: Ab
     const response = await fetch(request.url, {
       method: request.method,
       headers: request.headers,
-    body: request.body,
+      body: request.body,
       signal: controller.signal,
-      credentials: request.disableCookies ? "omit" : "same-origin"
+      credentials: request.disableCookies ? "omit" : "same-origin",
+      redirect: "manual"
     });
+    if (response.type === "opaqueredirect" || (response.status >= 300 && response.status < 400)) {
+      throw new Error("Browser development mode blocked an HTTP redirect before replaying the request. Enter the final URL explicitly or use Relay Studio desktop mode for validated same-origin redirects.");
+    }
     const body = await response.text();
     return {
       status: response.status,
       statusText: response.statusText,
       headers: Object.fromEntries(response.headers.entries()),
       body,
-      durationMs: Math.round(performance.now() - started)
+      durationMs: Math.round(performance.now() - started),
+      finalUrl: response.url || request.url
     };
   } finally {
     window.clearTimeout(timeout);

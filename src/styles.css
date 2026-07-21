@@ -1054,6 +1054,19 @@ kbd {
   grid-template-columns: 28px minmax(110px, 0.65fr) 76px minmax(170px, 1fr) minmax(150px, 0.7fr) auto;
 }
 
+.file-form-field-row {
+  grid-template-columns: 28px minmax(110px, 0.65fr) 76px minmax(150px, 1fr) minmax(130px, 0.65fr) auto auto;
+}
+
+.file-approval {
+  color: #1f5fbf;
+  white-space: nowrap;
+}
+
+.file-approval.approved {
+  color: #18794e;
+}
+
 .form-content-type-spacer { min-width: 0; }
 
 .kv-row input[type="checkbox"] {
@@ -1172,6 +1185,15 @@ kbd {
 .api-import-source > div { display: flex; gap: 10px; }
 .api-import-source input { flex: 1; min-width: 0; padding: 10px 12px; border: 1px solid var(--gray-300); border-radius: 6px; }
 .api-import-error { margin-top: 14px; padding: 10px 12px; border: 1px solid var(--danger); border-radius: 6px; color: var(--danger); background: #fff5f5; }
+.api-import-destination-review { display: grid; gap: 12px; margin-top: 18px; padding: 16px; border: 1px solid var(--blue-600); border-radius: 8px; background: var(--blue-100); }
+.api-import-destination-review p { margin: 4px 0 0; line-height: 1.45; }
+.api-import-destination-review dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 7px 12px; margin: 0; }
+.api-import-destination-review dt { color: var(--gray-600); font-size: 12px; font-weight: 700; }
+.api-import-destination-review dd { min-width: 0; margin: 0; }
+.api-import-destination-review code { display: block; overflow: hidden; color: var(--navy-900); text-overflow: ellipsis; white-space: nowrap; }
+.api-import-destination-review .api-import-destination-warning { color: var(--danger); font-weight: 700; }
+.api-import-destination-actions { display: flex; gap: 10px; }
+.api-import-destination-actions button { min-height: 32px; padding: 0 12px; }
 .api-import-results { margin-top: 22px; border: 1px solid var(--gray-200); border-radius: 8px; overflow: hidden; }
 .api-import-summary, .api-import-actions { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 14px 16px; border-bottom: 1px solid var(--gray-200); }
 .api-import-summary div { display: grid; gap: 3px; }
@@ -2468,6 +2490,15 @@ kbd {
   min-width: 0;
   overflow-x: auto;
   white-space: nowrap;
+}
+
+.response-final-url {
+  max-width: min(46vw, 560px);
+  overflow: hidden;
+  color: var(--gray-600);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-overflow: ellipsis;
 }
 
 .response-save-button {

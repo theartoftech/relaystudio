@@ -92,6 +92,7 @@ struct HttpResponseOutput {
     headers: HashMap<String, String>,
     body: String,
     duration_ms: u128,
+    final_url: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
@@ -559,12 +560,15 @@ fn build_proxy(
     settings: &ProxySettingsInput,
     scope: &str,
 ) -> Result<reqwest::Proxy, String> {
-    let proxy = match scope {
+    let mut proxy = match scope {
         "http" => reqwest::Proxy::http(endpoint),
         "https" => reqwest::Proxy::https(endpoint),
         _ => reqwest::Proxy::all(endpoint),
     }
     .map_err(|error| format!("Invalid proxy configuration: {error}"))?;
+    if !settings.bypass_list.trim().is_empty() {
+        proxy = proxy.no_proxy(validated_no_proxy(&settings.bypass_list)?);
+    }
     if settings.basic_auth_enabled {
         Ok(proxy.basic_auth(&settings.username, &settings.password))
     } else {
@@ -581,6 +585,60 @@ fn proxy_endpoint(settings: &ProxySettingsInput) -> String {
     }
 }
 
+fn validated_no_proxy(bypass_list: &str) -> Result<Option<reqwest::NoProxy>, String> {
+    let trimmed = bypass_list.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    for entry in trimmed.split(',').map(str::trim) {
+        if !valid_proxy_bypass_entry(entry) {
+            return Err(format!(
+                "Invalid proxy bypass entry: {entry}. Use comma-separated hostnames, domains, IP addresses, CIDR ranges, or *. Ports and URL schemes are not supported."
+            ));
+        }
+    }
+    let parsed = reqwest::NoProxy::from_string(trimmed).ok_or_else(|| {
+        "Proxy bypass list could not be applied. Use comma-separated hostnames, domains, IP addresses, CIDR ranges, or *.".to_string()
+    })?;
+    Ok(Some(parsed))
+}
+
+fn valid_proxy_bypass_entry(entry: &str) -> bool {
+    if entry == "*" || entry.parse::<std::net::IpAddr>().is_ok() {
+        return true;
+    }
+    if let Some((address, prefix)) = entry.split_once('/') {
+        let Ok(address) = address.parse::<std::net::IpAddr>() else {
+            return false;
+        };
+        let Ok(prefix) = prefix.parse::<u8>() else {
+            return false;
+        };
+        return match address {
+            std::net::IpAddr::V4(_) => prefix <= 32,
+            std::net::IpAddr::V6(_) => prefix <= 128,
+        };
+    }
+    let domain = entry.strip_prefix('.').unwrap_or(entry);
+    !domain.is_empty()
+        && domain.len() <= 253
+        && domain.split('.').all(|label| {
+            !label.is_empty()
+                && label.len() <= 63
+                && label
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+                && label
+                    .as_bytes()
+                    .first()
+                    .is_some_and(u8::is_ascii_alphanumeric)
+                && label
+                    .as_bytes()
+                    .last()
+                    .is_some_and(u8::is_ascii_alphanumeric)
+        })
+}
+
 async fn execute_http_request_impl(
     request: HttpRequestInput,
 ) -> Result<HttpResponseOutput, String> {
@@ -588,8 +646,9 @@ async fn execute_http_request_impl(
 
     let method = reqwest::Method::from_bytes(request.method.as_bytes())
         .map_err(|_| format!("Unsupported HTTP method: {}", request.method))?;
-    let mut client_builder =
-        reqwest::Client::builder().timeout(Duration::from_millis(request.timeout_ms));
+    let mut client_builder = reqwest::Client::builder()
+        .timeout(Duration::from_millis(request.timeout_ms))
+        .redirect(same_origin_redirect_policy());
     if request.ssl_certificate_verification == Some(false) {
         client_builder = client_builder.danger_accept_invalid_certs(true);
     }
@@ -616,17 +675,40 @@ async fn execute_http_request_impl(
     }
 
     let started = Instant::now();
-    let response = builder.send().await.map_err(|error| {
-        if error.is_timeout() {
-            "Request timed out.".to_string()
-        } else if error.is_connect() {
-            format!("Network connection failed: {error}")
-        } else {
-            format!("HTTP request failed: {error}")
-        }
-    })?;
+    let response = builder.send().await.map_err(http_request_error)?;
+    if response.status().is_redirection() {
+        let current_url = response.url();
+        let location = response
+            .headers()
+            .get(reqwest::header::LOCATION)
+            .ok_or_else(|| {
+                format!(
+                    "Redirect response from {} did not include a Location header.",
+                    current_url.origin().ascii_serialization()
+                )
+            })?
+            .to_str()
+            .map_err(|_| {
+                format!(
+                    "Redirect response from {} included an invalid Location header.",
+                    current_url.origin().ascii_serialization()
+                )
+            })?;
+        let destination = current_url.join(location).map_err(|_| {
+            format!(
+                "Redirect response from {} included an invalid Location URL.",
+                current_url.origin().ascii_serialization()
+            )
+        })?;
+        return Err(format!(
+            "Cross-origin redirect blocked: {} cannot redirect to {}. Review the destination and send it explicitly.",
+            current_url.origin().ascii_serialization(),
+            destination.origin().ascii_serialization()
+        ));
+    }
     let status = response.status();
     let status_text = status.canonical_reason().unwrap_or("").to_string();
+    let final_url = response.url().to_string();
     let headers = response
         .headers()
         .iter()
@@ -648,7 +730,54 @@ async fn execute_http_request_impl(
         headers,
         body,
         duration_ms: started.elapsed().as_millis(),
+        final_url,
     })
+}
+
+fn same_origin_redirect_policy() -> reqwest::redirect::Policy {
+    reqwest::redirect::Policy::custom(|attempt| {
+        if attempt.previous().len() >= 10 {
+            return attempt.error(std::io::Error::other(
+                "Redirect limit exceeded after 10 requests.",
+            ));
+        }
+        if attempt
+            .previous()
+            .last()
+            .is_some_and(|previous| !same_origin(previous, attempt.url()))
+        {
+            return attempt.stop();
+        }
+        attempt.follow()
+    })
+}
+
+fn http_request_error(error: reqwest::Error) -> String {
+    if error.is_timeout() {
+        return "Request timed out.".to_string();
+    }
+    if error.is_connect() {
+        return format!("Network connection failed: {error}");
+    }
+    if error.is_redirect() {
+        let mut source = std::error::Error::source(&error);
+        while let Some(cause) = source {
+            let message = cause.to_string();
+            if message.contains("Redirect limit exceeded") {
+                return message;
+            }
+            source = cause.source();
+        }
+        return "HTTP redirect failed. Review the redirect destination and try the final URL explicitly."
+            .to_string();
+    }
+    format!("HTTP request failed: {error}")
+}
+
+fn same_origin(left: &reqwest::Url, right: &reqwest::Url) -> bool {
+    left.scheme() == right.scheme()
+        && left.host_str() == right.host_str()
+        && left.port_or_known_default() == right.port_or_known_default()
 }
 
 fn validate_http_request(request: &HttpRequestInput) -> Result<(), String> {
@@ -890,6 +1019,7 @@ fn validate_response_path(path: &Path) -> Result<(), String> {
 fn save_response_file_impl(path: &Path, overwrite: bool, artifact: &Value) -> Result<(), String> {
     validate_response_path(path)?;
     validate_response_artifact(artifact)?;
+    validate_response_artifact_path(path, artifact)?;
 
     if path.exists() && !overwrite {
         return Err("Saved response already exists at this path.".to_string());
@@ -900,17 +1030,8 @@ fn save_response_file_impl(path: &Path, overwrite: bool, artifact: &Value) -> Re
             .map_err(|error| format!("Could not create saved response directory: {error}"))?;
     }
 
-    let bytes = if path.extension().and_then(|ext| ext.to_str()) == Some("txt") {
-        artifact
-            .get("body")
-            .and_then(Value::as_str)
-            .ok_or_else(|| "Saved response body is required.".to_string())?
-            .as_bytes()
-            .to_vec()
-    } else {
-        serde_json::to_vec_pretty(artifact)
-            .map_err(|error| format!("Saved response serialization failed: {error}"))?
-    };
+    let bytes = serde_json::to_vec_pretty(artifact)
+        .map_err(|error| format!("Saved response serialization failed: {error}"))?;
     let temp_path = response_temp_path_for(path);
     fs::write(&temp_path, bytes)
         .map_err(|error| format!("Could not write temporary saved response file: {error}"))?;
@@ -935,20 +1056,29 @@ fn read_response_file_impl(metadata: &Value) -> Result<Value, String> {
         }
     })?;
 
-    let artifact = if path.extension().and_then(|ext| ext.to_str()) == Some("txt") {
-        serde_json::json!({
-            "format": SAVED_RESPONSE_FORMAT,
-            "schemaVersion": SAVED_RESPONSE_SCHEMA_VERSION,
-            "metadata": metadata,
-            "body": raw
-        })
-    } else {
-        serde_json::from_str::<Value>(&raw)
-            .map_err(|error| format!("Saved response file is corrupted or unsupported: {error}"))?
-    };
+    let artifact = serde_json::from_str::<Value>(&raw).map_err(|error| {
+        if path.extension().and_then(|ext| ext.to_str()) == Some("txt") {
+            "Legacy raw .txt response artifacts cannot be reopened safely. Re-send the request and save a new response artifact.".to_string()
+        } else {
+            format!("Saved response file is corrupted or unsupported: {error}")
+        }
+    })?;
 
     validate_response_artifact(&artifact)?;
+    validate_response_artifact_path(path, &artifact)?;
     Ok(artifact)
+}
+
+fn validate_response_artifact_path(path: &Path, artifact: &Value) -> Result<(), String> {
+    let artifact_path = artifact
+        .get("metadata")
+        .and_then(|value| value.get("filePath"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Saved response metadata file path is required.".to_string())?;
+    if Path::new(artifact_path) != path {
+        return Err("Saved response artifact path does not match the approved project metadata. Re-send the request and save a new response artifact.".to_string());
+    }
+    Ok(())
 }
 
 fn validate_response_artifact(artifact: &Value) -> Result<(), String> {
@@ -1080,7 +1210,9 @@ mod tests {
     use super::*;
     use serde_json::json;
     use std::io::{Read, Write};
-    use std::net::TcpListener;
+    use std::net::{SocketAddr, TcpListener};
+    use std::sync::mpsc::{self, Receiver};
+    use std::thread::JoinHandle;
     use tempfile::tempdir;
 
     #[test]
@@ -1266,6 +1398,201 @@ mod tests {
             response.headers.get("x-relay-test"),
             Some(&"covered".to_string())
         );
+        assert_eq!(response.final_url, format!("http://{address}/health"));
+    }
+
+    #[test]
+    fn native_http_request_follows_same_origin_redirects_and_returns_final_url() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind redirect server");
+        let address = listener.local_addr().expect("redirect server address");
+        let server = std::thread::spawn(move || {
+            let (mut first, _) = listener.accept().expect("accept initial request");
+            let mut first_request = [0_u8; 2048];
+            let first_length = first
+                .read(&mut first_request)
+                .expect("read initial request");
+            let first_text = String::from_utf8_lossy(&first_request[..first_length]);
+            assert!(first_text.starts_with("GET /start HTTP/1.1"));
+            assert!(first_text
+                .to_ascii_lowercase()
+                .contains("x-api-key: synthetic-key"));
+            first
+                .write_all(b"HTTP/1.1 302 Found\r\nLocation: /final\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .expect("write redirect");
+
+            let (mut second, _) = listener.accept().expect("accept redirected request");
+            let mut second_request = [0_u8; 2048];
+            let second_length = second
+                .read(&mut second_request)
+                .expect("read redirected request");
+            let second_text = String::from_utf8_lossy(&second_request[..second_length]);
+            assert!(second_text.starts_with("GET /final HTTP/1.1"));
+            assert!(second_text
+                .to_ascii_lowercase()
+                .contains("x-api-key: synthetic-key"));
+            second
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 5\r\nConnection: close\r\n\r\nfinal")
+                .expect("write final response");
+        });
+        let mut request = test_http_request("GET", &format!("http://{address}/start"));
+        request
+            .headers
+            .insert("X-API-Key".to_string(), "synthetic-key".to_string());
+
+        let response = tauri::async_runtime::block_on(execute_http_request_impl(request))
+            .expect("follow same-origin redirect");
+        server.join().expect("join redirect server");
+
+        assert_eq!(response.status, 200);
+        assert_eq!(response.body, "final");
+        assert_eq!(response.final_url, format!("http://{address}/final"));
+    }
+
+    #[test]
+    fn native_http_request_blocks_cross_origin_redirects_before_forwarding_headers() {
+        let (target_address, target_requests, target_server) = spawn_test_server(
+            b"HTTP/1.1 200 OK\r\nContent-Length: 6\r\nConnection: close\r\n\r\ntarget".to_vec(),
+        );
+        let redirect_response = format!(
+            "HTTP/1.1 302 Found\r\nLocation: http://{target_address}/capture\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        )
+        .into_bytes();
+        let (source_address, source_requests, source_server) = spawn_test_server(redirect_response);
+        let mut request = test_http_request("GET", &format!("http://{source_address}/start"));
+        request
+            .headers
+            .insert("X-API-Key".to_string(), "synthetic-key".to_string());
+
+        let error = tauri::async_runtime::block_on(execute_http_request_impl(request))
+            .expect_err("cross-origin redirect must be blocked");
+
+        source_server.join().expect("join source server");
+        target_server.join().expect("join target server");
+        assert!(source_requests
+            .recv()
+            .expect("source request result")
+            .is_some());
+        assert!(target_requests
+            .recv()
+            .expect("target request result")
+            .is_none());
+        assert!(error.contains("Cross-origin redirect blocked"));
+        assert!(!error.contains("synthetic-key"));
+    }
+
+    #[test]
+    fn native_http_request_rejects_redirects_without_a_destination() {
+        let (address, requests, server) = spawn_test_server(
+            b"HTTP/1.1 302 Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec(),
+        );
+        let request = test_http_request("GET", &format!("http://{address}/start"));
+
+        let error = tauri::async_runtime::block_on(execute_http_request_impl(request))
+            .expect_err("redirect without Location must be rejected");
+
+        server.join().expect("join redirect server");
+        assert!(requests.recv().expect("request result").is_some());
+        assert!(error.contains("did not include a Location header"));
+        assert!(!error.contains("/start"));
+    }
+
+    #[test]
+    fn native_http_request_rejects_excessive_same_origin_redirects() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind redirect loop server");
+        listener
+            .set_nonblocking(true)
+            .expect("configure redirect loop server");
+        let address = listener.local_addr().expect("redirect loop server address");
+        let server = std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            let mut requests = 0;
+            while Instant::now() < deadline {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        let mut request = [0_u8; 2048];
+                        let _bytes_read = stream.read(&mut request).expect("read loop request");
+                        stream
+                            .write_all(b"HTTP/1.1 302 Found\r\nLocation: /loop\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                            .expect("write loop redirect");
+                        requests += 1;
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        if requests > 10 {
+                            break;
+                        }
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(error) => panic!("accept loop request: {error}"),
+                }
+            }
+            requests
+        });
+        let request = test_http_request("GET", &format!("http://{address}/loop"));
+
+        let error = tauri::async_runtime::block_on(execute_http_request_impl(request))
+            .expect_err("redirect loop must be rejected");
+        let requests = server.join().expect("join redirect loop server");
+
+        assert_eq!(requests, 10);
+        assert!(error.contains("Redirect limit exceeded after 10 requests"));
+    }
+
+    #[test]
+    fn native_http_request_honors_configured_proxy_bypass_hosts() {
+        let (target_address, target_requests, target_server) = spawn_test_server(
+            b"HTTP/1.1 200 OK\r\nContent-Length: 6\r\nConnection: close\r\n\r\ndirect".to_vec(),
+        );
+        let (proxy_address, proxy_requests, proxy_server) = spawn_test_server(
+            b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nproxy".to_vec(),
+        );
+        let mut request = test_http_request("GET", &format!("http://{target_address}/health"));
+        request.proxy = Some(ProxySettingsInput {
+            enabled: true,
+            use_for_http: true,
+            use_for_https: true,
+            server_url: format!("http://{proxy_address}"),
+            port: proxy_address.port(),
+            basic_auth_enabled: false,
+            username: String::new(),
+            password: String::new(),
+            bypass_list: "localhost, 127.0.0.1".to_string(),
+        });
+
+        let response = tauri::async_runtime::block_on(execute_http_request_impl(request))
+            .expect("execute bypassed request");
+
+        target_server.join().expect("join target server");
+        proxy_server.join().expect("join proxy server");
+        assert_eq!(response.body, "direct");
+        assert!(target_requests
+            .recv()
+            .expect("target request result")
+            .is_some());
+        assert!(proxy_requests
+            .recv()
+            .expect("proxy request result")
+            .is_none());
+    }
+
+    #[test]
+    fn proxy_bypass_list_rejects_malformed_or_port_specific_entries() {
+        assert!(
+            validated_no_proxy("localhost, .example.test, 127.0.0.1, 192.168.0.0/16, ::1")
+                .expect("valid proxy bypass list")
+                .is_some()
+        );
+
+        for invalid in [
+            "https://example.test",
+            "localhost:8080",
+            "bad host",
+            "192.168.0.0/99",
+            "*.example.test",
+        ] {
+            let error = validated_no_proxy(invalid).expect_err("malformed proxy bypass entry");
+            assert!(error.contains("Invalid proxy bypass entry"));
+            assert!(error.contains(invalid));
+        }
     }
 
     #[test]
@@ -1558,13 +1885,45 @@ mod tests {
         save_response_file_impl(&path, false, &artifact).expect("save response");
 
         assert_eq!(
-            fs::read_to_string(&path).expect("read raw file"),
-            "plain response"
+            serde_json::from_str::<Value>(&fs::read_to_string(&path).expect("read response artifact")).expect("parse response artifact"),
+            artifact
         );
         assert_eq!(
             read_response_file_impl(&artifact["metadata"]).expect("read response"),
             artifact
         );
+    }
+
+    #[test]
+    fn saved_response_reader_rejects_disguised_local_text_and_mismatched_paths() {
+        let dir = tempdir().expect("tempdir");
+        let text_path = dir.path().join("private.txt");
+        fs::write(&text_path, "local file contents").expect("write local text");
+        let metadata = json!({
+            "id": "response-1",
+            "filePath": text_path.to_string_lossy(),
+            "fileName": "private.txt"
+        });
+
+        assert!(read_response_file_impl(&metadata)
+            .expect_err("disguised text")
+            .contains("Legacy raw .txt response artifacts cannot be reopened safely"));
+
+        let other_path = dir.path().join("other.json");
+        let artifact = json!({
+            "format": SAVED_RESPONSE_FORMAT,
+            "schemaVersion": SAVED_RESPONSE_SCHEMA_VERSION,
+            "metadata": {
+                "id": "response-2",
+                "filePath": other_path.to_string_lossy(),
+                "fileName": "other.json"
+            },
+            "body": "{}"
+        });
+        fs::write(&text_path, serde_json::to_vec(&artifact).expect("serialize artifact")).expect("write artifact");
+        assert!(read_response_file_impl(&metadata)
+            .expect_err("path mismatch")
+            .contains("does not match the approved project metadata"));
     }
 
     #[test]
@@ -1730,5 +2089,43 @@ mod tests {
             disable_cookies: None,
             proxy: None,
         }
+    }
+
+    fn spawn_test_server(
+        response: Vec<u8>,
+    ) -> (SocketAddr, Receiver<Option<String>>, JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
+        listener
+            .set_nonblocking(true)
+            .expect("configure nonblocking test server");
+        let address = listener.local_addr().expect("test server address");
+        let (sender, receiver) = mpsc::channel();
+        let server = std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            loop {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        let mut request = [0_u8; 4096];
+                        let length = stream.read(&mut request).expect("read test request");
+                        stream.write_all(&response).expect("write test response");
+                        sender
+                            .send(Some(
+                                String::from_utf8_lossy(&request[..length]).to_string(),
+                            ))
+                            .expect("send captured request");
+                        return;
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        if Instant::now() >= deadline {
+                            sender.send(None).expect("send empty request result");
+                            return;
+                        }
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(error) => panic!("accept test request: {error}"),
+                }
+            }
+        });
+        (address, receiver, server)
     }
 }

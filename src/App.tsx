@@ -118,11 +118,23 @@ import {
   buildSavedResponseDraft,
   defaultSavedResponsePath
 } from "./services/savedResponses";
-import { formatResponseSize } from "./services/responseFormatting";
+import { formatResponseDestination, formatResponseSize } from "./services/responseFormatting";
 import { createDiagnosticsBundle } from "./services/diagnostics";
 import { compareSavedResponses, comparisonToExecutedResponse } from "./services/responseComparison";
 import { runServiceRequest, type ExecutableRequest, type ExecutedResponse, type RunnerConsoleEvent } from "./services/serviceRunner";
-import { loadOpenApiFromUrl, selectedOperationsToServices, type ParsedOpenApi } from "./services/openApiImporter";
+import {
+  approveMultipartFile,
+  assertMultipartFilesApproved,
+  isMultipartFileApproved,
+  type MultipartFileApproval
+} from "./services/multipartAuthorization";
+import {
+  inspectOpenApiUrl,
+  loadDiscoveredOpenApiDefinition,
+  selectedOperationsToServices,
+  type ParsedOpenApi,
+  type SwaggerUiDefinitionDiscovery
+} from "./services/openApiImporter";
 import {
   createNativeShellMenuState,
   getCommandPaletteCommands,
@@ -353,6 +365,7 @@ export function App() {
   const [runnerEvents, setRunnerEvents] = useState<RunnerConsoleEvent[]>([]);
   const [runnerError, setRunnerError] = useState<string | null>(null);
   const [runnerRunning, setRunnerRunning] = useState(false);
+  const [multipartFileApprovals, setMultipartFileApprovals] = useState<MultipartFileApproval[]>([]);
   const runnerAbortControllerRef = useRef<AbortController | null>(null);
   const [editableRequestUrl, setEditableRequestUrl] = useState<string | null>(null);
   const [saveResponseDialog, setSaveResponseDialog] = useState<null | {
@@ -1176,6 +1189,13 @@ export function App() {
       serviceForRun = parsed.service;
       environmentForRun = parsed.environment;
     }
+    const destinationUrl = buildRequestPreview(serviceForRun, environmentForRun).url;
+    try {
+      assertMultipartFilesApproved(multipartFileApprovals, serviceForRun, destinationUrl);
+    } catch (error) {
+      setProjectError(error instanceof Error ? error.message : String(error));
+      return;
+    }
 
     const controller = new AbortController();
     runnerAbortControllerRef.current = controller;
@@ -1212,6 +1232,17 @@ export function App() {
 
   async function handleRunFlow() {
     if (!activeFlow || !activeEnvironment) return;
+    try {
+      for (const serviceId of activeFlow.steps) {
+        const service = project.services.find((candidate) => candidate.id === serviceId);
+        if (service) assertMultipartFilesApproved(multipartFileApprovals, service, buildRequestPreview(service, activeEnvironment).url);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setProjectError(message);
+      setRunnerError(message);
+      return;
+    }
     const controller = new AbortController();
     runnerAbortControllerRef.current = controller;
     setRunnerRunning(true);
@@ -1307,6 +1338,21 @@ export function App() {
       setTabs((current) => current.map((tab) => (tab.id === activeTabId ? { ...tab, dirty: true } : tab)));
       setSaveResponseDialog(null);
       setProjectMessage(draft.warning ? `Saved response to ${path}. ${draft.warning}` : `Saved response to ${path}.`);
+      setProjectError(null);
+    } catch (error) {
+      setProjectError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  function handleApproveMultipartFile(fieldId: string): void {
+    if (!activeService) return;
+    try {
+      const approval = approveMultipartFile(activeService, fieldId, requestUrl);
+      setMultipartFileApprovals((current) => [
+        ...current.filter((item) => !(item.serviceId === approval.serviceId && item.fieldId === approval.fieldId)),
+        approval
+      ]);
+      setProjectMessage(`Approved ${approval.filePath.replace(/\\/g, "/").split("/").pop() || "local file"} for ${approval.destinationOrigin} during this session.`);
       setProjectError(null);
     } catch (error) {
       setProjectError(error instanceof Error ? error.message : String(error));
@@ -1511,6 +1557,9 @@ export function App() {
             services={project.services}
             activeEnvironment={activeEnvironment}
             requestPreview={requestPreview}
+            requestUrl={requestUrl}
+            multipartFileApprovals={multipartFileApprovals}
+            onApproveMultipartFile={handleApproveMultipartFile}
             onCreateService={handleCreateService}
             onDuplicateService={handleDuplicateService}
             onDeleteService={handleDeleteService}
@@ -1967,6 +2016,7 @@ export function App() {
     setTabs(openedTabs);
     setActiveTabId(opened.services[0]?.id ?? opened.flows[0]?.id ?? openedTabs[0]?.id ?? "welcome");
     setEditableRequestUrl(null);
+    setMultipartFileApprovals([]);
     setProjectMessage(message);
   }
 
@@ -2817,6 +2867,9 @@ function RequestEditor({
   services,
   activeEnvironment,
   requestPreview,
+  requestUrl,
+  multipartFileApprovals,
+  onApproveMultipartFile,
   onCreateService,
   onDuplicateService,
   onDeleteService,
@@ -2852,6 +2905,9 @@ function RequestEditor({
   services: ProjectService[];
   activeEnvironment: ProjectEnvironment | undefined;
   requestPreview: RequestPreview | null;
+  requestUrl: string;
+  multipartFileApprovals: MultipartFileApproval[];
+  onApproveMultipartFile: (fieldId: string) => void;
   onCreateService: () => void;
   onDuplicateService: () => void;
   onDeleteService: () => void;
@@ -2931,6 +2987,9 @@ function RequestEditor({
     <ServiceDesignerEditor
       service={activeService}
       environment={activeEnvironment}
+      requestUrl={requestUrl}
+      multipartFileApprovals={multipartFileApprovals}
+      onApproveMultipartFile={onApproveMultipartFile}
       onCreateService={onCreateService}
       onDuplicateService={onDuplicateService}
       onDeleteService={onDeleteService}
@@ -2943,6 +3002,9 @@ function RequestEditor({
 function ServiceDesignerEditor(props: {
   service: ProjectService;
   environment: ProjectEnvironment;
+  requestUrl: string;
+  multipartFileApprovals: MultipartFileApproval[];
+  onApproveMultipartFile: (fieldId: string) => void;
   onCreateService: () => void;
   onDuplicateService: () => void;
   onDeleteService: () => void;
@@ -3025,7 +3087,13 @@ function ServiceDesignerEditor(props: {
             <RowsPanel title="Path Params" rows={service.pathParams} onChange={(pathParams) => update({ pathParams }, "Path params updated.")} />
           ) : null}
           {activePanel === "Body" ? (
-            <BodyPanel service={service} onUpdate={update} />
+            <BodyPanel
+              service={service}
+              requestUrl={props.requestUrl}
+              multipartFileApprovals={props.multipartFileApprovals}
+              onApproveMultipartFile={props.onApproveMultipartFile}
+              onUpdate={update}
+            />
           ) : null}
           {activePanel === "Retry" ? (
             <RetryPanel service={service} onUpdate={update} />
@@ -3111,7 +3179,21 @@ function AuthorizationPanel(props: {
   );
 }
 
-function RowsPanel({ title, rows, onChange, allowFiles = false }: { title: string; rows: KeyValueRow[]; onChange: (rows: KeyValueRow[]) => void; allowFiles?: boolean }) {
+function RowsPanel({
+  title,
+  rows,
+  onChange,
+  allowFiles = false,
+  isFileApproved,
+  onApproveFile
+}: {
+  title: string;
+  rows: KeyValueRow[];
+  onChange: (rows: KeyValueRow[]) => void;
+  allowFiles?: boolean;
+  isFileApproved?: (fieldId: string) => boolean;
+  onApproveFile?: (fieldId: string) => void;
+}) {
   function updateRow(row: KeyValueRow) {
     onChange(upsertRow(rows, row));
   }
@@ -3127,7 +3209,7 @@ function RowsPanel({ title, rows, onChange, allowFiles = false }: { title: strin
       {rows.length ? rows.map((row, index) => {
         const fieldLabel = row.name || `field ${index + 1}`;
         return (
-        <div className={allowFiles ? "kv-row form-field-row" : "kv-row"} key={row.id}>
+        <div className={allowFiles ? `kv-row form-field-row${row.valueType === "file" ? " file-form-field-row" : ""}` : "kv-row"} key={row.id}>
           <label><input aria-label={`${row.name || title} enabled`} type="checkbox" checked={row.enabled} onChange={(event) => updateRow({ ...row, enabled: event.target.checked })} /></label>
           <input aria-label={`${title} name`} value={row.name} placeholder="Name" onChange={(event) => updateRow({ ...row, name: event.target.value })} />
           {allowFiles ? (
@@ -3145,7 +3227,18 @@ function RowsPanel({ title, rows, onChange, allowFiles = false }: { title: strin
           ) : null}
           <input aria-label={allowFiles ? `${title} ${fieldLabel} value` : `${title} value`} value={row.value} placeholder={row.valueType === "file" ? "Local file path" : "Value"} onChange={(event) => updateRow({ ...row, value: event.target.value })} />
           {allowFiles ? row.valueType === "file" ? (
-            <input aria-label={`${title} ${fieldLabel} content type`} value={row.contentType ?? "application/octet-stream"} placeholder="Content type" onChange={(event) => updateRow({ ...row, contentType: event.target.value })} />
+            <>
+              <input aria-label={`${title} ${fieldLabel} content type`} value={row.contentType ?? "application/octet-stream"} placeholder="Content type" onChange={(event) => updateRow({ ...row, contentType: event.target.value })} />
+              <button
+                type="button"
+                className={isFileApproved?.(row.id) ? "file-approval approved" : "file-approval"}
+                disabled={!row.enabled || !row.value.trim()}
+                aria-label={`${isFileApproved?.(row.id) ? "Approved" : "Approve"} ${fieldLabel} file for this session`}
+                onClick={() => onApproveFile?.(row.id)}
+              >
+                {isFileApproved?.(row.id) ? "Approved for session" : "Approve file"}
+              </button>
+            </>
           ) : <span className="form-content-type-spacer" aria-hidden="true" /> : null}
           <button type="button" onClick={() => onChange(removeRow(rows, row.id))}>Remove</button>
         </div>
@@ -3154,7 +3247,19 @@ function RowsPanel({ title, rows, onChange, allowFiles = false }: { title: strin
   );
 }
 
-function BodyPanel({ service, onUpdate }: { service: ProjectService; onUpdate: (patch: Partial<ProjectService>, message?: string) => void }) {
+function BodyPanel({
+  service,
+  requestUrl,
+  multipartFileApprovals,
+  onApproveMultipartFile,
+  onUpdate
+}: {
+  service: ProjectService;
+  requestUrl: string;
+  multipartFileApprovals: MultipartFileApproval[];
+  onApproveMultipartFile: (fieldId: string) => void;
+  onUpdate: (patch: Partial<ProjectService>, message?: string) => void;
+}) {
   const [formatError, setFormatError] = useState<string | null>(null);
 
   function updateBody(raw: string) {
@@ -3192,8 +3297,15 @@ function BodyPanel({ service, onUpdate }: { service: ProjectService; onUpdate: (
       </header>
       {["application/x-www-form-urlencoded", "multipart/form-data"].includes(service.body.contentType) ? (
         <>
-          <p className="body-editor-note">Text fields are encoded at send time. Multipart file paths are read locally only by Relay Studio desktop.</p>
-          <RowsPanel title="Form Fields" rows={service.body.fields ?? []} allowFiles={service.body.contentType === "multipart/form-data"} onChange={(fields) => onUpdate({ body: { ...service.body, fields } }, "Request form fields updated.")} />
+          <p className="body-editor-note">Text fields are encoded at send time. Desktop file fields require approval for the exact local path and destination during each Relay Studio session; saved projects do not retain that authority.</p>
+          <RowsPanel
+            title="Form Fields"
+            rows={service.body.fields ?? []}
+            allowFiles={service.body.contentType === "multipart/form-data"}
+            isFileApproved={(fieldId) => multipartFileApprovals.some((approval) => isMultipartFileApproved(approval, service, fieldId, requestUrl))}
+            onApproveFile={onApproveMultipartFile}
+            onChange={(fields) => onUpdate({ body: { ...service.body, fields } }, "Request form fields updated.")}
+          />
         </>
       ) : (
         <textarea aria-label="Request body" value={service.body.raw} onChange={(event) => updateBody(event.target.value)} />
@@ -4127,6 +4239,7 @@ function WelcomeView() {
 function ImportApiView({ onImportServices }: { onImportServices: (parsed: ParsedOpenApi, selectedIds: string[], saveAfterImport: boolean) => void }) {
   const [url, setUrl] = useState("");
   const [parsed, setParsed] = useState<ParsedOpenApi | null>(null);
+  const [discovery, setDiscovery] = useState<SwaggerUiDefinitionDiscovery | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -4135,15 +4248,45 @@ function ImportApiView({ onImportServices }: { onImportServices: (parsed: Parsed
     setLoading(true);
     setError("");
     setParsed(null);
+    setDiscovery(null);
     try {
-      const result = await loadOpenApiFromUrl(url);
-      setParsed(result);
-      setSelectedIds(result.operations.map((operation) => operation.id));
+      const result = await inspectOpenApiUrl(url);
+      if (result.kind === "swagger-ui") {
+        setDiscovery(result);
+        setSelectedIds([]);
+      } else {
+        setParsed(result.parsed);
+        setSelectedIds(result.parsed.operations.map((operation) => operation.id));
+      }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
       setLoading(false);
     }
+  }
+
+  async function loadDiscoveredDefinition() {
+    if (!discovery) return;
+    setLoading(true);
+    setError("");
+    try {
+      const result = await loadDiscoveredOpenApiDefinition(discovery);
+      setParsed(result);
+      setSelectedIds(result.operations.map((operation) => operation.id));
+      setDiscovery(null);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function changeUrl(value: string) {
+    setUrl(value);
+    setParsed(null);
+    setDiscovery(null);
+    setSelectedIds([]);
+    setError("");
   }
 
   function addSelected(saveAfterImport: boolean) {
@@ -4167,11 +4310,30 @@ function ImportApiView({ onImportServices }: { onImportServices: (parsed: Parsed
       <div className="api-import-source">
         <label htmlFor="api-definition-url">Swagger UI or definition URL</label>
         <div>
-          <input id="api-definition-url" value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://api.example.com/swagger/index.html" />
+          <input id="api-definition-url" value={url} onChange={(event) => changeUrl(event.target.value)} placeholder="https://api.example.com/swagger/index.html" />
           <button type="button" className="primary-button" disabled={loading || !url.trim()} onClick={() => void inspectDefinition()}>{loading ? "Inspecting…" : "Inspect Definition"}</button>
         </div>
       </div>
       {error ? <div className="api-import-error" role="alert">{error}</div> : null}
+      {discovery ? (
+        <section className="api-import-destination-review" aria-label="Swagger UI definition destination review">
+          <div>
+            <strong>Review discovered definition destination</strong>
+            <p>Relay Studio inspected the Swagger UI page but has not requested its definition yet.</p>
+          </div>
+          <dl>
+            <dt>Swagger UI page</dt><dd><code>{discovery.pageUrl}</code></dd>
+            <dt>Definition destination</dt><dd><code>{discovery.definitionUrl}</code></dd>
+          </dl>
+          {new URL(discovery.pageUrl).origin !== new URL(discovery.definitionUrl).origin ? (
+            <p className="api-import-destination-warning">The definition uses a different origin. Load it only if you recognize and trust this destination.</p>
+          ) : null}
+          <div className="api-import-destination-actions">
+            <button type="button" className="primary-button" disabled={loading} onClick={() => void loadDiscoveredDefinition()}>{loading ? "Loading…" : "Load Discovered Definition"}</button>
+            <button type="button" disabled={loading} onClick={() => setDiscovery(null)}>Cancel</button>
+          </div>
+        </section>
+      ) : null}
       {parsed ? (
         <div className="api-import-results">
           <div className="api-import-summary">
@@ -4547,6 +4709,11 @@ function BottomDock(props: {
                   </span>
                   <span className="response-pill">{props.runnerResponse.durationMs} ms</span>
                   <span className="response-pill">{formatResponseSize(props.runnerResponse.rawBody)}</span>
+                  {props.runnerResponse.finalUrl ? (
+                    <span className="response-final-url" title={formatResponseDestination(props.runnerResponse.finalUrl)}>
+                      Final origin: {formatResponseDestination(props.runnerResponse.finalUrl)}
+                    </span>
+                  ) : null}
                 </div>
               </div>
               <button className="response-save-button" type="button" disabled={!props.canSaveResponse} onClick={props.onSaveResponse}>Save Response</button>

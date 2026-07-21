@@ -55,6 +55,26 @@ describe("saved response artifacts", () => {
     expect(draft.warning).toBeNull();
   });
 
+  it("canonically redacts request URL metadata before marking an artifact redacted", () => {
+    const request = {
+      ...buildExecutableRequest(login, qa),
+      url: "https://alice:password@example.test/login?api_key=url-secret&visible=yes"
+    };
+    const response = normalizeResponse(login, {
+      status: 200,
+      statusText: "OK",
+      headers: { "content-type": "text/plain" },
+      body: "apiKey=one api_key=two api-key=three x-api-key=four",
+      durationMs: 5
+    });
+
+    const draft = buildSavedResponseDraft({ service: login, request, response, filePath: "/tmp/login.txt" });
+
+    expect(draft.metadata.redacted).toBe(true);
+    expect(draft.metadata.url).toBe("https://example.test/login?api_key=********&visible=yes");
+    expect(draft.artifact.body).not.toMatch(/one|two|three|four/);
+  });
+
   it("classifies non-JSON responses as raw and warns clearly", () => {
     const request = buildExecutableRequest(createOrder, qa);
     const response = normalizeResponse(createOrder, {
@@ -151,7 +171,7 @@ describe("saved response artifacts", () => {
 
   it("redacts malformed JSON-like and raw credential values defensively", () => {
     expect(redactResponseBody(`{"accessToken":"abc"`, "application/json")).toBe(`{"accessToken":"********"`);
-    expect(redactResponseBody("token=abc123 password=secret", "text/plain")).toBe("token=\"********\" password=\"********\"");
+    expect(redactResponseBody("token=abc123 password=secret", "text/plain")).toBe("token=******** password=********");
     expect(redactResponseBody("", "application/json")).toBe("");
   });
 });
