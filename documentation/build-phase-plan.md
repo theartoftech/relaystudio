@@ -771,6 +771,8 @@ Status: Completed July 21, 2026. RS18A-002, RS18A-009, RS18A-016, RS18A-018, RS1
 
 ## Sprint 18E: Delivery Hardening And Final Readiness Review
 
+Status: Completed July 24, 2026. See the [Sprint 18E closure report](reviews/sprint-18e/closure-report.md) and updated [remediation register](reviews/sprint-18a/remediation-register.md). Protected live-test configuration is scoped to materialization/preflight steps, first-party checkout/artifact actions are pinned, secret scanning reports supported/unsupported artifact counts and detects modern lockfile canaries, and the documentation validator checks all OOXML text and relationship parts.
+
 ### Goals
 
 - Minimize CI secret exposure and make secret-scanning coverage and exclusions explicit.
@@ -784,6 +786,24 @@ Status: Completed July 21, 2026. RS18A-002, RS18A-009, RS18A-016, RS18A-018, RS1
 - No unresolved critical or high finding remains; lower-severity deferrals record impact, rationale, owner, milestone, and retest trigger.
 - TypeScript service and Rust native coverage remain at least 90 percent, and all applicable type, lint, test, build, dependency, license, secret, Clippy, cargo-deny, live REST, interactive, and package gates pass.
 - The threat model, architecture documentation, redacted review report, remediation register, and final readiness decision match the verified implementation.
+
+## Sprint 19: REST Code Examples
+
+Status: Planned roadmap feature after Sprint 18E. Generate deterministic, copyable examples from the selected request without executing it or exposing credentials.
+
+### Goals
+
+- Add a Code Example action to the request workflow with generators for raw HTTP, cURL, C#, jQuery, Node.js, PHP, Python, and Ruby.
+- Derive output from the typed request model shared with execution, including method, URL/query/path encoding, headers, JSON/text/form bodies, and multipart metadata.
+- Replace credentials and sensitive values with safe placeholders and represent local files without reading or persisting their contents.
+
+### Exit Criteria
+
+- Golden fixtures and service tests cover all eight generators and representative JSON, text, URL-encoded, and multipart requests.
+- Generated examples are deterministic, bounded, read-only, and never send a request or mutate project state.
+- Invalid or unsupported request combinations produce typed, actionable, redacted errors rather than silent fallbacks.
+- Playwright coverage verifies generator selection, output refresh, copy behavior, validation recovery, and secret/file-path safety.
+- Architecture, security, QA, and sprint portfolio documentation describe the implemented behavior and its limits.
 
 ### Program Non-Goals
 

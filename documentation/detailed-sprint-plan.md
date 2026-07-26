@@ -927,6 +927,8 @@ Status: Completed July 21, 2026. See the [Sprint 18D closure report](reviews/spr
 
 #### Sprint 18E: Delivery Hardening And Final Readiness Review
 
+Status: Completed July 24, 2026. See the [Sprint 18E closure report](reviews/sprint-18e/closure-report.md) and updated [remediation register](reviews/sprint-18a/remediation-register.md). The final readiness review closed the remaining delivery-defense rows with scoped CI secrets, immutable first-party action revisions, expanded lockfile/generated-artifact scanning, all-part OOXML validation, and explicit unsupported-content limitations.
+
 - Restrict protected CI configuration to the exact step that needs it and use immutable action revisions where practical.
 - Expand secret inspection for modern token formats, unpacked installer content, and relevant OOXML parts and relationships; report skipped content as a limitation rather than a pass.
 - Re-run all applicable quality, security, coverage, live REST, interactive, runtime-log, build, and packaged-platform gates.
@@ -983,6 +985,50 @@ Status: Completed July 21, 2026. See the [Sprint 18D closure report](reviews/spr
 - Sprint 18A produces the validated baseline; Sprints 18B-18D remediate their assigned boundaries; Sprint 18E produces the final readiness decision.
 - The redacted final report, remediation register, updated architecture/security documentation, and final readiness decision are committed without credentials or local-only data.
 
+## Sprint 19: REST Code Examples
+
+Status: Planned roadmap feature after Sprint 18E. This product increment preserves Relay Studio's local-first and no-credential-disclosure boundaries.
+
+### Objective
+
+Generate copyable, deterministic code examples from the currently selected Relay Studio request, similar to Postman's code-generation workflow, without sending the request or persisting runtime secrets.
+
+### Supported Generators
+
+- Raw HTTP
+- cURL
+- C#
+- jQuery
+- Node.js
+- PHP
+- Python
+- Ruby
+
+### Demonstrated Developer Workflow
+
+1. Configure or import a REST request with its method, URL, parameters, headers, body, authentication, and form/multipart fields.
+2. Open Code Example from the request action surface.
+3. Select a generator and review the read-only output.
+4. Copy the example and continue development in the target client or language without executing the request from Relay Studio.
+
+### Scope And Safety Requirements
+
+- Generate from the same typed request model used by execution so method, URL encoding, headers, body, form fields, and content types cannot silently diverge from Send Request behavior.
+- Replace bearer tokens, passwords, API keys, cookies, client secrets, secret variables, URL userinfo, and sensitive query values with safe placeholders; never display real credentials in generated output.
+- Represent local multipart files with an explicit placeholder path and field metadata; never read file contents or expose the persisted local path merely to generate an example.
+- Keep generation deterministic and bounded; large request bodies and unsupported combinations fail with typed, actionable guidance instead of silent language-specific fallbacks.
+- Code generation is read-only with respect to the project, environment, saved responses, and request history.
+
+### Failure Modes And Acceptance Criteria
+
+- Invalid or incomplete requests identify the exact validation issue before an example is produced.
+- Unsupported methods, body encodings, multipart combinations, or language-specific limitations produce a visible explanation and do not emit misleading code.
+- Golden fixtures cover all eight generators, GET/POST/PATCH/DELETE, query/path/header parameters, JSON, text, URL-encoded, and multipart text/file bodies.
+- Automated tests assert that generated output contains no synthetic credential canary, local file content, or unapproved secret value.
+- Playwright coverage opens Code Example, changes generators, verifies output updates, copies output, and recovers from validation errors without mutating project state.
+- Generated examples remain within an explicit output budget and preserve the same redaction and resource-limit policy as diagnostics.
+- The feature is documented in the architecture, QA, security, and sprint portfolio manuals when implemented.
+
 ## Cross-Sprint Backlog
 
 ### Strategic OpenAPI Import Construction
@@ -1008,6 +1054,7 @@ Status: Completed July 21, 2026. See the [Sprint 18D closure report](reviews/spr
 | Security | Central redaction utility shared by console, diagnostics, and persistence | 3-5 |
 | Services | Curl-style request preview | 4-5 |
 | Services | Request body examples from OpenAPI import | 4A |
+| Services | REST code examples for HTTP, cURL, C#, jQuery, Node.js, PHP, Python, and Ruby | 19 |
 | Runner | Request cancellation surfaced in console | 5, 10 |
 | Responses | Diff two saved responses | Post-beta candidate |
 | Flows | Flow run summary with pass/fail counts | 7-8 |

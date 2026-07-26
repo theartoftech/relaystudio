@@ -10,6 +10,11 @@ import zipfile
 from pathlib import Path
 from xml.etree import ElementTree
 
+try:
+    from lxml import etree as LxmlElementTree
+except ImportError:  # pragma: no cover - CI's standard library parser is sufficient
+    LxmlElementTree = None
+
 
 ROOT = Path(__file__).resolve().parents[1]
 DOC_ROOT = ROOT / "documentation"
@@ -60,6 +65,7 @@ FORBIDDEN_PATTERNS = (
     re.compile(r"(?i)bearer\s+[A-Za-z0-9._~+/=-]{16,}"),
     re.compile(r"(?i)(password|client_secret|api[_-]?key)\s*[:=]\s*[^\s<]{8,}"),
 )
+TEXT_PART_SUFFIXES = (".xml", ".rels", ".txt", ".json")
 
 
 def fail(message: str) -> None:
@@ -68,9 +74,27 @@ def fail(message: str) -> None:
 
 def parse_xml(data: bytes, source: str) -> ElementTree.Element:
     try:
+        if LxmlElementTree is not None:
+            return LxmlElementTree.fromstring(data)  # type: ignore[no-any-return]
         return ElementTree.fromstring(data)
-    except ElementTree.ParseError as error:
+    except (ElementTree.ParseError, ValueError) as error:
         fail(f"Malformed XML in {source}: {error}")
+
+
+def scan_text_parts(archive: zipfile.ZipFile, artifact_name: str) -> None:
+    """Inspect every text-bearing OOXML part, not only the primary document/page XML."""
+    for name in sorted(archive.namelist()):
+        if not name.lower().endswith(TEXT_PART_SUFFIXES):
+            continue
+        data = archive.read(name)
+        if name.lower().endswith((".xml", ".rels")):
+            parse_xml(data, f"{artifact_name}/{name}")
+        text = data.decode("utf-8", errors="ignore")
+        if "TODO" in text or "PLACEHOLDER" in text:
+            fail(f"Placeholder text remains in {artifact_name}/{name}")
+        for pattern in FORBIDDEN_PATTERNS:
+            if pattern.search(text):
+                fail(f"Potential secret-like value in {artifact_name}/{name}: {pattern.pattern}")
 
 
 def validate_word(path: Path) -> None:
@@ -86,12 +110,7 @@ def validate_word(path: Path) -> None:
         headings = [node for node in root.iter() if node.tag.endswith("}pStyle") and node.attrib.get("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val", "").startswith("Heading")]
         if len(headings) < 5:
             fail(f"Expected at least five structured headings in {path.name}")
-        text = document_xml.decode("utf-8", errors="ignore")
-        if "TODO" in text or "PLACEHOLDER" in text:
-            fail(f"Placeholder text remains in {path.name}")
-        for pattern in FORBIDDEN_PATTERNS:
-            if pattern.search(text):
-                fail(f"Potential secret-like value in {path.name}: {pattern.pattern}")
+        scan_text_parts(archive, path.name)
 
 
 def relationship_targets(archive: zipfile.ZipFile, name: str) -> list[str]:
@@ -117,8 +136,8 @@ def validate_visio(path: Path, expected_pages: int) -> None:
         for name in names:
             if name.endswith((".xml", ".rels")):
                 parse_xml(archive.read(name), f"{path.name}/{name}")
-        relationship_targets(archive, "_rels/.rels")
-        relationship_targets(archive, "visio/_rels/document.xml.rels")
+        for relationship_part in sorted(name for name in names if name.endswith(".rels")):
+            relationship_targets(archive, relationship_part)
         page_targets = relationship_targets(archive, "visio/pages/_rels/pages.xml.rels")
         if len(page_targets) != expected_pages:
             fail(f"Expected {expected_pages} page relationships in {path.name}, found {len(page_targets)}")
@@ -137,10 +156,7 @@ def validate_visio(path: Path, expected_pages: int) -> None:
             ids = [shape.attrib.get("ID") for shape in shapes]
             if len(ids) != len(set(ids)):
                 fail(f"Duplicate shape IDs in {path.name}/{page_file}")
-            text = data.decode("utf-8", errors="ignore")
-            for pattern in FORBIDDEN_PATTERNS:
-                if pattern.search(text):
-                    fail(f"Potential secret-like value in {path.name}/{page_file}")
+        scan_text_parts(archive, path.name)
 
 
 def validate_traceability() -> None:

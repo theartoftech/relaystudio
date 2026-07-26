@@ -97,6 +97,16 @@
       "destination": "Retained authoritative Markdown; referenced by the Word library"
     },
     {
+      "source": "documentation/reviews/sprint-18d/closure-report.md",
+      "action": "retain",
+      "destination": "Retained authoritative Markdown; referenced by the Word library"
+    },
+    {
+      "source": "documentation/reviews/sprint-18e/closure-report.md",
+      "action": "retain",
+      "destination": "Retained authoritative Markdown; referenced by the Word library"
+    },
+    {
       "source": "documentation/sample-test-project-definition.md",
       "action": "retain",
       "destination": "Retained authoritative Markdown; referenced by the Word library"

@@ -7,9 +7,7 @@ useDefault = true
 description = "Documentation placeholders and generated dependency metadata"
 paths = [
   '''documentation/live-rest-local-config\.example\.json''',
-  '''documentation/sprint-12-enterprise-hardening-qa-script\.md''',
-  '''package-lock\.json''',
-  '''src-tauri/Cargo\.lock'''
+  '''documentation/sprint-12-enterprise-hardening-qa-script\.md'''
 ]
 regexes = [
   '''replace-with-local-secret''',

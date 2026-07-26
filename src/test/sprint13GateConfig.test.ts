@@ -58,7 +58,7 @@ describe("Sprint 13 release gates", () => {
 
     expect(workflow).toContain("--fail-under-lines 90");
     expect(workflow).toContain("RELAY_LIVE_REST_CONFIG");
-    expect(workflow).toContain("if: env.LIVE_REST_CONFIG_B64 != ''");
+    expect(workflow).toContain("if: steps.live-rest-config.outputs.configured == 'true'");
   });
 
   it("reports missing live REST configuration without failing ordinary main validation", () => {

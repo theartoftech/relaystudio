@@ -10,6 +10,7 @@
     "check:rust": "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings",
     "check:rust-coverage": "cargo +nightly llvm-cov --manifest-path src-tauri/Cargo.toml --all-features --workspace --ignore-filename-regex 'src/main.rs' --fail-under-lines 90",
     "check:secrets": "node tools/secret-scan.mjs",
+    "check:documentation": "python3 -m unittest tools/validate_documentation_artifacts_test.py && python3 tools/validate_documentation_artifacts.py",
     "check:licenses": "node tools/license-check.mjs",
     "check:dependencies": "npm audit --audit-level=high && npm run check:licenses && cargo deny --manifest-path src-tauri/Cargo.toml check",
     "preview": "vite preview --host 127.0.0.1",
@@ -43,10 +44,10 @@
     "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^6.0.2",
     "@vitest/coverage-v8": "^4.1.9",
-    "eslint": "^9.17.0",
+    "eslint": "^10.8.0",
     "jsdom": "^25.0.1",
     "typescript": "^5.7.2",
-    "typescript-eslint": "^8.18.1",
+    "typescript-eslint": "^8.65.0",
     "vite": "^8.0.16",
     "vitest": "^4.1.9"
   }
