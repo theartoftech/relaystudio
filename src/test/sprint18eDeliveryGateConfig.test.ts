@@ -13,11 +13,20 @@ interface PackageManifest {
   scripts?: Record<string, string>;
 }
 
+function normalizeRepositoryText(value: string): string {
+  return value.replace(/\r\n?/g, "\n");
+}
+
 function readRepositoryFile(path: string): string {
-  return readFileSync(resolve(process.cwd(), path), "utf8");
+  return normalizeRepositoryText(readFileSync(resolve(process.cwd(), path), "utf8"));
 }
 
 describe("Sprint 18E delivery hardening", () => {
+  it("normalizes Windows checkout line endings before inspecting workflow structure", () => {
+    expect(normalizeRepositoryText("env:\r\n  LIVE_REST_CONFIG_B64: secret\r"))
+      .toBe("env:\n  LIVE_REST_CONFIG_B64: secret\n");
+  });
+
   it("keeps protected live REST configuration scoped to materialization steps", () => {
     const ci = readRepositoryFile(".github/workflows/ci.yml");
     const packageBeta = readRepositoryFile(".github/workflows/package-beta.yml");
