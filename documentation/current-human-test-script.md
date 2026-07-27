@@ -371,6 +371,24 @@ These sample services use placeholder endpoints unless you point the environment
    - The error instructs the developer to edit the environment destination explicitly.
    - Ordinary non-destination mappings continue to work.
 
+## Test 23: Request And Flow Code Examples
+
+1. Right-click an open request tab, choose `Generate Code`, and select `cURL`.
+2. Confirm the popup shows the request method, resolved URL, headers, and body without sending the request or changing project status.
+3. Switch through HTTP, C#, Java, jQuery, Node.js, PHP, Python, and Ruby; use `Copy Code` and confirm visible success.
+4. Repeat with JSON, text, URL-encoded, and multipart text/file bodies.
+5. Right-click a flow tab, choose `Generate Code`, and select `Java`, then repeat with `jQuery`.
+6. Expected result:
+   - Request output matches the typed request and includes safe auth/secret placeholders.
+   - Multipart local paths are absent and replaced with `SELECT_FILE` placeholders.
+   - Flow requests appear in dependency order with success/failure prerequisites and response-mapping comments.
+   - The Java flow states that `<REDACTED>` and other credential masks must be supplied securely before execution, uses Jackson Databind to parse mapped JSON responses, stores scalar values in `flowVariables`, and reuses values such as access tokens in later requests.
+   - Before parsing, Java rejects non-2xx and empty responses. Malformed JSON is wrapped in a step-specific error that identifies credential/endpoint checks without including the response body; missing, null, and non-scalar mapping results also fail explicitly.
+   - The jQuery flow parses mapped JSON responses, stores each mapped value in `flowVariables`, and reuses values such as access tokens in later requests.
+   - The flow popup warns that application-specific branch handling must be added.
+   - Language changes and clipboard failures remain actionable, focus stays in the modal, and Escape closes it.
+   - Project dirty state, execution status, response history, and runtime logs remain unchanged.
+
 ## Approval Criteria
 
 Approve check-in only if:
@@ -385,3 +403,4 @@ Approve check-in only if:
 8. Flow nodes stay attached to the pointer while dragging.
 9. No credentials or secret values are visible in logs, saved responses, project artifacts, or OpenAPI destination review.
 10. Cross-origin redirects, malformed proxy bypass entries, and `baseUrl` response mappings fail before widening the network trust boundary.
+11. Request and flow code examples are bounded, copyable, credential-safe, file-path-safe, and read-only.

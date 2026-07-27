@@ -1,0 +1,126 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`REST code examples > generates a deterministic 'C#' request fixture 1`] = `
+"using System.Collections.Generic;
+using System.IO;
+using System.Net.Http;
+using System.Text;
+
+using var client = new HttpClient();
+using var request = new HttpRequestMessage(new HttpMethod("POST"), "https://api.example.com/api/orders");
+request.Headers.TryAddWithoutValidation("Authorization", "Bearer <ACCESS_TOKEN>");
+request.Content = new StringContent("{\\n  \\"productId\\": \\"prod-1001\\",\\n  \\"quantity\\": 1,\\n  \\"shippingMethod\\": \\"standard\\"\\n}", Encoding.UTF8, "application/json");
+using var response = await client.SendAsync(request);
+var responseBody = await response.Content.ReadAsStringAsync();"
+`;
+
+exports[`REST code examples > generates a deterministic 'HTTP' request fixture 1`] = `
+"# Create Order
+# URL: https://api.example.com/api/orders
+POST /api/orders HTTP/1.1
+Authorization: Bearer <ACCESS_TOKEN>
+Content-Type: application/json
+Host: api.example.com
+
+{
+  "productId": "prod-1001",
+  "quantity": 1,
+  "shippingMethod": "standard"
+}"
+`;
+
+exports[`REST code examples > generates a deterministic 'Java' request fixture 1`] = `
+"import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+
+var client = HttpClient.newHttpClient();
+
+var bodyPublisher = HttpRequest.BodyPublishers.ofString("{\\n  \\"productId\\": \\"prod-1001\\",\\n  \\"quantity\\": 1,\\n  \\"shippingMethod\\": \\"standard\\"\\n}");
+var requestBuilder = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.example.com/api/orders"))
+    .method("POST", bodyPublisher);
+requestBuilder.header("Authorization", "Bearer <ACCESS_TOKEN>");
+requestBuilder.header("Content-Type", "application/json");
+var response = client.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
+var responseBody = response.body();"
+`;
+
+exports[`REST code examples > generates a deterministic 'Node.js' request fixture 1`] = `
+"const response = await fetch("https://api.example.com/api/orders", {
+  method: "POST",
+  headers: { "Authorization": "Bearer <ACCESS_TOKEN>", "Content-Type": "application/json" },
+  body: "{\\n  \\"productId\\": \\"prod-1001\\",\\n  \\"quantity\\": 1,\\n  \\"shippingMethod\\": \\"standard\\"\\n}",
+});
+const responseBody = await response.text();"
+`;
+
+exports[`REST code examples > generates a deterministic 'PHP' request fixture 1`] = `
+"<?php
+
+$curl = curl_init();
+curl_setopt_array($curl, [
+    CURLOPT_URL => 'https://api.example.com/api/orders',
+    CURLOPT_CUSTOMREQUEST => 'POST',
+    CURLOPT_RETURNTRANSFER => true,
+    CURLOPT_HTTPHEADER => ['Authorization: Bearer <ACCESS_TOKEN>', 'Content-Type: application/json'],
+    CURLOPT_POSTFIELDS => '{
+  "productId": "prod-1001",
+  "quantity": 1,
+  "shippingMethod": "standard"
+}',
+]);
+$response = curl_exec($curl);
+if ($response === false) { throw new RuntimeException(curl_error($curl)); }
+curl_close($curl);"
+`;
+
+exports[`REST code examples > generates a deterministic 'Python' request fixture 1`] = `
+"import requests
+
+response = requests.post('https://api.example.com/api/orders', headers={'Authorization': 'Bearer <ACCESS_TOKEN>', 'Content-Type': 'application/json'}, data='{\\n  "productId": "prod-1001",\\n  "quantity": 1,\\n  "shippingMethod": "standard"\\n}')
+response.raise_for_status()
+response_body = response.text"
+`;
+
+exports[`REST code examples > generates a deterministic 'Ruby' request fixture 1`] = `
+"require 'net/http'
+require 'uri'
+
+uri = URI('https://api.example.com/api/orders')
+request = Net::HTTPGenericRequest.new('POST', true, true, uri.request_uri)
+request['Authorization'] = 'Bearer <ACCESS_TOKEN>'
+request['Content-Type'] = 'application/json'
+request.body = '{
+  "productId": "prod-1001",
+  "quantity": 1,
+  "shippingMethod": "standard"
+}'
+response = Net::HTTP.start(uri.hostname, uri.port, use_ssl: uri.scheme == 'https') do |http|
+  http.request(request)
+end
+response_body = response.body"
+`;
+
+exports[`REST code examples > generates a deterministic 'cURL' request fixture 1`] = `
+"curl --request POST \\
+  --url 'https://api.example.com/api/orders' \\
+  --header 'Authorization: Bearer <ACCESS_TOKEN>' \\
+  --header 'Content-Type: application/json' \\
+  --data-raw '{
+  "productId": "prod-1001",
+  "quantity": 1,
+  "shippingMethod": "standard"
+}'"
+`;
+
+exports[`REST code examples > generates a deterministic 'jQuery' request fixture 1`] = `
+"const response = await $.ajax({
+  url: "https://api.example.com/api/orders",
+  method: "POST",
+  headers: { "Authorization": "Bearer <ACCESS_TOKEN>", "Content-Type": "application/json" },
+  data: "{\\n  \\"productId\\": \\"prod-1001\\",\\n  \\"quantity\\": 1,\\n  \\"shippingMethod\\": \\"standard\\"\\n}",
+  contentType: "application/json",
+});"
+`;

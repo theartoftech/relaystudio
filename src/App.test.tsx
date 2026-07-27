@@ -1206,6 +1206,89 @@ describe("Relay Studio shell", () => {
     expect(screen.getByText("Flow renamed to Authenticated Smoke Flow.")).toBeInTheDocument();
   });
 
+  it("generates request code from the tab context menu and changes language without mutating the project", () => {
+    render(<App />);
+
+    const initialStatus = screen.getByLabelText("Status bar").textContent;
+    const requestTab = screen.getByRole("tab", { name: /Create Order/i });
+    fireEvent.contextMenu(requestTab, { clientX: 420, clientY: 96 });
+
+    const menu = screen.getByRole("menu", { name: "Request tab context menu" });
+    fireEvent.pointerEnter(within(menu).getByRole("menuitem", { name: "Generate Code" }));
+    const languages = screen.getByRole("menu", { name: "Generate request code language" });
+    expect(within(languages).getByRole("menuitem", { name: "Java" })).toBeInTheDocument();
+    fireEvent.click(within(languages).getByRole("menuitem", { name: "Python" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Code Example: Create Order" });
+    expect(within(dialog).getByLabelText("Code language")).toHaveValue("python");
+    const pythonCode = (within(dialog).getByLabelText("Generated code") as HTMLTextAreaElement).value;
+    expect(pythonCode).toContain("requests.post");
+    expect(pythonCode).not.toContain("sample-access-token");
+
+    fireEvent.change(within(dialog).getByLabelText("Code language"), { target: { value: "ruby" } });
+    expect((within(dialog).getByLabelText("Generated code") as HTMLTextAreaElement).value).toContain("Net::HTTP");
+    expect(screen.getByLabelText("Status bar").textContent).toBe(initialStatus);
+    expect(screen.queryByText("Sample API Regression *", { exact: true })).not.toBeInTheDocument();
+  });
+
+  it("opens and navigates the code language submenu with desktop menu keyboard behavior", () => {
+    render(<App />);
+
+    fireEvent.contextMenu(screen.getByRole("tab", { name: /Create Order/i }), { clientX: 420, clientY: 96 });
+    const generateCode = within(screen.getByRole("menu", { name: "Request tab context menu" }))
+      .getByRole("menuitem", { name: "Generate Code" });
+    generateCode.focus();
+    fireEvent.keyDown(generateCode, { key: "ArrowRight" });
+
+    const languages = screen.getByRole("menu", { name: "Generate request code language" });
+    expect(within(languages).getByRole("menuitem", { name: "HTTP" })).toHaveFocus();
+
+    fireEvent.keyDown(within(languages).getByRole("menuitem", { name: "HTTP" }), { key: "Escape" });
+    expect(screen.queryByRole("menu", { name: "Request tab context menu" })).not.toBeInTheDocument();
+  });
+
+  it("copies generated code and reports clipboard failures actionably", async () => {
+    const writeText = vi.fn().mockRejectedValueOnce(new Error("Clipboard permission denied"));
+    vi.stubGlobal("navigator", {
+      platform: "MacIntel",
+      userAgent: "Mozilla/5.0 (Macintosh)",
+      clipboard: { writeText }
+    });
+    render(<App />);
+
+    fireEvent.contextMenu(screen.getByRole("tab", { name: /Login/i }), { clientX: 420, clientY: 96 });
+    fireEvent.click(within(screen.getByRole("menu", { name: "Request tab context menu" })).getByRole("menuitem", { name: "Generate Code" }));
+    fireEvent.click(within(screen.getByRole("menu", { name: "Generate request code language" })).getByRole("menuitem", { name: "cURL" }));
+    const dialog = screen.getByRole("dialog", { name: "Code Example: Login" });
+    const generatedCode = (within(dialog).getByLabelText("Generated code") as HTMLTextAreaElement).value;
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Copy Code" }));
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(generatedCode));
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("Clipboard permission denied");
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Copy Code" }));
+    await waitFor(() => expect(within(dialog).getByRole("status")).toHaveTextContent("Copied generated code"));
+  });
+
+  it("generates a dependency-ordered flow example from a flow tab", () => {
+    render(<App />);
+
+    const flowTab = screen.getByRole("tab", { name: /Authenticated Read/i });
+    fireEvent.contextMenu(flowTab, { clientX: 460, clientY: 96 });
+    fireEvent.click(within(screen.getByRole("menu", { name: "Flow tab context menu" })).getByRole("menuitem", { name: "Generate Code" }));
+    fireEvent.click(within(screen.getByRole("menu", { name: "Generate flow code language" })).getByRole("menuitem", { name: "Java" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Code Example: Authenticated Read" });
+    const code = (within(dialog).getByLabelText("Generated code") as HTMLTextAreaElement).value;
+    expect(code.indexOf("Step 1: Login")).toBeLessThan(code.indexOf("Step 2: Current User"));
+    expect(code.indexOf("Step 2: Current User")).toBeLessThan(code.indexOf("Step 3: List Products"));
+    expect(code).toContain("Capture $.accessToken as <ACCESS_TOKEN>");
+    expect(code).toContain('flowVariables.put("accessToken", mappedValue_step1_accessToken.asText())');
+    expect(code).toContain('"Bearer " + flowVariables.get("accessToken")');
+    expect(within(dialog).getByText(/4 requests/)).toBeInTheDocument();
+  });
+
   it("moves selected flow steps repeatedly and creates branch paths", async () => {
     render(<App />);
 

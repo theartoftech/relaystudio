@@ -789,17 +789,18 @@ Status: Completed July 24, 2026. See the [Sprint 18E closure report](reviews/spr
 
 ## Sprint 19: REST Code Examples
 
-Status: Planned roadmap feature after Sprint 18E. Generate deterministic, copyable examples from the selected request without executing it or exposing credentials.
+Status: Completed July 26, 2026. See the [Sprint 19 closure report](reviews/sprint-19/closure-report.md). Request and flow tabs now expose Generate Code language submenus and a local, read-only popup for HTTP, cURL, C#, Java, jQuery, Node.js, PHP, Python, and Ruby.
 
 ### Goals
 
-- Add a Code Example action to the request workflow with generators for raw HTTP, cURL, C#, jQuery, Node.js, PHP, Python, and Ruby.
+- Add a Generate Code action to request and flow tab context menus with generators for raw HTTP, cURL, C#, Java, jQuery, Node.js, PHP, Python, and Ruby.
 - Derive output from the typed request model shared with execution, including method, URL/query/path encoding, headers, JSON/text/form bodies, and multipart metadata.
 - Replace credentials and sensitive values with safe placeholders and represent local files without reading or persisting their contents.
+- Preserve flow dependency order and emit visible branch-prerequisite and response-mapping guidance; Java and jQuery examples capture JSONPath mappings into flow variables and reuse them in later requests without claiming to generate application-specific branch orchestration. Java examples identify their Jackson Databind dependency and credential-mask substitution requirement, then reject non-2xx, empty, malformed JSON, missing, null, or non-scalar mapping responses with step-specific errors that do not echo response bodies.
 
 ### Exit Criteria
 
-- Golden fixtures and service tests cover all eight generators and representative JSON, text, URL-encoded, and multipart requests.
+- Golden fixtures and service tests cover all nine generators and representative JSON, text, URL-encoded, and multipart requests.
 - Generated examples are deterministic, bounded, read-only, and never send a request or mutate project state.
 - Invalid or unsupported request combinations produce typed, actionable, redacted errors rather than silent fallbacks.
 - Playwright coverage verifies generator selection, output refresh, copy behavior, validation recovery, and secret/file-path safety.

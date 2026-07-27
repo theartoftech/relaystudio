@@ -30,6 +30,15 @@
       ]
     },
     {
+      "title": "Code Examples",
+      "body": "Generate local, read-only HTTP, cURL, C#, Java, jQuery, Node.js, PHP, Python, or Ruby examples from an open request or flow without sending it.",
+      "steps": [
+        "Right-click a request or flow tab, choose Generate Code, then choose a language.",
+        "Review safe credential and multipart-file placeholders, switch languages if needed, and choose Copy Code.",
+        "For flows, implement the generated branch prerequisites before running the example; Java and jQuery output capture and reuse mapped JSON response values automatically. Java mapping output requires Jackson Databind, requires credential masks such as <REDACTED> to be supplied securely at runtime, and fails actionably for non-2xx, empty, malformed JSON, missing, null, or non-scalar mapping responses."
+      ]
+    },
+    {
       "title": "Saved Responses",
       "body": "Save response artifacts for offline evidence and reopen them from Explorer.",
       "steps": [

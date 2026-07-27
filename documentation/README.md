@@ -2,7 +2,7 @@
 
 Relay Studio uses a curated documentation library instead of preserving every historical sprint file. Word documents are authoritative for onboarding, architecture narrative, product handoff, UML guidance, sprint summaries, consolidated QA, and release operations. Markdown remains authoritative for build criteria, engineering policy, design constraints, and operative test procedures.
 
-The library reflects completed Sprint 17 native multipart file workflows and completed Sprints 18A-18E review/remediation work. Sprint 19 is the next planned product increment for Postman-style REST code examples. Relay Studio now keeps redirects on the reviewed origin, requires review before retrieving a Swagger UI secondary destination, bounds imported and compared documents, enforces response/project resource limits, evaluates flow branches by predecessor outcome, removes persisted multipart file authority, binds file approval to the current session and destination origin, rejects disguised response files, deeply validates project state, applies canonical redaction across persistence and output boundaries, and distinguishes clean secret scans from explicit unsupported-artifact limitations.
+The library reflects completed Sprint 17 native multipart file workflows, completed Sprints 18A-18E review/remediation work, and completed Sprint 19 request/flow code examples. Relay Studio now generates bounded, copyable HTTP, cURL, C#, Java, jQuery, Node.js, PHP, Python, and Ruby examples from request or flow tabs without executing requests, reading multipart files, mutating projects, or displaying credential values. Java and jQuery flow output captures mapped JSON response values and reuses them in later requests. Java output identifies exported credential masks as required runtime substitutions and fails actionably before mapping reuse when a response is non-successful, empty, malformed JSON, missing, null, or non-scalar. It also keeps redirects on the reviewed origin, requires review before retrieving a Swagger UI secondary destination, bounds imported and compared documents, enforces response/project resource limits, evaluates flow branches by predecessor outcome, removes persisted multipart file authority, binds file approval to the current session and destination origin, rejects disguised response files, deeply validates project state, applies canonical redaction across persistence and output boundaries, and distinguishes clean secret scans from explicit unsupported-artifact limitations.
 
 ## Word Library
 
@@ -41,6 +41,11 @@ The library reflects completed Sprint 17 native multipart file workflows and com
 - [Sprint 18B Network and Import Boundary Closure](reviews/sprint-18b/closure-report.md)
 - [Sprint 18C Local File, Persistence, and Redaction Closure](reviews/sprint-18c/closure-report.md)
 - [Sprint 18D Execution Integrity and Resource Bounds Closure](reviews/sprint-18d/closure-report.md)
+- [Sprint 18E Delivery Hardening and Final Readiness Closure](reviews/sprint-18e/closure-report.md)
+
+## Sprint 19 Delivery Record
+
+- [Sprint 19 REST Code Examples Closure](reviews/sprint-19/closure-report.md)
 
 ## Governance
 

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-07-12T18:36:41+00:00",
+  "generatedAt": "2026-07-26T14:50:00+00:00",
   "authority": {
     "word": "Narrative onboarding, architecture, UML guidance, sprint summaries, QA consolidation, and release operations",
     "markdown": "Build criteria, engineering policy, design constraints, and operative test procedures listed as retained"
@@ -103,6 +103,11 @@
     },
     {
       "source": "documentation/reviews/sprint-18e/closure-report.md",
+      "action": "retain",
+      "destination": "Retained authoritative Markdown; referenced by the Word library"
+    },
+    {
+      "source": "documentation/reviews/sprint-19/closure-report.md",
       "action": "retain",
       "destination": "Retained authoritative Markdown; referenced by the Word library"
     },

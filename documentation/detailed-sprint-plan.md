@@ -987,17 +987,18 @@ Status: Completed July 24, 2026. See the [Sprint 18E closure report](reviews/spr
 
 ## Sprint 19: REST Code Examples
 
-Status: Planned roadmap feature after Sprint 18E. This product increment preserves Relay Studio's local-first and no-credential-disclosure boundaries.
+Status: Completed July 26, 2026. See the [Sprint 19 closure report](reviews/sprint-19/closure-report.md). This product increment preserves Relay Studio's local-first and no-credential-disclosure boundaries.
 
 ### Objective
 
-Generate copyable, deterministic code examples from the currently selected Relay Studio request, similar to Postman's code-generation workflow, without sending the request or persisting runtime secrets.
+Generate copyable, deterministic code examples from a request tab or dependency-ordered flow tab, similar to Postman's code-generation workflow, without sending requests or persisting runtime secrets.
 
 ### Supported Generators
 
 - Raw HTTP
 - cURL
 - C#
+- Java
 - jQuery
 - Node.js
 - PHP
@@ -1007,9 +1008,10 @@ Generate copyable, deterministic code examples from the currently selected Relay
 ### Demonstrated Developer Workflow
 
 1. Configure or import a REST request with its method, URL, parameters, headers, body, authentication, and form/multipart fields.
-2. Open Code Example from the request action surface.
+2. Right-click the open request or flow tab and choose Generate Code, then a language.
 3. Select a generator and review the read-only output.
-4. Copy the example and continue development in the target client or language without executing the request from Relay Studio.
+4. For a flow, review the dependency order, branch prerequisites, and response mappings. Java and jQuery examples capture mapped JSON response values and reuse them in later requests; add application-specific branch handling before execution. Java mapping examples require Jackson Databind, require credential masks such as `<REDACTED>` to be supplied securely at runtime, and throw step-specific errors for non-2xx, empty, malformed JSON, missing, null, or non-scalar mapping responses without echoing the response body.
+5. Copy the example and continue development in the target client or language without executing the request from Relay Studio.
 
 ### Scope And Safety Requirements
 
@@ -1018,12 +1020,13 @@ Generate copyable, deterministic code examples from the currently selected Relay
 - Represent local multipart files with an explicit placeholder path and field metadata; never read file contents or expose the persisted local path merely to generate an example.
 - Keep generation deterministic and bounded; large request bodies and unsupported combinations fail with typed, actionable guidance instead of silent language-specific fallbacks.
 - Code generation is read-only with respect to the project, environment, saved responses, and request history.
+- Flow generation is capped at 100 requests and all output is capped at 256 KiB; excessive input fails before a popup can present misleading or unbounded output.
 
 ### Failure Modes And Acceptance Criteria
 
 - Invalid or incomplete requests identify the exact validation issue before an example is produced.
 - Unsupported methods, body encodings, multipart combinations, or language-specific limitations produce a visible explanation and do not emit misleading code.
-- Golden fixtures cover all eight generators, GET/POST/PATCH/DELETE, query/path/header parameters, JSON, text, URL-encoded, and multipart text/file bodies.
+- Golden fixtures cover all nine generators, GET/POST/PATCH/DELETE, query/path/header parameters, JSON, text, URL-encoded, and multipart text/file bodies.
 - Automated tests assert that generated output contains no synthetic credential canary, local file content, or unapproved secret value.
 - Playwright coverage opens Code Example, changes generators, verifies output updates, copies output, and recovers from validation errors without mutating project state.
 - Generated examples remain within an explicit output budget and preserve the same redaction and resource-limit policy as diagnostics.
@@ -1054,7 +1057,7 @@ Generate copyable, deterministic code examples from the currently selected Relay
 | Security | Central redaction utility shared by console, diagnostics, and persistence | 3-5 |
 | Services | Curl-style request preview | 4-5 |
 | Services | Request body examples from OpenAPI import | 4A |
-| Services | REST code examples for HTTP, cURL, C#, jQuery, Node.js, PHP, Python, and Ruby | 19 |
+| Services | REST code examples for HTTP, cURL, C#, Java, jQuery, Node.js, PHP, Python, and Ruby | 19 |
 | Runner | Request cancellation surfaced in console | 5, 10 |
 | Responses | Diff two saved responses | Post-beta candidate |
 | Flows | Flow run summary with pass/fail counts | 7-8 |

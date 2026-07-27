@@ -861,3 +861,44 @@ test("renames an open flow from the tab context menu", async ({ page }) => {
   await expect(explorer.getByRole("button", { name: /Authenticated Smoke Flow/i })).toBeVisible();
   await expect(page.getByText("Flow renamed to Authenticated Smoke Flow.")).toBeVisible();
 });
+
+test("generates request and flow code from tab context menus", async ({ page }) => {
+  await page.goto("/");
+
+  const requestTab = page.getByRole("tab", { name: /Create Order/i });
+  await requestTab.click({ button: "right" });
+  const requestMenu = page.getByRole("menu", { name: "Request tab context menu" });
+  await requestMenu.getByRole("menuitem", { name: "Generate Code" }).hover();
+  await page.getByRole("menu", { name: "Generate request code language" }).getByRole("menuitem", { name: "Java" }).click();
+
+  let dialog = page.getByRole("dialog", { name: "Code Example: Create Order" });
+  await expect(dialog.getByLabel("Generated code")).toContainText("HttpClient.newHttpClient()");
+  await expect(dialog.getByLabel("Generated code")).not.toContainText("sample-access-token");
+  await dialog.getByRole("button", { name: "Close code example" }).click();
+
+  const flowTab = page.getByRole("tab", { name: /Authenticated Read/i });
+  await flowTab.click({ button: "right" });
+  const flowMenu = page.getByRole("menu", { name: "Flow tab context menu" });
+  await flowMenu.getByRole("menuitem", { name: "Generate Code" }).hover();
+  await page.getByRole("menu", { name: "Generate flow code language" }).getByRole("menuitem", { name: "Java" }).click();
+
+  dialog = page.getByRole("dialog", { name: "Code Example: Authenticated Read" });
+  let code = await dialog.getByLabel("Generated code").inputValue();
+  expect(code.indexOf("Step 1: Login")).toBeLessThan(code.indexOf("Step 2: Current User"));
+  expect(code).toContain("Capture $.accessToken as <ACCESS_TOKEN>");
+  expect(code).toContain("Credential placeholders such as <REDACTED> must be supplied securely before running");
+  expect(code).toContain("if (response_step1.statusCode() < 200 || response_step1.statusCode() >= 300)");
+  expect(code).toContain("Flow step 1 (Login) did not return valid JSON required by response mappings");
+  expect(code).toContain('flowVariables.put("accessToken", mappedValue_step1_accessToken.asText())');
+  expect(code).toContain('"Bearer " + flowVariables.get("accessToken")');
+  await dialog.getByRole("button", { name: "Close code example" }).click();
+
+  await flowTab.click({ button: "right" });
+  await page.getByRole("menu", { name: "Flow tab context menu" }).getByRole("menuitem", { name: "Generate Code" }).hover();
+  await page.getByRole("menu", { name: "Generate flow code language" }).getByRole("menuitem", { name: "jQuery" }).click();
+  dialog = page.getByRole("dialog", { name: "Code Example: Authenticated Read" });
+  code = await dialog.getByLabel("Generated code").inputValue();
+  expect(code).toContain('flowVariables["accessToken"] = responseData_step1["accessToken"]');
+  expect(code).toContain('"Authorization": "Bearer " + flowVariables["accessToken"]');
+  await expect(dialog.getByText(/4 requests/)).toBeVisible();
+});

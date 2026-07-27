@@ -19,6 +19,8 @@ import {
   Box,
   Braces,
   ChevronDown,
+  ChevronRight,
+  Copy,
   FileJson,
   Folder,
   FolderOpen,
@@ -121,7 +123,15 @@ import {
 import { formatResponseDestination, formatResponseSize } from "./services/responseFormatting";
 import { createDiagnosticsBundle } from "./services/diagnostics";
 import { compareSavedResponses, comparisonToExecutedResponse } from "./services/responseComparison";
+import {
+  CODE_EXAMPLE_LANGUAGES,
+  generateFlowCodeExample,
+  generateRequestCodeExample,
+  isCodeExampleLanguage,
+  type CodeExampleLanguage
+} from "./services/codeExamples";
 import { runServiceRequest, type ExecutableRequest, type ExecutedResponse, type RunnerConsoleEvent } from "./services/serviceRunner";
+import { redactText } from "./lib/redaction";
 import {
   approveMultipartFile,
   assertMultipartFilesApproved,
@@ -177,6 +187,12 @@ interface ProjectListTarget {
   id?: string;
   name: string;
   path: string;
+}
+
+interface CodeExampleDialogState {
+  kind: "request" | "flow";
+  targetId: string;
+  language: CodeExampleLanguage;
 }
 
 type PendingProjectOpen =
@@ -342,6 +358,7 @@ export function App() {
   const [deleteProjectDialog, setDeleteProjectDialog] = useState<ProjectListTarget | null>(null);
   const [renameFlowDialog, setRenameFlowDialog] = useState<ProjectFlow | null>(null);
   const [renameRequestDialog, setRenameRequestDialog] = useState<ProjectService | null>(null);
+  const [codeExampleDialog, setCodeExampleDialog] = useState<CodeExampleDialogState | null>(null);
   const [tabs, setTabs] = useState(initialTabs);
   const [activeTabId, setActiveTabId] = useState("create-order");
   const [activeServiceId, setActiveServiceId] = useState("create-order");
@@ -382,6 +399,12 @@ export function App() {
   }, [environment, project.environments]);
   const activeService = project.services.find((service) => service.id === activeServiceId) ?? project.services[0];
   const activeFlow = project.flows.find((flow) => flow.id === activeFlowId) ?? project.flows[0];
+  const codeExampleService = codeExampleDialog?.kind === "request"
+    ? project.services.find((service) => service.id === codeExampleDialog.targetId)
+    : undefined;
+  const codeExampleFlow = codeExampleDialog?.kind === "flow"
+    ? project.flows.find((flow) => flow.id === codeExampleDialog.targetId)
+    : undefined;
   const projectSettings = getProjectSettings(project);
   const requestPreview = activeService && activeEnvironment ? buildRequestPreview(activeService, activeEnvironment) : null;
   const welcomeTabActive = activeTab.kind === "welcome";
@@ -1521,6 +1544,9 @@ export function App() {
               const flow = project.flows.find((item) => item.id === flowId);
               if (flow) setRenameFlowDialog(flow);
             }}
+            onGenerateCode={(kind, targetId, language) => {
+              setCodeExampleDialog({ kind, targetId, language });
+            }}
           />
           {activeTabHasComposer ? (
             <RequestComposer
@@ -1786,6 +1812,18 @@ export function App() {
           fieldLabel="Request name"
           onCancel={() => setRenameRequestDialog(null)}
           onSubmit={(name) => handleRenameRequest(renameRequestDialog.id, name)}
+        />
+      ) : null}
+
+      {codeExampleDialog && activeEnvironment && (codeExampleService || codeExampleFlow) ? (
+        <CodeExampleDialog
+          state={codeExampleDialog}
+          service={codeExampleService}
+          flow={codeExampleFlow}
+          services={project.services}
+          environment={activeEnvironment}
+          onClose={() => setCodeExampleDialog(null)}
+          onLanguageChange={(language) => setCodeExampleDialog((current) => current ? { ...current, language } : null)}
         />
       ) : null}
 
@@ -2718,21 +2756,57 @@ function TabStrip(props: {
   onNewTab: () => void;
   onRenameRequest: (id: string) => void;
   onRenameFlow: (id: string) => void;
+  onGenerateCode: (kind: "request" | "flow", id: string, language: CodeExampleLanguage) => void;
 }) {
   const [contextMenu, setContextMenu] = useState<null | { x: number; y: number; tabId: string; kind: "request" | "flow" }>(null);
+  const [generateCodeMenuOpen, setGenerateCodeMenuOpen] = useState(false);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
+  const generateCodeMenuItemRef = useRef<HTMLButtonElement>(null);
+  const firstLanguageMenuItemRef = useRef<HTMLButtonElement>(null);
+  const focusLanguageMenuOnOpenRef = useRef(false);
 
   useEffect(() => {
     if (!contextMenu) return;
+
     function closeContextMenu() {
       setContextMenu(null);
+      setGenerateCodeMenuOpen(false);
     }
-    window.addEventListener("click", closeContextMenu);
-    window.addEventListener("keydown", closeContextMenu);
+
+    function closeContextMenuFromOutsidePointer(event: Event) {
+      if (event.target instanceof Node && contextMenuRef.current?.contains(event.target)) return;
+      closeContextMenu();
+    }
+
+    function closeContextMenuFromKeyboard(event: KeyboardEvent) {
+      if (event.key === "Escape") closeContextMenu();
+    }
+
+    window.addEventListener("pointerdown", closeContextMenuFromOutsidePointer);
+    window.addEventListener("click", closeContextMenuFromOutsidePointer);
+    window.addEventListener("keydown", closeContextMenuFromKeyboard);
     return () => {
-      window.removeEventListener("click", closeContextMenu);
-      window.removeEventListener("keydown", closeContextMenu);
+      window.removeEventListener("pointerdown", closeContextMenuFromOutsidePointer);
+      window.removeEventListener("click", closeContextMenuFromOutsidePointer);
+      window.removeEventListener("keydown", closeContextMenuFromKeyboard);
     };
   }, [contextMenu]);
+
+  useEffect(() => {
+    if (!generateCodeMenuOpen || !focusLanguageMenuOnOpenRef.current) return;
+    focusLanguageMenuOnOpenRef.current = false;
+    firstLanguageMenuItemRef.current?.focus();
+  }, [generateCodeMenuOpen]);
+
+  function openGenerateCodeMenu(focusFirstLanguage: boolean) {
+    if (focusFirstLanguage) focusLanguageMenuOnOpenRef.current = true;
+    if (generateCodeMenuOpen && focusFirstLanguage) {
+      focusLanguageMenuOnOpenRef.current = false;
+      firstLanguageMenuItemRef.current?.focus();
+      return;
+    }
+    setGenerateCodeMenuOpen(true);
+  }
 
   return (
     <div className="tab-strip" role="tablist" aria-label="Open editors">
@@ -2747,6 +2821,7 @@ function TabStrip(props: {
           onContextMenu={isRequestOrFlowTabKind(tab.kind) ? (event) => {
             event.preventDefault();
             const kind = tab.kind === "request" ? "request" : "flow";
+            setGenerateCodeMenuOpen(false);
             setContextMenu({ x: event.clientX, y: event.clientY, tabId: tab.id, kind });
           } : undefined}
         >
@@ -2766,6 +2841,7 @@ function TabStrip(props: {
       </button>
       {contextMenu ? (
         <div
+          ref={contextMenuRef}
           className="tree-context-menu"
           role="menu"
           aria-label={contextMenu.kind === "flow" ? "Flow tab context menu" : "Request tab context menu"}
@@ -2773,7 +2849,7 @@ function TabStrip(props: {
           onClick={(event) => event.stopPropagation()}
         >
           {contextMenu.kind === "flow" ? (
-            <button type="button" role="menuitem" onClick={() => {
+            <button type="button" role="menuitem" onPointerEnter={() => setGenerateCodeMenuOpen(false)} onClick={() => {
               const tabId = contextMenu.tabId;
               setContextMenu(null);
               props.onRenameFlow(tabId);
@@ -2782,7 +2858,7 @@ function TabStrip(props: {
               <span>Rename Flow</span>
             </button>
           ) : (
-            <button type="button" role="menuitem" onClick={() => {
+            <button type="button" role="menuitem" onPointerEnter={() => setGenerateCodeMenuOpen(false)} onClick={() => {
               const tabId = contextMenu.tabId;
               setContextMenu(null);
               props.onRenameRequest(tabId);
@@ -2791,6 +2867,55 @@ function TabStrip(props: {
               <span>Rename Request</span>
             </button>
           )}
+          <button
+            ref={generateCodeMenuItemRef}
+            type="button"
+            role="menuitem"
+            aria-haspopup="menu"
+            aria-expanded={generateCodeMenuOpen}
+            onPointerEnter={() => openGenerateCodeMenu(false)}
+            onClick={() => openGenerateCodeMenu(false)}
+            onKeyDown={(event) => {
+              if (event.key !== "ArrowRight" && event.key !== "Enter" && event.key !== " ") return;
+              event.preventDefault();
+              openGenerateCodeMenu(true);
+            }}
+          >
+            <Braces size={14} />
+            <span>Generate Code</span>
+            <ChevronRight className="context-menu-chevron" size={14} />
+          </button>
+          {generateCodeMenuOpen ? (
+            <div
+              className={`tree-context-menu tab-code-language-menu ${contextMenu.x > window.innerWidth - 340 ? "open-left" : ""}`.trim()}
+              role="menu"
+              aria-label={`Generate ${contextMenu.kind} code language`}
+            >
+              {CODE_EXAMPLE_LANGUAGES.map((language, index) => (
+                <button
+                  ref={index === 0 ? firstLanguageMenuItemRef : undefined}
+                  type="button"
+                  role="menuitem"
+                  key={language.id}
+                  onKeyDown={(event) => {
+                    if (event.key !== "ArrowLeft") return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setGenerateCodeMenuOpen(false);
+                    generateCodeMenuItemRef.current?.focus();
+                  }}
+                  onClick={() => {
+                    const { kind, tabId } = contextMenu;
+                    setContextMenu(null);
+                    setGenerateCodeMenuOpen(false);
+                    props.onGenerateCode(kind, tabId, language.id);
+                  }}
+                >
+                  <span>{language.label}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -5142,6 +5267,131 @@ function isActiveProjectListTarget(
 
 function hasTauriRuntimeSync(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
+
+function CodeExampleDialog({
+  state,
+  service,
+  flow,
+  services,
+  environment,
+  onClose,
+  onLanguageChange
+}: {
+  state: CodeExampleDialogState;
+  service?: ProjectService;
+  flow?: ProjectFlow;
+  services: ProjectService[];
+  environment: ProjectEnvironment;
+  onClose: () => void;
+  onLanguageChange: (language: CodeExampleLanguage) => void;
+}) {
+  const [copyMessage, setCopyMessage] = useState<string | null>(null);
+  const [copyError, setCopyError] = useState<string | null>(null);
+  const languageSelectRef = useRef<HTMLSelectElement | null>(null);
+  const dialogRef = useModalBehavior(onClose, { initialFocusRef: languageSelectRef });
+  const generated = useMemo(() => {
+    try {
+      const example = state.kind === "request" && service
+        ? generateRequestCodeExample(service, environment, state.language)
+        : state.kind === "flow" && flow
+          ? generateFlowCodeExample(flow, services, environment, state.language)
+          : null;
+      return example ? { example, error: null } : {
+        example: null,
+        error: "The selected request or flow is no longer available. Close this dialog and select an open tab."
+      };
+    } catch (error) {
+      return {
+        example: null,
+        error: redactText(error instanceof Error ? error.message : String(error))
+      };
+    }
+  }, [environment, flow, service, services, state.kind, state.language]);
+  const title = generated.example?.title ?? service?.name ?? flow?.name ?? "Unavailable";
+
+  useEffect(() => {
+    setCopyMessage(null);
+    setCopyError(null);
+  }, [state.language]);
+
+  async function copyCode(): Promise<void> {
+    setCopyMessage(null);
+    setCopyError(null);
+    if (!generated.example) return;
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error("Clipboard access is unavailable. Select the generated code and copy it manually.");
+      }
+      await navigator.clipboard.writeText(generated.example.code);
+      setCopyMessage("Copied generated code to the clipboard.");
+    } catch (error) {
+      setCopyError(redactText(error instanceof Error ? error.message : String(error)));
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        ref={dialogRef}
+        className="project-file-dialog code-example-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Code Example: ${title}`}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header>
+          <div>
+            <strong>Code Example</strong>
+            <span>{title}</span>
+          </div>
+          <button type="button" aria-label="Close code example" onClick={onClose}><X size={17} /></button>
+        </header>
+        <div className="code-example-toolbar">
+          <label>
+            <span>Language</span>
+            <select
+              ref={languageSelectRef}
+              aria-label="Code language"
+              value={state.language}
+              onChange={(event) => {
+                if (isCodeExampleLanguage(event.target.value)) onLanguageChange(event.target.value);
+              }}
+            >
+              {CODE_EXAMPLE_LANGUAGES.map((language) => (
+                <option key={language.id} value={language.id}>{language.label}</option>
+              ))}
+            </select>
+          </label>
+          {generated.example ? (
+            <span>{generated.example.requestCount} {generated.example.requestCount === 1 ? "request" : "requests"} · generated locally</span>
+          ) : null}
+        </div>
+        <div className="code-example-body">
+          {generated.error ? <p className="dialog-error" role="alert">{generated.error}</p> : null}
+          {generated.example?.warnings.map((warning) => <p className="code-example-warning" key={warning}>{warning}</p>)}
+          {generated.example ? (
+            <textarea
+              aria-label="Generated code"
+              className="code-example-output"
+              readOnly
+              spellCheck={false}
+              value={generated.example.code}
+            />
+          ) : null}
+        </div>
+        {copyMessage ? <p className="code-example-copy-status" role="status">{copyMessage}</p> : null}
+        {copyError ? <p className="dialog-error" role="alert">{copyError}</p> : null}
+        <footer>
+          <button type="button" className="primary-command" disabled={!generated.example} onClick={() => void copyCode()}>
+            <Copy size={14} />
+            Copy Code
+          </button>
+          <button type="button" onClick={onClose}>Close</button>
+        </footer>
+      </section>
+    </div>
+  );
 }
 
 function ProjectNameDialog({

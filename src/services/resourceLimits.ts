@@ -14,6 +14,9 @@ export const MAX_COMPARISON_JSON_NODES = 20_000;
 export const MAX_COMPARISON_DIFF_ENTRIES = 10_000;
 export const MAX_COMPARISON_RAW_LINES = 10_000;
 
+export const MAX_CODE_EXAMPLE_OUTPUT_BYTES = 256 * 1024;
+export const MAX_CODE_EXAMPLE_FLOW_REQUESTS = 100;
+
 export function utf8ByteLength(value: string): number {
   return new TextEncoder().encode(value).byteLength;
 }
