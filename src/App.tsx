@@ -121,6 +121,7 @@ import {
   defaultSavedResponsePath
 } from "./services/savedResponses";
 import { formatResponseDestination, formatResponseSize } from "./services/responseFormatting";
+import { createLinkedGetService, tokenizeJsonResponseLinks } from "./services/hypermediaLinks";
 import { createDiagnosticsBundle } from "./services/diagnostics";
 import { compareSavedResponses, comparisonToExecutedResponse } from "./services/responseComparison";
 import {
@@ -379,11 +380,13 @@ export function App() {
   const [consoleFilter, setConsoleFilter] = useState("All Events");
   const [runnerResponse, setRunnerResponse] = useState<ExecutedResponse | null>(null);
   const [runnerRequest, setRunnerRequest] = useState<ExecutableRequest | null>(null);
+  const [runnerSourceServiceId, setRunnerSourceServiceId] = useState<string | null>(null);
   const [runnerEvents, setRunnerEvents] = useState<RunnerConsoleEvent[]>([]);
   const [runnerError, setRunnerError] = useState<string | null>(null);
   const [runnerRunning, setRunnerRunning] = useState(false);
   const [multipartFileApprovals, setMultipartFileApprovals] = useState<MultipartFileApproval[]>([]);
   const runnerAbortControllerRef = useRef<AbortController | null>(null);
+  const responseLinkedServiceIdsRef = useRef<Set<string>>(new Set());
   const [editableRequestUrl, setEditableRequestUrl] = useState<string | null>(null);
   const [saveResponseDialog, setSaveResponseDialog] = useState<null | {
     path: string;
@@ -1231,6 +1234,7 @@ export function App() {
     setRunnerEvents(result.events);
     setRunnerResponse(result.response);
     setRunnerError(result.error);
+    setRunnerSourceServiceId(serviceForRun.id);
 
     if (result.response?.capturedVariables.length) {
       setProject((current) => touchProject({
@@ -1294,6 +1298,10 @@ export function App() {
     setRunnerEvents(result.events);
     setRunnerResponse(result.response);
     setRunnerRequest(result.request);
+    const latestExecutedStep = result.steps.slice().reverse().find((step) => (
+      step.status !== "idle" && step.status !== "skipped" && step.status !== "blocked"
+    ));
+    setRunnerSourceServiceId(latestExecutedStep?.serviceId ?? null);
     setRunnerError(result.issues.length ? result.issues.map((issue) => issue.message).join(" ") : result.error);
     if (runnerAbortControllerRef.current === controller) runnerAbortControllerRef.current = null;
     setRunnerRunning(false);
@@ -1302,6 +1310,40 @@ export function App() {
   function handleCancelRun() {
     runnerAbortControllerRef.current?.abort();
     setProjectMessage(activeTab.kind === "flow" ? "Cancelling flow…" : "Cancelling request…");
+  }
+
+  function handleOpenResponseLink(targetUrl: string): void {
+    const sourceService = project.services.find((service) => service.id === runnerSourceServiceId);
+    if (!sourceService || !runnerRequest) {
+      setProjectError("This response is not attached to an executable request, so Relay Studio cannot copy its authorization settings.");
+      return;
+    }
+
+    try {
+      const linkedService = createLinkedGetService({
+        sourceService,
+        sourceRequestUrl: runnerRequest.url,
+        targetUrl,
+        existingServiceIds: [
+          ...project.services.map((service) => service.id),
+          ...responseLinkedServiceIdsRef.current
+        ]
+      });
+      responseLinkedServiceIdsRef.current.add(linkedService.id);
+      setProject((current) => touchProject({ ...current, services: [...current.services, linkedService] }));
+      setProjectDirty(true);
+      setTabs((current) => [
+        ...current,
+        { id: linkedService.id, label: linkedService.name, kind: "request", method: "GET", dirty: true }
+      ]);
+      setActiveServiceId(linkedService.id);
+      setActiveTabId(linkedService.id);
+      syncNativeMenuForTabKind("request");
+      setProjectMessage("GET request created from response link with authorization copied.");
+      setProjectError(null);
+    } catch (error) {
+      setProjectError(error instanceof Error ? error.message : String(error));
+    }
   }
 
   function handleExportDiagnostics() {
@@ -1403,6 +1445,7 @@ export function App() {
       const response = artifactToExecutedResponse(artifact);
       setRunnerResponse(response);
       setRunnerRequest(null);
+      setRunnerSourceServiceId(null);
       setRunnerError(response.parseError);
       setRunnerEvents([
         { sequence: 1, phase: "prepare", level: "info", message: `Loaded saved response: ${metadata.fileName}.` },
@@ -1435,6 +1478,7 @@ export function App() {
       const tabId = `comparison:${before.id}:${after.id}`;
       setRunnerResponse(response);
       setRunnerRequest(null);
+      setRunnerSourceServiceId(null);
       setRunnerError(null);
       setRunnerEvents([
         { sequence: 1, phase: "prepare", level: "info", message: `Comparing redacted responses: ${before.fileName} and ${after.fileName}.` },
@@ -1625,6 +1669,7 @@ export function App() {
                 runnerError={runnerError}
                 canSaveResponse={Boolean(runnerResponse && runnerRequest)}
                 onSaveResponse={openSaveResponseDialog}
+                onOpenResponseLink={handleOpenResponseLink}
               />
             </>
           ) : null}
@@ -1869,6 +1914,8 @@ export function App() {
     ]);
     setActiveTabId(starterService.id);
     setEditableRequestUrl(null);
+    setRunnerSourceServiceId(null);
+    responseLinkedServiceIdsRef.current.clear();
     setNewProjectDialogOpen(false);
     setProjectMessage(`New unsaved project "${projectName}" created with a starter request.`);
     setProjectError(null);
@@ -1984,6 +2031,8 @@ export function App() {
     setEnvironment(snapshot.environment || getDefaultEnvironmentName(snapshot.project));
     setProjectDirty(snapshot.projectDirty);
     setEditableRequestUrl(null);
+    setRunnerSourceServiceId(null);
+    responseLinkedServiceIdsRef.current.clear();
     setProjectMessage(`Restored ${snapshot.name}.`);
     setProjectError(null);
   }
@@ -2055,6 +2104,8 @@ export function App() {
     setTabs(openedTabs);
     setActiveTabId(opened.services[0]?.id ?? opened.flows[0]?.id ?? openedTabs[0]?.id ?? "welcome");
     setEditableRequestUrl(null);
+    setRunnerSourceServiceId(null);
+    responseLinkedServiceIdsRef.current.clear();
     setMultipartFileApprovals([]);
     setProjectMessage(message);
   }
@@ -4774,6 +4825,7 @@ function BottomDock(props: {
   runnerError: string | null;
   canSaveResponse: boolean;
   onSaveResponse: () => void;
+  onOpenResponseLink: (href: string) => void;
 }) {
   const [responseTab, setResponseTab] = useState<"Pretty" | "Raw" | "Headers" | "Error">("Pretty");
   const [utilityTab, setUtilityTab] = useState<UtilityDockTab>("Response");
@@ -4844,7 +4896,9 @@ function BottomDock(props: {
               </div>
               <button className="response-save-button" type="button" disabled={!props.canSaveResponse} onClick={props.onSaveResponse}>Save Response</button>
               <div className="response-body">
-                {responseTab === "Pretty" ? <pre>{responseText || "No response body."}</pre> : null}
+                {responseTab === "Pretty" ? (
+                  <JsonResponseText body={responseText || "No response body."} onOpenLink={props.onOpenResponseLink} />
+                ) : null}
                 {responseTab === "Raw" ? <pre>{props.runnerResponse.rawBody || "No response body."}</pre> : null}
                 {responseTab === "Headers" ? <pre>{JSON.stringify(props.runnerResponse.headers, null, 2)}</pre> : null}
                 {responseTab === "Error" ? <pre>{props.runnerError ?? props.runnerResponse.parseError ?? (props.runnerResponse.ok ? "No errors." : `HTTP ${props.runnerResponse.status} ${props.runnerResponse.statusText}`)}</pre> : null}
@@ -4895,6 +4949,29 @@ function BottomDock(props: {
         </div>
       ) : null}
     </section>
+  );
+}
+
+function JsonResponseText({ body, onOpenLink }: { body: string; onOpenLink: (href: string) => void }) {
+  const tokens = tokenizeJsonResponseLinks(body);
+  return (
+    <pre>{tokens.map((token, index) => {
+      const href = token.href;
+      return href ? (
+        <a
+          aria-label={`Create GET request for ${href}`}
+          className="response-json-link"
+          href={href}
+          key={`${index}:${href}`}
+          onClick={(event) => {
+            event.preventDefault();
+            onOpenLink(href);
+          }}
+        >
+          {token.text}
+        </a>
+      ) : <span key={index}>{token.text}</span>;
+    })}</pre>
   );
 }
 

@@ -17,6 +17,7 @@
       "steps": [
         "Choose the intended environment before sending.",
         "Review status, headers, timing, body, and console diagnostics.",
+        "In a formatted JSON response, select a same-origin HTTP(S) URL to create a new GET request with the source request's authorization settings.",
         "Use Cancel Request to stop an in-progress request."
       ]
     },

@@ -23,6 +23,27 @@ test("renders the Relay Studio desktop shell", async ({ page }) => {
   await expect(page.getByRole("complementary", { name: "Inspector" })).toBeVisible();
 });
 
+test("opens a same-origin JSON response link as an authorized GET request", async ({ page }) => {
+  const profileUrl = "https://api.example.com/api/profile/contacts?projection=summary";
+  await page.route("https://api.example.com/api/orders", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({ _links: { profile: { href: profileUrl } } })
+  }));
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Send Request" }).click();
+  const responseLink = page.getByRole("link", { name: `Create GET request for ${profileUrl}` });
+  await expect(responseLink).toBeVisible();
+  await responseLink.focus();
+  await responseLink.press("Enter");
+
+  await expect(page.getByRole("tab", { name: /GET \/api\/profile\/contacts/ })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByLabel("Request method")).toHaveValue("GET");
+  await expect(page.getByLabel("Request URL")).toHaveValue(profileUrl);
+  await expect(page.getByLabel("Authorization type")).toHaveValue("bearer");
+  await expect(page.getByLabel("Bearer token variable name")).toHaveValue("accessToken");
+});
+
 test("opens inspector immediately at narrower desktop widths", async ({ page }) => {
   await page.setViewportSize({ width: 1180, height: 820 });
   await page.goto("/");

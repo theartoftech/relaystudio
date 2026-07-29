@@ -958,6 +958,33 @@ describe("Relay Studio shell", () => {
     expect(screen.queryByText("3467 B")).not.toBeInTheDocument();
   });
 
+  it("opens a JSON response URL as a new authorized GET request tab", async () => {
+    const profileUrl = "https://api.example.com/api/profile/contacts?projection=summary";
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      _links: { profile: { href: profileUrl } },
+      ignored: "javascript:alert(1)"
+    }), {
+      status: 200,
+      statusText: "OK",
+      headers: { "content-type": "application/json" }
+    })));
+    render(<App />);
+
+    fireEvent.click(within(screen.getByLabelText("Request composer")).getByRole("button", { name: "Send Request" }));
+    const responseLink = await screen.findByRole("link", { name: `Create GET request for ${profileUrl}` });
+
+    responseLink.focus();
+    fireEvent.click(responseLink);
+
+    expect(screen.getByRole("tab", { name: /GET \/api\/profile\/contacts/ })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByLabelText("Request method")).toHaveValue("GET");
+    expect(screen.getByLabelText("Request path")).toHaveValue("/api/profile/contacts");
+    expect(screen.getByLabelText("Authorization type")).toHaveValue("bearer");
+    expect(screen.getByLabelText("Bearer token variable name")).toHaveValue("accessToken");
+    expect(screen.getByLabelText("Request URL")).toHaveValue(profileUrl);
+    expect(screen.getByText("GET request created from response link with authorization copied.")).toBeInTheDocument();
+  });
+
   it("lets the user cancel an in-flight request and explains the cancellation", async () => {
     vi.stubGlobal("fetch", vi.fn((_url: string, init?: RequestInit) => new Promise((_resolve, reject) => {
       init?.signal?.addEventListener("abort", () => reject(new DOMException("Cancelled", "AbortError")), { once: true });

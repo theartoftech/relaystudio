@@ -2578,6 +2578,20 @@ kbd {
   min-height: 0;
 }
 
+.response-json-link {
+  color: var(--blue-600);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.response-json-link:hover,
+.response-json-link:focus-visible {
+  color: var(--blue-700);
+  text-decoration-thickness: 2px;
+}
+
 .empty-response {
   display: grid;
   gap: 9px;

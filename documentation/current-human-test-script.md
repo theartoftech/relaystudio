@@ -389,6 +389,19 @@ These sample services use placeholder endpoints unless you point the environment
    - Language changes and clipboard failures remain actionable, focus stays in the modal, and Escape closes it.
    - Project dirty state, execution status, response history, and runtime logs remain unchanged.
 
+## Test 24: Hypermedia Response Links
+
+1. Send an authorized request to a controlled endpoint that returns formatted JSON containing same-origin HTTP and HTTPS URL string values, including a HAL `_links.profile.href` value.
+2. In the `Pretty` response tab, use both pointer activation and keyboard focus plus `Enter` on a response URL.
+3. Confirm Relay Studio creates and selects a uniquely named `GET` request tab with the linked path and query parameters, an empty body, an `Accept: application/json` header, and an independent copy of the source authorization profile.
+4. Select the same link again and confirm the new request receives a unique ID/tab instead of replacing the first request.
+5. Repeat with plain text, malformed JSON, a JSON property name that resembles a URL, `javascript:`, `ftp:`, embedded URL credentials, a duplicate query parameter, and a cross-origin HTTP(S) URL.
+6. Expected result:
+   - Only HTTP(S) JSON string values are interactive; raw response text remains unchanged.
+   - Same-origin links create a new GET request without executing it.
+   - Cross-origin links never receive copied bearer, API-key, basic, OAuth, or custom-header authorization.
+   - Unsupported or unsafe destinations leave the project unchanged and produce actionable status guidance.
+
 ## Approval Criteria
 
 Approve check-in only if:
@@ -404,3 +417,4 @@ Approve check-in only if:
 9. No credentials or secret values are visible in logs, saved responses, project artifacts, or OpenAPI destination review.
 10. Cross-origin redirects, malformed proxy bypass entries, and `baseUrl` response mappings fail before widening the network trust boundary.
 11. Request and flow code examples are bounded, copyable, credential-safe, file-path-safe, and read-only.
+12. Formatted JSON response links create same-origin GET requests without widening the authorization boundary.
