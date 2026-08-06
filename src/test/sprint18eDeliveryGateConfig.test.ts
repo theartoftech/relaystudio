@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -114,6 +114,45 @@ describe("Sprint 18E delivery hardening", () => {
       expect(report.limitations).toEqual([
         { path: "bundle.bin", reason: "binary content is not text-scannable" }
       ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("reports bundled AppImage system libraries without treating their parser strings as secrets", async () => {
+    const scanner = await import(pathToFileURL(resolve(process.cwd(), "tools/secret-scan.mjs")).href) as {
+      scanFiles: (input: { root: string; files: string[] }) => SecretScanReport;
+    };
+    const root = mkdtempSync(join(tmpdir(), "relay-studio-secret-scan-"));
+    const systemLibrary = "src-tauri/target/release/bundle/appimage/Relay Studio.AppDir/usr/lib/libgnutls.so.30";
+    const applicationBinary = "src-tauri/target/release/bundle/appimage/Relay Studio.AppDir/usr/bin/relay-studio";
+    const githubTokenCanary = `github${"_pat_"}0123456789012345678901234567890123456789`;
+    const privateKeyHeaderCanary = ["-----BEGIN ", "PRIVATE KEY-----"].join("");
+    const awsAccessKeyCanary = ["AK", "IA", "0123456789012345"].join("");
+    try {
+      mkdirSync(join(root, "src-tauri/target/release/bundle/appimage/Relay Studio.AppDir/usr/lib"), { recursive: true });
+      mkdirSync(join(root, "src-tauri/target/release/bundle/appimage/Relay Studio.AppDir/usr/bin"), { recursive: true });
+      writeFileSync(join(root, systemLibrary), Buffer.concat([
+        Buffer.from([0, 1, 2]),
+        Buffer.from(privateKeyHeaderCanary),
+        Buffer.from(awsAccessKeyCanary),
+        Buffer.from([3, 4, 5])
+      ]));
+      writeFileSync(join(root, applicationBinary), Buffer.concat([
+        Buffer.from([0, 1, 2]),
+        Buffer.from(githubTokenCanary),
+        Buffer.from([3, 4, 5])
+      ]));
+
+      const report = scanner.scanFiles({ root, files: [systemLibrary, applicationBinary] });
+
+      expect(report.findings).toEqual([
+        `${applicationBinary}: GitHub fine-grained token`
+      ]);
+      expect(report.limitations).toEqual(expect.arrayContaining([
+        { path: systemLibrary, reason: "packaged system library is not application secret-scannable" },
+        { path: applicationBinary, reason: "binary content is not text-scannable" }
+      ]));
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

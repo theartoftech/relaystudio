@@ -63,6 +63,12 @@ function findSignatures(content, relativePath) {
   return findings;
 }
 
+/** @param {string} relativePath @returns {boolean} */
+function isPackagedSystemLibrary(relativePath) {
+  const normalizedPath = relativePath.replaceAll("\\", "/");
+  return /(?:^|\/)[^/]+\.AppDir\/usr\/lib(?:\/|$)/.test(normalizedPath);
+}
+
 /**
  * Scan explicit repository or generated-artifact files. The explicit input form is used by tests and
  * keeps the scanner deterministic; the CLI supplies the tracked/untracked plus generated candidates.
@@ -85,6 +91,11 @@ export function scanFiles(input) {
     const stat = lstatSync(absolutePath);
     if (stat.size > maximumTextFileBytes) {
       limitations.push({ path: relativePath, reason: `file exceeds ${maximumTextFileBytes} bytes` });
+      continue;
+    }
+
+    if (isPackagedSystemLibrary(relativePath)) {
+      limitations.push({ path: relativePath, reason: "packaged system library is not application secret-scannable" });
       continue;
     }
 
