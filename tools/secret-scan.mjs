@@ -85,7 +85,7 @@ export function scanFiles(input) {
 
   for (const candidate of input.files) {
     const absolutePath = resolve(root, candidate);
-    const relativePath = relative(root, absolutePath) || candidate;
+    const relativePath = (relative(root, absolutePath) || candidate).replaceAll("\\", "/");
     if (!existsSync(absolutePath) || !lstatSync(absolutePath).isFile()) continue;
 
     const stat = lstatSync(absolutePath);
