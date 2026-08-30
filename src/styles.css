@@ -1247,13 +1247,84 @@ kbd {
 .api-operation-list small { color: var(--gray-500); }
 
 .help-view > header,
-.help-view > section {
+.help-section-list {
   max-width: 820px;
 }
 
 .help-view header {
   padding-bottom: 18px;
   border-bottom: 1px solid var(--gray-200);
+}
+
+.help-search {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  max-width: 680px;
+  margin-top: 18px;
+  padding: 0 10px;
+  border: 1px solid var(--gray-300);
+  border-radius: 7px;
+  color: var(--gray-500);
+  background: var(--white);
+}
+
+.help-search:focus-within {
+  border-color: var(--blue-600);
+  box-shadow: 0 0 0 2px rgb(37 99 235 / 14%);
+}
+
+.help-search input {
+  min-width: 0;
+  height: 38px;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  color: var(--gray-800);
+  background: transparent;
+}
+
+.help-search button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  place-items: center;
+  color: var(--gray-600);
+  border: 0;
+  background: transparent;
+}
+
+.help-results {
+  margin-top: 9px !important;
+  color: var(--gray-500);
+  font-size: 12px !important;
+}
+
+.help-section-list {
+  display: grid;
+  gap: 14px;
+  padding-top: 20px;
+}
+
+.help-section-list > section {
+  padding: 18px 20px;
+  border: 1px solid var(--gray-200);
+  border-radius: 8px;
+  background: var(--gray-50);
+}
+
+.help-empty {
+  padding: 24px;
+  color: var(--gray-600);
+  border: 1px dashed var(--gray-300);
+  border-radius: 8px;
+  text-align: center;
+}
+
+.help-empty p {
+  margin-top: 6px;
 }
 
 .help-view h1 {
@@ -1263,7 +1334,7 @@ kbd {
 }
 
 .help-view h2 {
-  margin: 26px 0 8px;
+  margin: 0 0 8px;
   color: var(--gray-800);
   font-size: 18px;
 }

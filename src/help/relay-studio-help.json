@@ -1,78 +1,165 @@
 {
   "title": "Relay Studio Help",
-  "introduction": "Use Relay Studio to design REST requests, run multi-step flows, save response evidence, and diagnose failures without sending project data to a hosted workspace.",
+  "introduction": "Search this offline guide for the task you are trying to complete. Relay Studio keeps projects, requests, flows, saved responses, and diagnostics on your computer and does not require a hosted workspace.",
   "sections": [
     {
-      "title": "Projects",
-      "body": "Projects are local .restproj files containing requests, flows, environments, variables, and workspace settings.",
+      "title": "Getting Started",
+      "body": "A Relay Studio workspace combines a local project, an active environment, reusable REST requests, multi-step flows, and saved response evidence.",
       "steps": [
-        "Create or open a project from File or the command palette.",
-        "Use Save Project As to choose its first location.",
-        "Keep credentials out of project values; use approved local-only configuration for secrets."
+        "Create a project or open a local .restproj file from File or the command palette.",
+        "Choose the active environment and set baseUrl before sending a request.",
+        "Create requests manually or import selected operations from an OpenAPI definition.",
+        "Save the project before closing Relay Studio so request and flow changes remain available."
+      ]
+    },
+    {
+      "title": "Projects And Saving",
+      "body": "Projects are local .restproj files containing requests, flows, environments, variables, saved-response metadata, import history, and workspace settings.",
+      "steps": [
+        "Use Save Project As the first time you choose a project location.",
+        "Use Save Project or Cmd+S on macOS and Ctrl+S on Windows and Linux for later changes.",
+        "A dot on a request or flow tab indicates unsaved work.",
+        "Do not edit the same project concurrently in multiple Relay Studio windows. Concurrent native saves are rejected rather than silently overwriting changes."
+      ]
+    },
+    {
+      "title": "Environments, Variables, And Credentials",
+      "body": "Environment variables provide reusable values such as baseUrl and runtime authentication values. Reference a variable with double braces, for example {{accountId}}.",
+      "steps": [
+        "Open the Inspector and edit variables for the active environment.",
+        "Mark credential values secret and use variable names in Bearer, Basic, API-key, OAuth, or custom-header authorization settings.",
+        "Use a path template such as /api/accounts/{accountId}, then set the accountId path parameter value to {{accountId}} so the value is URL-encoded.",
+        "Never paste production passwords, tokens, cookies, or private keys into an imported definition, generated example, saved response, or issue report."
       ]
     },
     {
       "title": "Requests",
-      "body": "Select a request in Explorer, choose its method, URL, authorization, headers, parameters, body, retry policy, and timeout, then select Send Request.",
+      "body": "Relay Studio supports GET, POST, PUT, PATCH, DELETE, HEAD, and OPTIONS requests with headers, query parameters, path parameters, authentication, retry, timeout, and cancellation controls.",
       "steps": [
-        "Choose the intended environment before sending.",
-        "Review status, headers, timing, body, and console diagnostics.",
-        "In a formatted JSON response, select a same-origin HTTP(S) URL to create a new GET request with the source request's authorization settings.",
-        "Use Cancel Request to stop an in-progress request."
+        "Select a request in Explorer and review its method, path, active environment, authorization, parameters, headers, and body.",
+        "Choose Send Request and inspect status, headers, final URL, timing, formatted body, and Console events.",
+        "Select Cancel Request to stop an in-progress request.",
+        "In a formatted JSON response, select a same-origin HTTP(S) URL to create a new GET request with an independent copy of the source authorization profile."
       ]
     },
     {
-      "title": "Flows",
-      "body": "Flows connect requests into ordered success and failure paths with response mappings and assertions.",
+      "title": "JSON, Form, And Multipart Bodies",
+      "body": "Request bodies can be JSON, plain text, URL-encoded form data, or multipart form data.",
       "steps": [
-        "Add request steps and connect their success or failure paths.",
-        "Map earlier response values into variables needed by later steps.",
-        "Run the flow, inspect each step, and use Cancel Flow when necessary."
+        "For JSON, enter valid JSON and use Format or Minify when reviewing it.",
+        "For URL-encoded forms, add enabled name/value fields; Relay Studio creates the Content-Type header.",
+        "For multipart forms, choose text or file for each field. File access requires explicit approval for the current session and destination origin.",
+        "Relay Studio does not persist active local file authority in the project. Reapprove multipart files after reopening the project or changing the destination origin."
+      ]
+    },
+    {
+      "title": "OpenAPI Import And Saving",
+      "body": "Import selected Swagger 2.0 or OpenAPI 3.x operations from a direct JSON/YAML URL or a Swagger UI page while keeping operation selection explicit.",
+      "steps": [
+        "Open File > Import API Definition or run Import API Docs from the command palette.",
+        "Enter the Swagger UI or direct definition URL. Review and approve any secondary definition destination before Relay Studio retrieves it.",
+        "Review the discovered operations and select only the requests you want.",
+        "Choose Add N Selected to add requests without saving yet, or Add and Save N Selected to add them and open the Save Project dialog.",
+        "Review imported base URLs, authentication placeholders, examples, form fields, multipart fields, external references, and deprecated operations before sending anything.",
+        "Relay Studio never imports example credentials as usable secrets. Supply approved local values separately."
+      ]
+    },
+    {
+      "title": "Flows And Response Mappings",
+      "body": "Flows run requests in dependency order. Success and failure paths determine which later steps run, and response mappings capture JSON values as temporary variables.",
+      "steps": [
+        "Create or open a flow, add request steps, and connect each success or failure path.",
+        "Select a source step, open Response Mappings > Manage, and choose Add Mapping.",
+        "Enter a variable name and a supported JSONPath such as $.accessToken, $.user.id, or $.items[0].id.",
+        "Mark authentication mappings secret. Credential-shaped paths and variable names are treated as secret even when the checkbox is cleared.",
+        "Use the mapped variable in a later request header, query value, body field, or path-parameter value with {{variableName}}.",
+        "Captured values exist only during that flow run and are not written back into the saved project environment."
+      ]
+    },
+    {
+      "title": "Flows: Use The First List Result",
+      "body": "Use an indexed JSONPath mapping when one request returns a named array and the next request needs a key from its first row.",
+      "steps": [
+        "Connect Login success to Parts List, then connect Parts List success to Get Part.",
+        "On Login, map $.accessToken into the secret variable accessToken and configure both part requests to use that Bearer variable.",
+        "If the list response is {\"items\":[{\"partNumber\":\"IMP-CSV-1001\"}]}, map $.items[0].partNumber into firstPartKey on the Parts List step.",
+        "Configure Get Part with the path /api/config/parts/{partKey} and an enabled path parameter named partKey whose value is {{firstPartKey}}.",
+        "Run the flow and inspect Console events to confirm accessToken and firstPartKey were captured before Get Part ran.",
+        "If the API returns a top-level array, root-array syntax such as $[0].partNumber is not currently supported. Use a response with a named array property or capture a deterministic identifier another way."
+      ]
+    },
+    {
+      "title": "Running And Debugging Flows",
+      "body": "Flow results show each step as success, failed, skipped, or blocked and retain runtime variables only for the current execution.",
+      "steps": [
+        "Choose Run Flow and inspect node status plus the Console utility tab.",
+        "A failed response mapping identifies its source step, JSONPath, and destination variable. Success-dependent steps are skipped afterward.",
+        "An empty list, missing field, malformed JSON response, unsupported JSONPath, or missing request dependency stops the affected path actionably.",
+        "Use Cancel Flow to stop the active request and prevent remaining steps from starting.",
+        "For reliable first-row workflows, make sure the API defines a deterministic sort order; otherwise the first item can change between runs."
+      ]
+    },
+    {
+      "title": "Saved Responses And Comparison",
+      "body": "Save redacted response artifacts as local evidence, reopen them from Explorer, and compare two saved responses while debugging API changes.",
+      "steps": [
+        "After a request or flow response, choose Save Response and select a JSON or text destination.",
+        "Confirm explicitly before overwriting an existing artifact.",
+        "In Explorer, select exactly two saved responses for comparison and choose Compare selected responses.",
+        "Review status, header, timing, text, or JSON-path differences in the Response dock.",
+        "Inspect every artifact before sharing it even though Relay Studio applies shared credential redaction."
       ]
     },
     {
       "title": "Code Examples",
-      "body": "Generate local, read-only HTTP, cURL, C#, Java, jQuery, Node.js, PHP, Python, or Ruby examples from an open request or flow without sending it.",
+      "body": "Generate local, read-only HTTP, cURL, C#, Java, jQuery, Node.js, PHP, Python, or Ruby examples from an open request or flow without executing it.",
       "steps": [
         "Right-click a request or flow tab, choose Generate Code, then choose a language.",
-        "Review safe credential and multipart-file placeholders, switch languages if needed, and choose Copy Code.",
-        "For flows, implement the generated branch prerequisites before running the example; Java and jQuery output capture and reuse mapped JSON response values automatically. Java mapping output requires Jackson Databind, requires credential masks such as <REDACTED> to be supplied securely at runtime, and fails actionably for non-2xx, empty, malformed JSON, missing, null, or non-scalar mapping responses."
-      ]
-    },
-    {
-      "title": "Saved Responses",
-      "body": "Save response artifacts for offline evidence and reopen them from Explorer.",
-      "steps": [
-        "Choose a JSON or text destination.",
-        "Confirm explicitly before overwriting an existing artifact.",
-        "Verify sensitive headers and values are redacted before sharing."
+        "Review credential and multipart-file placeholders, switch languages if needed, and choose Copy Code.",
+        "Replace <REDACTED> and other credential masks securely at runtime; generated examples never reveal stored credential values.",
+        "For flows, implement the displayed branch prerequisites. Java and jQuery examples capture and reuse supported scalar response mappings automatically.",
+        "Java response mapping requires Jackson Databind and rejects non-success, empty, malformed, missing, null, or non-scalar mapping responses actionably."
       ]
     },
     {
       "title": "Recovery And Backups",
-      "body": "Relay Studio validates project schema, uses atomic native saves, and keeps recovery backups for the last valid project state.",
+      "body": "Relay Studio validates project schema, uses atomic native saves, and keeps a recovery backup for the last valid project state.",
       "steps": [
-        "Follow the recovery guidance shown when a project is invalid.",
-        "Restore the backup only when the primary file cannot be opened.",
-        "Do not edit the primary project concurrently in multiple Relay Studio windows."
+        "Follow the displayed recovery guidance when a project is invalid or incomplete.",
+        "Restore the backup only when the primary project cannot be opened.",
+        "Legacy projects receive typed defaults where migration is supported; malformed nested project state is rejected instead of guessed.",
+        "Keep a separate copy before manually editing a .restproj file."
       ]
     },
     {
       "title": "Diagnostics And Security",
-      "body": "Diagnostics export includes application, platform, project counts, and recent console context with known secrets redacted.",
+      "body": "Diagnostics export includes application, platform, project counts, and recent Console context with known secrets redacted.",
       "steps": [
         "Export diagnostics from Settings > Workspace.",
         "Inspect the generated JSON before sharing it.",
-        "Never include passwords, bearer tokens, cookies, API keys, or private project data in issue reports."
+        "Relay Studio keeps project persistence local and does not upload workspace data to a hosted Relay Studio service.",
+        "Never include passwords, bearer tokens, cookies, API keys, private keys, or private project data in issue reports."
+      ]
+    },
+    {
+      "title": "Troubleshooting Requests And Imports",
+      "body": "Start with the visible error and Console events; Relay Studio reports validation, HTTP, timeout, cancellation, mapping, import, persistence, and security failures separately.",
+      "steps": [
+        "For an Invalid or non-JSON response, verify the endpoint, HTTP status, credentials, Content-Type, and response body before applying a JSON mapping.",
+        "For 401 or 403, verify the selected environment and authentication variable without pasting its value into diagnostics.",
+        "For an unresolved variable, confirm its spelling, active environment, or preceding flow mapping and success path.",
+        "For an import failure, verify the direct definition URL or review the secondary Swagger UI destination, external reference origin, circular reference, and response size.",
+        "For native/browser differences, test in the packaged desktop app when file access, proxy behavior, redirects, or operating-system persistence is involved."
       ]
     },
     {
       "title": "Keyboard And Navigation",
-      "body": "The native menus and command palette expose the same primary workspace actions.",
+      "body": "Native menus and the command palette expose the primary workspace actions without requiring pointer navigation.",
       "steps": [
         "Open command search with Cmd+K on macOS or Ctrl+K on Windows and Linux.",
         "Save with Cmd+S or Ctrl+S and send or run with Cmd+Enter or Ctrl+Enter.",
-        "Use the View menu to toggle Explorer, Inspector, Response Dock, and Flow Details."
+        "Use the View menu to toggle Explorer, Inspector, Response Dock, and Flow Details.",
+        "Press Escape to dismiss command palettes, dialogs, and context menus without taking an action."
       ]
     }
   ]

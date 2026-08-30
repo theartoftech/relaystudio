@@ -387,9 +387,23 @@ test("opens bundled Relay Studio help without navigating away", async ({ page })
   await expect(page.getByRole("tab", { name: "Help" })).toBeVisible();
   const help = page.getByLabel("Relay Studio help");
   await expect(help.getByRole("heading", { name: "Relay Studio Help" })).toBeVisible();
-  await expect(help.getByRole("heading", { name: "Projects" })).toBeVisible();
+  await expect(help.getByRole("heading", { name: "Projects And Saving" })).toBeVisible();
   await expect(help.getByRole("heading", { name: "Diagnostics And Security" })).toBeVisible();
   await expect(page).toHaveURL(/\/$/);
+});
+
+test("searches bundled Relay Studio help for a flow recipe", async ({ page }) => {
+  await page.goto("/");
+
+  await page.getByRole("button", { name: /Search commands/i }).click();
+  await page.getByRole("dialog", { name: "Command palette" }).getByRole("button", { name: "Relay Studio Help" }).click();
+
+  const help = page.getByLabel("Relay Studio help");
+  await help.getByRole("searchbox", { name: "Search help topics" }).fill("first list result");
+
+  await expect(help.getByRole("heading", { name: "Flows: Use The First List Result" })).toBeVisible();
+  await expect(help).toContainText("$.items[0].partNumber");
+  await expect(help.getByRole("heading", { name: "Projects And Saving" })).toHaveCount(0);
 });
 
 test("keeps command palette focus trapped and toggles the response dock", async ({ page }) => {

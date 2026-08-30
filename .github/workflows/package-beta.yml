@@ -48,10 +48,17 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: macOS
+          - name: macOS Apple Silicon
             os: macos-latest
             bundles: dmg
-            artifact: relay-studio-macos-beta
+            expected_arch: arm64
+            artifact: relay-studio-macos-arm64-beta
+            paths: src-tauri/target/release/bundle/dmg/*.dmg
+          - name: macOS Intel
+            os: macos-15-intel
+            bundles: dmg
+            expected_arch: x86_64
+            artifact: relay-studio-macos-x86_64-beta
             paths: src-tauri/target/release/bundle/dmg/*.dmg
           - name: Windows
             os: windows-latest
@@ -86,6 +93,10 @@ jobs:
       - run: cargo test --manifest-path src-tauri/Cargo.toml
       - name: Build unsigned beta installer
         run: npm run tauri build -- --bundles ${{ matrix.bundles }}
+      - name: Verify macOS package architecture
+        if: runner.os == 'macOS'
+        shell: bash
+        run: file src-tauri/target/release/relay-studio | grep "${{ matrix.expected_arch }}"
       - name: Scan unpacked and generated bundle contents
         run: npm run check:secrets
       - name: Retain native beta installer

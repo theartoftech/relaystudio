@@ -60,6 +60,21 @@ describe("Sprint 14 cross-platform packaging", () => {
     expect(workflow).toContain("if-no-files-found: error");
   });
 
+  it("packages distinct Apple Silicon and Intel macOS installers", () => {
+    const workflow = readRepositoryFile(".github/workflows/package-beta.yml");
+
+    expect(workflow).toContain("name: macOS Apple Silicon");
+    expect(workflow).toContain("os: macos-latest");
+    expect(workflow).toContain("expected_arch: arm64");
+    expect(workflow).toContain("artifact: relay-studio-macos-arm64-beta");
+    expect(workflow).toContain("name: macOS Intel");
+    expect(workflow).toContain("os: macos-15-intel");
+    expect(workflow).toContain("expected_arch: x86_64");
+    expect(workflow).toContain("artifact: relay-studio-macos-x86_64-beta");
+    expect(workflow).toContain("name: Verify macOS package architecture");
+    expect(workflow).toContain('grep "${{ matrix.expected_arch }}"');
+  });
+
   it("blocks beta packaging until configured live REST acceptance passes", () => {
     const workflow = readRepositoryFile(".github/workflows/package-beta.yml");
 

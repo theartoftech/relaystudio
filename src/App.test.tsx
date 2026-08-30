@@ -169,6 +169,30 @@ describe("Relay Studio shell", () => {
     expect(within(dialog).queryByRole("button", { name: /Open Project/i })).not.toBeInTheDocument();
   });
 
+  it("searches the bundled user guide by workflow and restores all topics", () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Search commands/i }));
+    const palette = screen.getByRole("dialog", { name: "Command palette" });
+    fireEvent.click(within(palette).getByRole("button", { name: /Relay Studio Help/i }));
+
+    const help = screen.getByLabelText("Relay Studio help");
+    const search = within(help).getByRole("searchbox", { name: "Search help topics" });
+    expect(within(help).getByRole("heading", { name: "OpenAPI Import And Saving" })).toBeInTheDocument();
+
+    fireEvent.change(search, { target: { value: "first list result" } });
+
+    expect(within(help).getByRole("heading", { name: "Flows: Use The First List Result" })).toBeInTheDocument();
+    expect(within(help).getByText(/\$\.items\[0\]\.partNumber/)).toBeInTheDocument();
+    expect(within(help).queryByRole("heading", { name: "Projects And Saving" })).not.toBeInTheDocument();
+
+    fireEvent.change(search, { target: { value: "topic that does not exist" } });
+    expect(within(help).getByRole("status")).toHaveTextContent("No help topics match");
+
+    fireEvent.change(search, { target: { value: "" } });
+    expect(within(help).getByRole("heading", { name: "Projects And Saving" })).toBeInTheDocument();
+  });
+
   it("does not intercept native text editing shortcuts", () => {
     render(<App />);
 
@@ -861,6 +885,7 @@ describe("Relay Studio shell", () => {
     expect(within(dialog).getByLabelText("JSONPath examples")).toBeInTheDocument();
     expect(within(dialog).getByText("Top-level field named accessToken.")).toBeInTheDocument();
     expect(within(dialog).getByText("First item in an array.")).toBeInTheDocument();
+    expect(within(dialog).queryByText("$.items[*].sku")).not.toBeInTheDocument();
 
     fireEvent.change(within(dialog).getByLabelText("Mapping 1 variable"), {
       target: { value: "sessionToken" }

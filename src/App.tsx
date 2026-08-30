@@ -4175,8 +4175,8 @@ function FlowMappingsDialog({
               <dd>Nested field inside user.</dd>
               <dt><code>$.items[0].id</code></dt>
               <dd>First item in an array.</dd>
-              <dt><code>$.items[*].sku</code></dt>
-              <dd>All sku values from an array.</dd>
+              <dt><code>$.orders[0].items[1].sku</code></dt>
+              <dd>Second item inside the first order.</dd>
             </dl>
           </section>
           {mappings.length ? (
@@ -4547,21 +4547,61 @@ function ImportApiView({ onImportServices }: { onImportServices: (parsed: Parsed
 }
 
 function HelpView() {
+  const [query, setQuery] = useState("");
+  const normalizedQuery = query.trim().toLowerCase();
+  const visibleSections = useMemo(() => {
+    if (!normalizedQuery) return helpDocument.sections;
+    return helpDocument.sections.filter((section) => (
+      [section.title, section.body, ...section.steps]
+        .join(" ")
+        .toLowerCase()
+        .includes(normalizedQuery)
+    ));
+  }, [normalizedQuery]);
+
   return (
     <article className="help-view" aria-label="Relay Studio help">
       <header>
         <h1>{helpDocument.title}</h1>
         <p>{helpDocument.introduction}</p>
+        <div className="help-search" role="search">
+          <Search size={17} aria-hidden="true" />
+          <input
+            type="search"
+            aria-label="Search help topics"
+            placeholder="Search flows, imports, authentication, saving..."
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+          {query ? (
+            <button type="button" aria-label="Clear help search" title="Clear help search" onClick={() => setQuery("")}>
+              <X size={16} />
+            </button>
+          ) : null}
+        </div>
+        <p className="help-results" role="status" aria-live="polite">
+          {visibleSections.length
+            ? `${visibleSections.length} help topic${visibleSections.length === 1 ? "" : "s"}${normalizedQuery ? " matched" : " available"}.`
+            : `No help topics match "${query.trim()}".`}
+        </p>
       </header>
-      {helpDocument.sections.map((section) => (
-        <section key={section.title}>
-          <h2>{section.title}</h2>
-          <p>{section.body}</p>
-          <ol>
-            {section.steps.map((step) => <li key={step}>{step}</li>)}
-          </ol>
-        </section>
-      ))}
+      <div className="help-section-list">
+        {visibleSections.map((section) => (
+          <section key={section.title}>
+            <h2>{section.title}</h2>
+            <p>{section.body}</p>
+            <ol>
+              {section.steps.map((step) => <li key={step}>{step}</li>)}
+            </ol>
+          </section>
+        ))}
+        {!visibleSections.length ? (
+          <div className="help-empty">
+            <strong>Try a shorter task or feature name.</strong>
+            <p>Examples: flow mapping, OpenAPI, save response, multipart, authentication, or diagnostics.</p>
+          </div>
+        ) : null}
+      </div>
     </article>
   );
 }
