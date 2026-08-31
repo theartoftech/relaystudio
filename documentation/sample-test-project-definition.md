@@ -43,7 +43,7 @@ Passwords and tokens must never be committed. Live test credentials must be supp
 
 | Service | Method | Path | Auth | Purpose |
 | --- | --- | --- | --- | --- |
-| Health Check | GET | `/health` | None | Verify base service availability |
+| Public Probe (optional) | GET | Target-defined | None | Verify the configured unauthenticated status when the fixture exposes a useful probe |
 
 ### Auth
 

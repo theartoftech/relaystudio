@@ -57,15 +57,15 @@ describe("Sprint 13 release gates", () => {
     }
 
     expect(workflow).toContain("--fail-under-lines 90");
-    expect(workflow).toContain("RELAY_LIVE_REST_CONFIG");
-    expect(workflow).toContain("if: steps.live-rest-config.outputs.configured == 'true'");
+    expect(workflow).not.toContain("RELAY_LIVE_REST_CONFIG");
+    expect(workflow).not.toContain("npm run test:live-rest");
   });
 
-  it("reports missing live REST configuration without failing ordinary main validation", () => {
+  it("keeps external live REST validation out of ordinary main validation", () => {
     const workflow = readRepositoryFile(".github/workflows/ci.yml");
 
-    expect(workflow).toContain("Live REST acceptance not configured; release packaging remains blocked.");
-    expect(workflow).not.toContain("Block release without live REST configuration");
+    expect(workflow).not.toContain("live-rest:");
+    expect(workflow).not.toContain("RELAY_LIVE_REST_CONFIG_B64");
   });
 
   it("enables a restrictive CSP and selects the reviewed capability", () => {

@@ -24,11 +24,11 @@
     "tokenJsonPath": "$.accessToken"
   },
   "requests": {
-    "health": {
+    "publicProbe": {
       "method": "GET",
-      "path": "/api/health",
+      "path": "/api/probe",
       "auth": "none",
-      "expectedStatus": 200
+      "expectedStatus": 204
     },
     "currentUser": {
       "method": "GET",

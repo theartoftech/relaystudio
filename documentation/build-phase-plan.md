@@ -202,7 +202,7 @@ Implemented. See the Sprint Portfolio for the delivery summary.
 
 ### Live REST Acceptance Scope
 
-- Health check.
+- Optional unauthenticated public probe with a target-defined expected status.
 - Login.
 - Current user.
 - List records.

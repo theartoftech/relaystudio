@@ -27,15 +27,14 @@ describe("Sprint 18E delivery hardening", () => {
       .toBe("env:\n  LIVE_REST_CONFIG_B64: secret\n");
   });
 
-  it("keeps protected live REST configuration scoped to materialization steps", () => {
+  it("keeps protected live REST configuration out of ordinary gates and scoped in beta packaging", () => {
     const ci = readRepositoryFile(".github/workflows/ci.yml");
     const packageBeta = readRepositoryFile(".github/workflows/package-beta.yml");
 
-    expect(ci).not.toContain("env:\n      LIVE_REST_CONFIG_B64: ${{ secrets.RELAY_LIVE_REST_CONFIG_B64 }}");
+    expect(ci).not.toContain("LIVE_REST_CONFIG_B64");
+    expect(ci).not.toContain("RELAY_LIVE_REST_CONFIG");
     expect(packageBeta).not.toContain("env:\n      LIVE_REST_CONFIG_B64: ${{ secrets.RELAY_LIVE_REST_CONFIG_B64 }}");
-    expect(ci).toContain("name: Materialize local-only live REST configuration");
     expect(packageBeta).toContain("name: Materialize protected live REST configuration");
-    expect(ci).toContain("env:\n          LIVE_REST_CONFIG_B64: ${{ secrets.RELAY_LIVE_REST_CONFIG_B64 }}");
     expect(packageBeta).toContain("env:\n          LIVE_REST_CONFIG_B64: ${{ secrets.RELAY_LIVE_REST_CONFIG_B64 }}");
   });
 

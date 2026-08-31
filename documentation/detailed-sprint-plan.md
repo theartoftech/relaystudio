@@ -269,11 +269,11 @@ Execute individual REST calls and display trustworthy diagnostics.
 - Inject auth according to selected auth mode.
 - Emit console events for variable resolution, connection open, request sent, response received, parse response, success, and error.
 - Render response headers, status, timing, formatted JSON, raw body, and parse errors.
-- Add sample service definitions for health, login, current user, list records, get record, search records, and create/update record.
+- Add sample service definitions for an optional public probe, login, current user, list records, get record, search records, and create/update record.
 
 ### Acceptance Criteria
 
-- `GET /api/health` succeeds without auth.
+- When configured, an unauthenticated public probe matches the target-defined expected status; no public health endpoint is required.
 - `POST /api/auth/login` captures a bearer token without leaking it.
 - Authenticated REST requests succeed with a supplied token.
 - Failed login, missing bearer token, 401, 403, timeout, malformed JSON, and network errors display clearly.

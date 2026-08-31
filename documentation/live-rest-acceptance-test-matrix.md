@@ -5,6 +5,7 @@
 - Base URL: supplied through local test configuration as `baseUrl`.
 - Purpose: prove Relay Studio works against a real REST service with authentication, payloads, chained flows, role gates, error conditions, and redaction.
 - Target selection: any external service with equivalent coverage is valid. The target is a validation fixture, not product identity.
+- Public probe: optional. When configured, Relay Studio sends it before login and asserts the configured status. A protected endpoint that intentionally returns `401` is a valid probe contract.
 - Local suite entry point: `npm run test:live-rest`.
 - Local config path: set `RELAY_LIVE_REST_CONFIG` to a gitignored JSON file such as `.relay/live-rest.local.json`, using `documentation/live-rest-local-config.example.json` as the schema template.
 
@@ -22,7 +23,7 @@ Passwords should be supplied through local test configuration, never committed.
 
 | Service | Method | Path Pattern | Auth | Expected Result |
 | --- | --- | --- | --- | --- |
-| Health | GET | `/health` | None | 200 with health payload |
+| Public Probe (optional) | GET or equivalent | Target-defined | None | Configured status, such as 200, 204, or 401 |
 | Login | POST | `/auth/login` | None | 200 with bearer token or equivalent credential |
 | Current User | GET | `/auth/me` | Bearer | 200 with username and roles/permissions |
 | List Records | GET | `/records` or domain equivalent | Bearer | 200 with collection payload |
@@ -115,5 +116,6 @@ Passwords should be supplied through local test configuration, never committed.
 - Unit tests cover request construction, auth behavior, variable substitution, JSONPath extraction, project persistence, and typed errors.
 - Component tests cover service editor, auth panel, response viewer, console, flow mapping, and save prompt.
 - Playwright tests cover full user workflows.
-- Live REST acceptance tests run as a gated suite, separate from fast unit tests.
-- Release candidate requires 90% coverage and passing the configured live REST suite.
+- Live REST acceptance tests run separately from deterministic PR/main Release Gates so external availability and fixture policy do not make ordinary desktop validation fail.
+- Manual and beta-package validation requires the protected live REST suite to pass before the platform packaging matrix starts.
+- Release candidates require at least 90% coverage and passing live REST acceptance when beta packaging is in scope.

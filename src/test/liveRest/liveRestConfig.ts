@@ -37,7 +37,7 @@ export interface LiveRestSuiteConfig {
   };
   login: LiveRestLoginConfig;
   requests: {
-    health: LiveRestRequestConfig;
+    publicProbe?: LiveRestRequestConfig;
     currentUser: LiveRestRequestConfig;
     standardRead: LiveRestRequestConfig;
     standardAdminDenied: LiveRestRequestConfig;
@@ -106,7 +106,7 @@ function parseLiveRestSuiteConfig(value: unknown, sourceLabel: string): LiveRest
     },
     login: parseLoginConfig(config.login, sourceLabel),
     requests: {
-      health: parseRequestConfig(config.requests, "health", sourceLabel),
+      publicProbe: parsePublicProbeConfig(config.requests, sourceLabel),
       currentUser: parseRequestConfig(config.requests, "currentUser", sourceLabel),
       standardRead: parseRequestConfig(config.requests, "standardRead", sourceLabel),
       standardAdminDenied: parseRequestConfig(config.requests, "standardAdminDenied", sourceLabel),
@@ -117,6 +117,19 @@ function parseLiveRestSuiteConfig(value: unknown, sourceLabel: string): LiveRest
       adminAudit: parseRequestConfig(config.requests, "adminAudit", sourceLabel)
     }
   };
+}
+
+function parsePublicProbeConfig(value: unknown, sourceLabel: string): LiveRestRequestConfig | undefined {
+  const requests = expectObject(value, `${sourceLabel}.requests`);
+  if (typeof requests.publicProbe === "undefined") {
+    return undefined;
+  }
+
+  const publicProbe = parseRequestConfig(value, "publicProbe", sourceLabel);
+  if (publicProbe.auth !== "none") {
+    throw new Error(`${sourceLabel}.requests.publicProbe.auth must be none because the public probe runs before login.`);
+  }
+  return publicProbe;
 }
 
 function parseCredentials(value: unknown, role: "admin" | "standard" | "restricted", sourceLabel: string): LiveRestUserCredentials {

@@ -20,12 +20,15 @@ if (!liveRestState.enabled) {
   const { config } = liveRestState;
 
   describe("live REST acceptance", () => {
-    it("reaches the health endpoint without auth", async () => {
-      const result = await executeScenario("health-check", config.requests.health);
+    const publicProbe = config.requests.publicProbe;
+    if (publicProbe) {
+      it("matches the configured unauthenticated public probe contract", async () => {
+        const result = await executeScenario("public-probe", publicProbe);
 
-      assertStatus(result.response?.status, config.requests.health.expectedStatus, "health endpoint");
-      expect(result.error).toBeNull();
-    });
+        assertStatus(result.response?.status, publicProbe.expectedStatus, "public probe");
+        expect(result.error).toBeNull();
+      });
+    }
 
     it("lets the standard user read and denies admin/setup routes", async () => {
       const accessToken = await loginAs(config.users.standard);

@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import type { HttpMethod, RequestBodyDefinition } from "../../project/projectModel";
 import { LIVE_REST_CONFIG_ENV, loadLiveRestConfig, loadOptionalLiveRestConfig } from "./liveRestConfig";
 
 describe("liveRestConfig", () => {
@@ -73,12 +74,70 @@ describe("liveRestConfig", () => {
     expect(config.baseUrl).toBe("https://api.example.com");
     expect(config.users.restricted.username).toBe("restricted.user");
     expect(config.login.tokenJsonPath).toBe("$.accessToken");
+    expect(config.requests.publicProbe).toBeUndefined();
     expect(config.requests.standardAdminDenied.expectedStatus).toBe(403);
     expect(config.requests.standardSetupWriteDenied.body).toContain("\"enabled\": true");
   });
+
+  it("loads an optional unauthenticated public probe with its configured status", () => {
+    const configPath = join(tempDir, "public-probe.json");
+    const source = validConfig();
+    source.requests.publicProbe = {
+      method: "GET",
+      path: "/api/health",
+      auth: "none",
+      expectedStatus: 401
+    };
+    writeFileSync(configPath, JSON.stringify(source, null, 2));
+
+    const config = loadLiveRestConfig(configPath);
+
+    expect(config.requests.publicProbe).toEqual({
+      method: "GET",
+      path: "/api/health",
+      auth: "none",
+      expectedStatus: 401,
+      body: undefined,
+      contentType: undefined,
+      headers: [],
+      timeoutMs: undefined
+    });
+  });
+
+  it("rejects an authenticated public probe because no login token exists yet", () => {
+    const configPath = join(tempDir, "authenticated-public-probe.json");
+    const source = validConfig();
+    source.requests.publicProbe = {
+      method: "GET",
+      path: "/api/health",
+      auth: "bearer",
+      expectedStatus: 200
+    };
+    writeFileSync(configPath, JSON.stringify(source, null, 2));
+
+    expect(() => loadLiveRestConfig(configPath)).toThrow(
+      ".requests.publicProbe.auth must be none because the public probe runs before login"
+    );
+  });
 });
 
-function validConfig() {
+interface TestRequestConfig {
+  method: HttpMethod;
+  path: string;
+  auth: "none" | "bearer";
+  expectedStatus: number;
+  contentType?: RequestBodyDefinition["contentType"];
+  body?: string;
+}
+
+interface TestLiveRestConfig {
+  baseUrl: string;
+  users: Record<string, { username: string; password: string }>;
+  login: TestRequestConfig & { tokenJsonPath: string };
+  requests: Record<string, TestRequestConfig> & { publicProbe?: TestRequestConfig };
+}
+
+function validConfig(): TestLiveRestConfig {
   return {
     baseUrl: "https://api.example.com",
     users: {
@@ -96,7 +155,6 @@ function validConfig() {
       tokenJsonPath: "$.accessToken"
     },
     requests: {
-      health: { method: "GET", path: "/api/health", auth: "none", expectedStatus: 200 },
       currentUser: { method: "GET", path: "/api/auth/me", auth: "bearer", expectedStatus: 200 },
       standardRead: { method: "GET", path: "/api/products", auth: "bearer", expectedStatus: 200 },
       standardAdminDenied: { method: "GET", path: "/api/admin/settings", auth: "bearer", expectedStatus: 403 },
